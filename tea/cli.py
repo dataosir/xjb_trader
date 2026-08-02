@@ -474,7 +474,28 @@ def build_parser() -> argparse.ArgumentParser:
     return p
 
 
+def _force_utf8_output() -> None:
+    """把 stdout / stderr 切到 UTF-8。
+
+    Windows 上输出一旦不是直连控制台（管道、`> file`、CI 日志），Python
+    用的就是 ANSI 代码页（cp1252 / cp936），而本程序所有文案都是中文，
+    第一句 print 就会 UnicodeEncodeError 把进程整个打挂。
+
+    必须在 parse_args 之前调：`--help` 是 argparse 在解析时就打印的。
+    控制台直连时本来就是 UTF-8，这里是幂等的。
+    """
+    for stream in (sys.stdout, sys.stderr):
+        enc = (getattr(stream, "encoding", "") or "").lower().replace("-", "").replace("_", "")
+        if enc == "utf8":
+            continue
+        try:
+            stream.reconfigure(encoding="utf-8", errors="replace")
+        except (AttributeError, ValueError, OSError):
+            pass   # 不是常规文本流（被测试框架或调用方探过），保持原样
+
+
 def main(argv: Optional[List[str]] = None) -> int:
+    _force_utf8_output()
     argv = list(sys.argv[1:] if argv is None else argv)
     parser = build_parser()
     args = parser.parse_args(argv)

@@ -4,6 +4,16 @@
 
 ## [Unreleased]
 
+### 修复
+
+- **Windows 上输出被重定向时程序直接崩溃**：输出不是直连控制台（管道、`> file`、CI 日志）时 Python 用 ANSI 代码页（cp1252 / cp936），而本程序文案全是中文，第一句 print 就 `UnicodeEncodeError`。现在入口处统一把 stdout / stderr 切到 UTF-8
+- `.gitignore` 的 `data/` 未锁定根目录，连 `tea/data/`（行情数据层包）一起忽略掉了；已改为 `/data/` 与 `/reports/`
+
+### 工程
+
+- CI 新增「非 UTF-8 输出环境」断言，用 `PYTHONIOENCODING` 在任意平台复现 Windows 的编码条件，不必等 Windows 跟尾才发现回归
+- `run.bat` 开头 `chcp 65001`，使中文错误提示在 cmd 里不乱码
+
 ## [1.0.0] - 2026-08-02
 
 首个完整版本。按"道-法-术"三层框架从零实现 A 股交易准入引擎。
