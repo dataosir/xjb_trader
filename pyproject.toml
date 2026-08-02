@@ -1,0 +1,61 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "xjb-trade"
+version = "1.0.0"
+description = "TEA / XJB_TRADE — A 股交易准入引擎（道-法-术三层纪律框架）"
+readme = { file = "README.md", content-type = "text/markdown" }
+requires-python = ">=3.8"
+license = { file = "LICENSE" }
+authors = [{ name = "renwentao" }]
+keywords = ["a-share", "trading", "stock", "screener", "risk-management", "cli", "量化", "A股"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: Console",
+    "Intended Audience :: End Users/Desktop",
+    "License :: OSI Approved :: MIT License",
+    "Natural Language :: Chinese (Simplified)",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3 :: Only",
+    "Topic :: Office/Business :: Financial :: Investment",
+]
+# 运行时零第三方依赖：全部走标准库（urllib / json / concurrent.futures）
+dependencies = []
+
+[project.optional-dependencies]
+# requests 可用时优先使用（连接复用，抓取更稳），不装则自动回退 urllib
+fast = ["requests>=2.25"]
+
+[project.scripts]
+tea = "tea.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/dataosir/xjb_trader"
+Repository = "https://github.com/dataosir/xjb_trader"
+Issues = "https://github.com/dataosir/xjb_trader/issues"
+Changelog = "https://github.com/dataosir/xjb_trader/blob/main/CHANGELOG.md"
+
+[tool.setuptools]
+packages = ["tea", "tea.data", "tea.phases"]
+
+[tool.ruff]
+line-length = 110
+target-version = "py38"
+extend-exclude = ["build", "dist", ".venv"]
+
+[tool.ruff.lint]
+# 只开真正会咬人的规则：语法错误、未定义名、未使用导入
+select = ["E4", "E7", "E9", "F"]
+ignore = [
+    "E741", # 允许 l/I/O 作变量名（K 线的 low 简写为 l）
+    "E731", # 全库统一的 `c = lambda k, d=None: cfg.get(f"xxx.{k}", d)` 取参缩写，有意保留
+]

@@ -1,0 +1,69 @@
+name: Bug 报告
+description: 引擎行为不符合预期、报错或崩溃
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        提交前请先跑一次 `tea selftest`。如果自测有失败项，请把失败项一并贴上来——那通常直接指向问题所在。
+
+        ⚠️ 请勿粘贴 `tea_config.json` 全文（可能含代理账号密码）。只贴相关的那几个参数。
+
+  - type: textarea
+    id: what
+    attributes:
+      label: 问题描述
+      description: 你期望发生什么，实际发生了什么
+    validations:
+      required: true
+
+  - type: textarea
+    id: repro
+    attributes:
+      label: 复现步骤
+      placeholder: |
+        1. 执行 `tea capital 100000`
+        2. 执行 `tea eval 600123`
+        3. 出现 ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: version
+    attributes:
+      label: 版本与环境
+      description: 请贴 `tea --version` 的输出
+      render: text
+    validations:
+      required: true
+
+  - type: dropdown
+    id: selftest
+    attributes:
+      label: "`tea selftest` 结果"
+      options:
+        - 全绿通过
+        - 有失败项（请在下方贴出）
+        - 没跑
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: 报错输出 / 自测失败项
+      description: 完整的报错堆栈或失败断言
+      render: text
+
+  - type: dropdown
+    id: layer
+    attributes:
+      label: 涉及哪一层（不确定可跳过）
+      options:
+        - 道 · 情绪与天气（sentiment / timing）
+        - 法 · 门禁与计划（gates / plan / portfolio）
+        - 术 · 评分与否决（identity / preflight / veto）
+        - 扫描与观察池（screener / watch_pool）
+        - 行情数据与防封（market）
+        - CLI / 报告输出
+        - 不确定

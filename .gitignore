@@ -1,0 +1,57 @@
+# ---------------------------------------------------------------- 运行时产出
+# 个人配置：含代理池（可能带账号密码）、本金、个人阈值 —— 绝不入库
+tea_config.json
+tea_config.*.json
+
+# 交易数据与报告：属于个人隐私 + 每次运行都变
+# 前导斜杠必须保留：写 data/ 会连 `tea/data/`（行情数据层包）一起忽略掉
+/data/
+/reports/
+
+# 原子写入的中间文件（写 .tmp 再 rename，异常中断可能残留）
+*.tmp
+
+# 板块缓存
+.tea_sector_cache.json
+
+# ---------------------------------------------------------------- Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# 打包产物
+build/
+dist/
+sdist/
+wheels/
+*.egg-info/
+*.egg
+.eggs/
+MANIFEST
+
+# 虚拟环境
+.venv/
+venv/
+env/
+ENV/
+
+# 测试与类型检查缓存
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+.nox/
+
+# ---------------------------------------------------------------- 编辑器 / 系统
+.qoder/
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db

@@ -1,0 +1,134 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # 离线自测：不联网，验证核心公式与规格对齐
+  test:
+    name: selftest (py${{ matrix.python }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # 3.8 在 ubuntu-24.04 上已不提供，固定用 22.04
+          - { os: ubuntu-22.04, python: "3.8" }
+          - { os: ubuntu-latest, python: "3.9" }
+          - { os: ubuntu-latest, python: "3.10" }
+          - { os: ubuntu-latest, python: "3.11" }
+          - { os: ubuntu-latest, python: "3.12" }
+          - { os: ubuntu-latest, python: "3.13" }
+          # 跨平台：路径处理与原子写（rename）在 Windows 上语义不同，必须覆盖
+          - { os: macos-latest, python: "3.12" }
+          - { os: windows-latest, python: "3.12" }
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+
+      - name: 安装（零第三方依赖）
+        run: python -m pip install --upgrade pip && python -m pip install .
+
+      - name: 语法编译检查
+        run: python -m compileall -q tea
+
+      - name: 离线自测（97 项公式断言）
+        run: python -m tea selftest
+
+      - name: 控制台入口冒烟
+        run: |
+          tea --help
+          tea --version
+          tea config count
+
+  # requests 是可选依赖，装上后走连接复用分支，必须同样能跑通
+  test-with-requests:
+    name: selftest (requests 分支)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python -m pip install --upgrade pip && python -m pip install ".[fast]"
+      - name: 确认 requests 已启用
+        run: python -c "import tea.data.fetcher as f; assert f.requests is not None, 'requests 未生效'; print('requests 分支已启用')"
+      - run: python -m tea selftest
+
+  # 一键启动脚本：入口坏了比公式坏了更难发现（自测全绿也没用，人根本启不起来），所以让 CI 真的点一次
+  launcher:
+    name: 一键启动脚本 (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: 语法检查 run.sh
+        if: runner.os != 'Windows'
+        run: bash -n run.sh
+
+      - name: 可执行位是否已入库
+        if: runner.os != 'Windows'
+        run: test -x run.sh || { echo '::error::run.sh 缺可执行位，请执行 git update-index --chmod=+x run.sh'; exit 1; }
+
+      - name: 启动 run.sh
+        if: runner.os != 'Windows'
+        run: ./run.sh selftest
+
+      # 子目录里跑，验证脚本确实把工作目录锁回了仓库根（否则 -m tea 会直接找不到包）
+      - name: 从其他目录启动
+        if: runner.os != 'Windows'
+        run: mkdir -p /tmp/elsewhere && cd /tmp/elsewhere && "$GITHUB_WORKSPACE/run.sh" config count
+
+      # <NUL 是保险结：就算 pause 意外被触发，也不会把作业挂到超时
+      - name: 启动 run.bat
+        if: runner.os == 'Windows'
+        shell: cmd
+        run: run.bat selftest <NUL
+
+  lint:
+    name: ruff
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python -m pip install --upgrade pip && python -m pip install ruff
+      - run: ruff check --output-format=github .
+
+  build:
+    name: 构建分发包
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python -m pip install --upgrade pip && python -m pip install build twine
+      - run: python -m build
+      - name: 校验元数据
+        run: python -m twine check dist/*
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/

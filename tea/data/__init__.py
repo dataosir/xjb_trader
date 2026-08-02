@@ -1,0 +1,37 @@
+"""行情数据层。
+
+按关注点分四层，依赖方向单向向下，不存在回边：
+
+    indicators  纯指标数学，不联网、不读配置
+    cache       进程内 TTL 缓存
+    fetcher     HTTP + 防封（只管取回 JSON，不懂行情语义）
+    market      行情门面（把原始 JSON 翻译成领域字段）
+
+外部一律从本包顶层导入，不要直接引用子模块——这样内部再调整文件划分时，
+调用方不受影响。
+"""
+from __future__ import annotations
+
+from .cache import MemCache
+from .errors import MarketError
+from .fetcher import Fetcher
+from .indicators import (
+    atr,
+    compute_indicators,
+    count_limit_ups,
+    intraday_position,
+    ma,
+)
+from .market import Market
+
+__all__ = [
+    "MarketError",
+    "MemCache",
+    "Fetcher",
+    "Market",
+    "ma",
+    "atr",
+    "compute_indicators",
+    "count_limit_ups",
+    "intraday_position",
+]

@@ -1,0 +1,5 @@
+blank_issues_enabled: false
+contact_links:
+  - name: ⚠️ 投资咨询请止步
+    url: https://github.com/dataosir/xjb_trader/blob/main/README.md
+    about: 本项目不提供选股建议、买卖点咨询或收益预测。Issue 区只处理代码与规则问题。

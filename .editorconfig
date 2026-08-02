@@ -1,0 +1,24 @@
+root = true
+
+[*]
+charset = utf-8
+end_of_line = lf
+insert_final_newline = true
+trim_trailing_whitespace = true
+indent_style = space
+indent_size = 4
+
+[*.py]
+indent_size = 4
+max_line_length = 110
+
+[*.{yml,yaml,json,toml}]
+indent_size = 2
+
+[*.md]
+# Markdown 里行尾两个空格是换行语义，不能裁
+trim_trailing_whitespace = false
+
+[*.bat]
+# cmd.exe 是一行一行读批处理文件的，只有 LF 时 goto 跳转可能错位，必须 crlf
+end_of_line = crlf

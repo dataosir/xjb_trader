@@ -1,0 +1,8 @@
+# 行尾统一由 git 管，避免跨平台协作时整文件 diff。
+* text=auto eol=lf
+
+# Windows 批处理必须是 CRLF：cmd.exe 一行一行读文件，只有 LF 时 goto 跳转可能错位。
+*.bat text eol=crlf
+
+# shell 脚本永远 LF，被 CRLF 污染会报 "bad interpreter: /usr/bin/env bash^M"。
+*.sh text eol=lf

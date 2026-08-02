@@ -1,0 +1,43 @@
+name: 功能建议 / 规则讨论
+description: 新增功能，或讨论某条纪律规则该怎么改
+labels: [enhancement]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        本项目的每一条纪律都是为了防住某一类具体亏损。提规则改动时，请说清它想防住什么——
+        "我觉得这样更好"很难评估，"这条能避免在退潮期追高被套"就可以讨论。
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: 想解决什么问题
+      description: 你在实际使用中遇到的什么情况，让你觉得需要这个改动
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: 你的建议
+      description: 具体怎么改。如果涉及公式或阈值，请写出算式与取值
+    validations:
+      required: true
+
+  - type: textarea
+    id: prevents
+    attributes:
+      label: 这能防住哪一类错误 / 亏损
+      description: 规则类改动请务必回答；纯功能类（如新增报告字段）可写"不涉及"
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: scope
+    attributes:
+      label: 影响范围自评
+      options:
+        - label: 会改动现有公式或阈值（需同步更新 selftest 断言）
+        - label: 会新增配置参数
+        - label: 会放宽某条纪律约束（请在上面说明为什么这是安全的）
+        - label: 只是新增展示 / 报告内容，不影响决策
