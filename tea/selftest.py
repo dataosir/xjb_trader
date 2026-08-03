@@ -19,6 +19,7 @@ from . import sentiment as sent_mod
 from . import utils, veto as veto_mod
 from .config_store import Config
 from .data import Market, indicators
+from .data.fetcher import Fetcher
 
 TARGET = "600123"
 TARGET_NAME = "测试光伏"
@@ -426,6 +427,71 @@ def check_ztpool_fallback(t: Suite, cfg: Config) -> None:
              sent_mod.classify(cls, cfg)["ice_cut"] is False)
     finally:
         utils.now = real_now
+
+
+class _FlakyTransport:
+    """模拟按节点丢连接的东财：dead 集合里的 host 一律抛连接异常，其余回真数据。
+
+    复刻真实现象：`push2` / `push2his` 某些节点 RemoteDisconnected，而 `push2delay`
+    这类节点是通的。用它验证抓取器会绕开坏节点、并在会话里记住它们。
+    """
+
+    def __init__(self, cfg: Config, dead: set):
+        self.f = Fetcher(cfg)
+        self.f.delay_base = self.f.delay_spread = self.f.delay_after_error = 0.0  # 自测不等
+        self.dead = dead
+        self.hits: list = []
+
+        def fake_get(full_url):
+            host = full_url.split("//", 1)[1].split("/", 1)[0]
+            self.hits.append(host)
+            if host in self.dead:
+                raise OSError("Remote end closed connection without response")
+            return '{"ok": 1}'
+        self.f._do_get = fake_get  # type: ignore[assignment]
+
+    def get_json(self, url, params, host_pool=None):
+        return self.f.get_json(url, params, host_pool=host_pool)
+
+
+def check_host_failover(t: Suite, cfg: Config) -> None:
+    """CDN 节点故障转移：坏节点不该拖垮取数。
+
+    真实踩坑：修好代理后仍见 push2 / push2his RemoteDisconnected，而板块（同一
+    节点池）却成功——旧实现每次随机挑节点，一次操作里多个请求各自随机，
+    坏运气就整段失败。现在先活后死排序、重试走不同节点、会话内记住坏节点。
+    """
+    t.head("数据层 · CDN 节点故障转移")
+    url = cfg.get("market.clist_url")
+    pool = list(cfg.get("market.cdn_hosts_quote"))
+    dead = {pool[0], pool[1]}  # 三选二坏，只剩最后一个能通
+    good = pool[2]
+
+    tr = _FlakyTransport(cfg, dead)
+    # 单次请求：哪怕连撞两个坏节点，重试也应落到好节点上
+    js = tr.get_json(url, {"pn": 1}, host_pool="cdn_hosts_quote")
+    t.ok("绕开坏节点最终取到数据", js.get("ok") == 1, f"hits={tr.hits}")
+    t.ok("好节点没被误杀", good not in tr.f._dead_hosts)
+    t.ok("试过的坏节点都进了黑名单",
+         all(h in tr.f._dead_hosts for h in tr.hits if h in dead),
+         f"hits={tr.hits} dead_hosts={tr.f._dead_hosts}")
+
+    # 坏节点已知时，先活后死排序应让第一次尝试就直奔好节点
+    tr.f._dead_hosts = set(dead)
+    tr.hits.clear()
+    js2 = tr.get_json(url, {"pn": 2}, host_pool="cdn_hosts_quote")
+    t.ok("坏节点已知时首选好节点", tr.hits[0] == good, f"first={tr.hits[:1]}")
+    t.ok("该请求仍成功", js2.get("ok") == 1)
+
+    # 整池全坏：不能因为都在黑名单里就放弃，仍要把所有节点都试一遍
+    tr_all = _FlakyTransport(cfg, set(pool))
+    tr_all.f._dead_hosts = set(pool)
+    try:
+        tr_all.get_json(url, {"pn": 1}, host_pool="cdn_hosts_quote")
+        t.ok("全坏时抛错", False)
+    except Exception:
+        t.ok("全坏时抛错", True)
+    t.eq("全坏也把每个节点都试到", len(set(tr_all.hits)), len(pool))
 
 
 def check_sentiment(t: Suite, cfg: Config, mk: FakeMarket) -> dict:
@@ -861,6 +927,7 @@ def main(verbose: bool = True, cfg: Optional[Config] = None) -> int:
         check_raw_parsing(t, c)
         check_clist_paging(t, c)
         check_ztpool_fallback(t, c)
+        check_host_failover(t, c)
         sent = check_sentiment(t, c, mk)
         idn = check_identity(t, c, mk)
         lv = check_levels(t, c, mk)

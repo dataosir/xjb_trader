@@ -45,6 +45,7 @@ class Fetcher:
         self.offline = bool(m.get("offline", False))
         self._last_req = 0.0
         self._proxy_idx = 0
+        self._dead_hosts: set = set()  # 本次会话里连接刚敲不开的 CDN 节点，下次排到最后试
         self._sess = requests.Session() if requests else None
         # 东财是国内站。shell 里为翻墙配的 http_proxy/https_proxy 会被 requests 默认
         # 读走，把域名请求硬塞进代理——代理一连不上就 ProxyError 全崩。除非用户显式
@@ -74,13 +75,24 @@ class Fetcher:
             return self.proxies[self._proxy_idx]
         return self.proxies[0]
 
-    def rotate_host(self, url: str, pool_key: str) -> str:
-        """CDN 节点轮换：替换 URL 的 host。"""
-        pool = self.cfg.get(f"market.{pool_key}") or []
-        if not (self.rotate_cdn and pool):
-            return url
+    def _swap_host(self, url: str, host: str) -> str:
         parts = urllib.parse.urlsplit(url)
-        return urllib.parse.urlunsplit(parts._replace(netloc=random.choice(pool)))
+        return urllib.parse.urlunsplit(parts._replace(netloc=host))
+
+    def _host_order(self, pool_key: Optional[str]) -> list:
+        """给出本次请求要依次尝试的 CDN 节点顺序（None 表示不换 host）。
+
+        旧实现每次 `random.choice` 可能三次重试全撑在同一个坏节点上，而且
+        不记事——上一个请求刚确认 push2 死了，下一个又去撞。现在先活后死排序，
+        并让同一次 get_json 的几次重试走不同节点，最大化撞上好节点的概率。
+        多请求操作（如涨跌家数二分需 ~9 次）最受益。
+        """
+        pool = list(self.cfg.get(f"market.{pool_key}") or []) if pool_key else []
+        if not (self.rotate_cdn and pool):
+            return [None]
+        random.shuffle(pool)
+        pool.sort(key=lambda h: h in self._dead_hosts)  # 活（False）在前，死（True）在后
+        return pool
 
     def _throttle(self) -> None:
         wait = utils.jitter(self.delay_base, self.delay_spread) - (time.time() - self._last_req)
@@ -91,20 +103,26 @@ class Fetcher:
     def get_json(self, url: str, params: dict, host_pool: Optional[str] = None) -> dict:
         if self.offline:
             raise MarketError("离线模式已开启，禁止发起网络请求")
+        hosts = self._host_order(host_pool)
         last_err: Optional[Exception] = None
         for attempt in range(self.retries):
-            target = self.rotate_host(url, host_pool) if host_pool else url
+            host = hosts[attempt % len(hosts)]  # 逐次换不同节点，而不是反复随机
+            target = self._swap_host(url, host) if host else url
             full = target + ("&" if "?" in target else "?") + urllib.parse.urlencode(params)
             self._throttle()
             self.stats["requests"] += 1
             try:
                 raw = self._do_get(full)
                 self._last_req = time.time()
+                if host:
+                    self._dead_hosts.discard(host)  # 这回通了，从黑名单里放出来
                 return json.loads(raw) if raw else {}
             except Exception as exc:  # 网络/解析异常统一退避重试
                 last_err = exc
                 self.stats["errors"] += 1
                 self._last_req = time.time()
+                if host:
+                    self._dead_hosts.add(host)  # 该节点敲不开，后续请求尽量绕开
                 time.sleep(self.delay_after_error * (self.backoff ** attempt))
         raise MarketError(f"请求失败({self.retries}次): {url} -> {last_err}")
 

@@ -3,7 +3,7 @@
 [![CI](https://github.com/dataosir/xjb_trader/actions/workflows/ci.yml/badge.svg)](https://github.com/dataosir/xjb_trader/actions/workflows/ci.yml)
 [![Python](https://img.shields.io/badge/python-3.8%2B-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![自测](https://img.shields.io/badge/selftest-151%2F151-brightgreen.svg)](#十离线自测)
+[![自测](https://img.shields.io/badge/selftest-158%2F158-brightgreen.svg)](#十离线自测)
 
 > 计划你的交易，交易你的计划。宁可空仓，不强行凑票。
 
@@ -379,7 +379,7 @@ tea/
 ├── accumulator.py    当日累积（为什么没交易）
 ├── stats.py          统计归因
 ├── weekly.py         周复盘
-├── selftest.py       离线自测（151 项断言）
+├── selftest.py       离线自测（158 项断言）
 └── utils.py          原子写 / JSON / 数值格式化
 ```
 
@@ -411,7 +411,7 @@ python3 -m tea selftest
 
 覆盖范围：情绪分逐项复算 + 冰点降仓、身份 6 维 + 分数夹紧 + 杂毛强制降级、ATR(14) + 止损止盈 + 含滑点 R:R + 反推止盈、9 分共振六维逐项 + 扣分项、VETO 全部阈值边界（含 20cm ×2 放大与权限）、仓位与期望值公式、三道门禁 7 条规则、种子四步流、行情解析量级（fltt=2 不再缩放，含尺度无关的涨幅自洽断言）、clist 翻页（精确涨跌家数 + 板块成分不被前 100 名截断）、涨停池按交易日回退、菜单分组与时段建议、`run_once` 端到端（BUY → 灰度仓 → 补确认仓 → 平仓 → 门禁拦截当日第二次评估）。
 
-当前：**151/151 通过**。
+当前：**158/158 通过**。
 
 自测在临时 `TEA_HOME` 沙箱中运行，不会碰你的真实数据与报告。
 

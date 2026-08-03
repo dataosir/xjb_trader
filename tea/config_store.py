@@ -66,7 +66,8 @@ DEFAULTS: Dict[str, Any] = {
         "ztpool_fallback_days": 3,
         # 防封
         "timeout": 8.0,
-        "retries": 3,
+        # 至少要能盖住最大的 CDN 节点池（kline 4 个），否则单次请求轮不到好节点
+        "retries": 4,
         "retry_backoff": 1.7,
         "delay_base": 0.35,
         "delay_spread": 0.25,
@@ -75,7 +76,8 @@ DEFAULTS: Dict[str, Any] = {
         "rotate_ua": True,
         "rotate_cdn": True,
         "cdn_hosts_quote": ["push2.eastmoney.com", "82.push2.eastmoney.com", "push2delay.eastmoney.com"],
-        "cdn_hosts_kline": ["push2his.eastmoney.com", "1.push2his.eastmoney.com"],
+        "cdn_hosts_kline": ["push2his.eastmoney.com", "1.push2his.eastmoney.com",
+                             "2.push2his.eastmoney.com", "7.push2his.eastmoney.com"],
         "referers": [
             "https://quote.eastmoney.com/",
             "https://quote.eastmoney.com/center/gridlist.html",
