@@ -37,11 +37,13 @@ DEFAULTS: Dict[str, Any] = {
     },
     # ---------------------------------------------------------- 行情/防封
     "market": {
-        "quote_url": "http://push2.eastmoney.com/api/qt/stock/get",
-        "kline_url": "http://push2his.eastmoney.com/api/qt/stock/kline/get",
+        "quote_url": "https://push2.eastmoney.com/api/qt/stock/get",
+        "kline_url": "https://push2his.eastmoney.com/api/qt/stock/kline/get",
         "clist_url": "https://push2.eastmoney.com/api/qt/clist/get",
         "ztpool_url": "https://push2ex.eastmoney.com/getTopicZTPool",
-        "ztpool_ut": "7eea3edca7534f47b2a127b9e299adac",
+        # 涨停池的 ut 令牌与行情接口不同一套。填错不会报 HTTP 错，接口回 rc=205
+        # 且 data=null，看上去就像「今天没有涨停」。
+        "ztpool_ut": "7eea3edcaed734bea9cbfc24409ed989",
         "quote_fields": "f43,f44,f45,f46,f47,f48,f50,f57,f58,f100,f116,f117,f127,f168,f169,f170",
         "kline_fields1": "f1,f2,f3,f4,f5,f6",
         "kline_fields2": "f51,f52,f53,f54,f55,f56,f57",
@@ -52,14 +54,16 @@ DEFAULTS: Dict[str, Any] = {
         "index_kline_limit": 25,
         "sector_fs": "m:90+t:2",
         "sector_fields": "f3,f12,f14,f104,f105",
-        "sector_pages": 3,
-        "sector_page_size": 200,
-        "member_page_size": 1000,
+        # clist 硬限 100 行/页（pz 填再大也不多给），下面的上限是「最多翻几页」。
+        # 实际翻几页看接口自报的 data.total，抽到够数就停。
+        "sector_max_pages": 12,
+        "member_max_pages": 10,
         "member_fields": "f3,f8,f12,f14,f20",
         "breadth_fs": "m:0+t:6,m:0+t:80,m:1+t:2,m:1+t:23",
-        "breadth_page_size": 6000,
         "breadth_flat_eps": 0.05,
+        "breadth_max_probes": 24,
         "ztpool_page_size": 300,
+        "ztpool_fallback_days": 3,
         # 防封
         "timeout": 8.0,
         "retries": 3,

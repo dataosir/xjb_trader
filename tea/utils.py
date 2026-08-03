@@ -52,6 +52,13 @@ def next_trading_day(d: Optional[_dt.date] = None) -> _dt.date:
     return cur
 
 
+def prev_trading_day(d: Optional[_dt.date] = None) -> _dt.date:
+    cur = (d or now().date()) - _dt.timedelta(days=1)
+    while not is_trading_day(cur):
+        cur -= _dt.timedelta(days=1)
+    return cur
+
+
 def days_between(a: str, b: str) -> Optional[int]:
     da, db = parse_date(a), parse_date(b)
     if not da or not db:

@@ -219,6 +219,215 @@ class FakeMarket(Market):
 
 # ==================================================================== 各项检查
 
+def check_raw_parsing(t: Suite, cfg: Config) -> None:
+    """用东财真实返回的原始 payload 验证行情解析的量级。
+
+    其余检查全走 FakeMarket，绕过了 _parse_quote / get_index，所以“fltt 缩放
+    系数搞错”这类 bug 它们一条也抱不住——曾经真的没抱住。
+    下面的 payload 是 fltt=2 实际抓回来的形式：已经是最终浮点数。
+    """
+    t.head("行情解析 · fltt=2 量级")
+
+    # 贵州茅台某日真实返回
+    raw = {"f43": 1350.6, "f44": 1355.72, "f45": 1325.77, "f46": 1330.03,
+           "f50": 1.08, "f58": "贵州茅台", "f168": 0.44, "f169": -11.16, "f170": -0.82}
+    q = Market._parse_quote("600519", 1, raw)
+    t.eq("现价不被缩放", q["price"], 1350.6, tol=1e-6)
+    t.eq("涨幅不被缩放", q["chg_pct"], -0.82, tol=1e-6)
+    t.eq("最高价", q["high"], 1355.72, tol=1e-6)
+    t.eq("量比", q["vol_ratio"], 1.08, tol=1e-6)
+    t.eq("换手率", q["turnover"], 0.44, tol=1e-6)
+
+    # 尺度无关的自洽断言：价格和涨幅只要有一边被缩放，这个恒等式就破。
+    implied = (q["price"] / q["pre_close"] - 1) * 100
+    t.eq("涨幅与昨收自洽", round(implied, 2), q["chg_pct"], tol=0.01)
+
+    # 指数：点位来自报价、MA20 来自 K 线，两边缩放不一致时
+    # ma20_above 会恒为 False，把新开仓永久锁死。
+    closes = [3800.0] * 20
+
+    class _Stub:
+        stats = {"requests": 0, "errors": 0, "cache_hits": 0}
+
+        def get_json(self, url, params, host_pool=None):
+            if "klt" in params:  # K 线：日期,开,收,高,低,量,额
+                return {"data": {"klines": [f"2026-07-{i + 1:02d},3790,{c},3810,3780,1,2"
+                                            for i, c in enumerate(closes)]}}
+            return {"data": {"f43": 3832.26, "f170": 0.72}}
+
+    idx = Market(cfg, fetcher=_Stub()).get_index()
+    t.eq("指数点位不被缩放", idx["point"], 3832.26, tol=1e-6)
+    t.eq("指数涨幅不被缩放", idx["chg_pct"], 0.72, tol=1e-6)
+    t.eq("MA20", idx["ma20"], 3800.0, tol=1e-6)
+    t.ok("点位与 MA20 同量级", abs(idx["point"] - idx["ma20"]) / idx["ma20"] < 0.5,
+         f"point={idx['point']} ma20={idx['ma20']}")
+    t.ok("3832 > MA20 3800 → 在上方", idx["ma20_above"] is True)
+
+
+class _FakeClist:
+    """模拟东财 clist：无论 pz 填多少都只回 100 行，但 total 报真值。
+
+    这就是真接口的行为，也正是踩过的坑：请求 pz=6000 不报错，静悄悄只给 100 行；
+    叠上按涨幅降序，拿到的是涨幅榜前 100 名——看起来很正常，实际是极端偏样本。
+    """
+
+    HARD_CAP = 100
+
+    def __init__(self, chgs: list):
+        self.chgs = chgs
+        self.calls: list = []
+        self.stats = {"requests": 0, "errors": 0, "cache_hits": 0}
+
+    def get_json(self, url, params, host_pool=None):
+        self.calls.append(dict(params))
+        self.stats["requests"] += 1
+        pn = max(1, int(params.get("pn", 1)))
+        pz = min(int(params.get("pz", 20)), self.HARD_CAP)
+        start = (pn - 1) * pz
+        rows = [{"f12": f"{600000 + i:06d}", "f14": f"股{i}", "f3": c,
+                 "f8": 3.0, "f20": 1.0e10, "f104": 1, "f105": 1}
+                for i, c in enumerate(self.chgs[start:start + pz], start)]
+        return {"data": {"total": len(self.chgs), "diff": rows}}
+
+
+def check_clist_paging(t: Suite, cfg: Config) -> None:
+    """clist 翻页：精确涨跌家数 + 板块成分不被截断。
+
+    历史 bug：配置里写 pz=6000 / 1000 / 200，以为一次拿全，实际只拿到 100 行。
+    后果是涨跌比恒为 100%（取到的全是涨幅榜前 100 名），以及大板块里 3~5.5%
+    的温和票全部看不见——而那正是种子扫描要找的东西。
+    """
+    t.head("数据层 · clist 翻页与精确涨跌家数")
+
+    # ---- 涨跌家数：5545 只，涨 3000 / 平 45 / 跌 2500（降序）
+    rising_n, flat_n, falling_n = 3000, 45, 2500
+    chgs = ([round(9.99 - i * 0.003, 4) for i in range(rising_n)]
+            + [0.0] * flat_n
+            + [round(-0.06 - i * 0.003, 4) for i in range(falling_n)])
+    fake = _FakeClist(chgs)
+    br = Market(cfg, fetcher=fake).get_breadth()
+    t.eq("全市场总数取 data.total", br["total"], rising_n + flat_n + falling_n)
+    t.eq("上涨家数精确", br["rising"], rising_n)
+    t.eq("下跌家数精确", br["falling"], falling_n)
+    t.eq("平盘家数精确", br["flat"], flat_n)
+    t.eq("涨跌比", round(br["advance_ratio"], 6),
+         round(rising_n / (rising_n + falling_n), 6), tol=1e-6)
+    t.ok("标记为精确值", br["exact"] is True)
+    # 翻完 5545 只要 56 页；二分定位应该远少于此，否则就是在硬碰接口。
+    t.ok("请求数远少于全量翻页", len(fake.calls) <= 15,
+         f"实际 {len(fake.calls)} 次（全量需 56 次）")
+    t.ok("从不声称 pz>100", all(int(c["pz"]) <= 100 for c in fake.calls),
+         f"pz={sorted({int(c['pz']) for c in fake.calls})}")
+
+    # 一个普涨日：前 100 名全是涨的。旧实现在这里会算出 100%。
+    fake2 = _FakeClist([round(9.99 - i * 0.002, 4) for i in range(1200)]
+                       + [round(-0.5 - i * 0.001, 4) for i in range(800)])
+    br2 = Market(cfg, fetcher=fake2).get_breadth()
+    t.eq("普涨日不会误报 100%", round(br2["advance_ratio"], 4), round(1200 / 2000, 4), tol=1e-4)
+
+    # ---- 板块成分：613 只，温和票（3~5.5%）全在前 100 名之外
+    member_chgs = ([round(10.0 - i * 0.02, 4) for i in range(150)]      # 前 150 名均 >7%
+                   + [round(5.4 - i * 0.01, 4) for i in range(240)]     # 5.4% → 3.0%
+                   + [round(0.5 - i * 0.002, 4) for i in range(223)])
+    fake3 = _FakeClist(member_chgs)
+    members = Market(cfg, fetcher=fake3).get_sector_members("BK1205")
+    t.eq("板块成分拿全", len(members), len(member_chgs))
+    t.eq("末位成分股排名", members[-1]["rank"], len(member_chgs))
+    mild = [m for m in members if 3.0 <= (m["chg"] or 0) <= 5.5]
+    t.ok("温和票没被首页截掉", len(mild) >= 200, f"温和票 {len(mild)} 只")
+    t.ok("温和票确实在前 100 名之外", min(m["rank"] for m in mild) > 100,
+         f"最靠前的温和票排 {min(m['rank'] for m in mild)}")
+
+    # ---- 板块排名：437 个，不能停在 300（3 页 × 100）
+    fake4 = _FakeClist([round(15.0 - i * 0.03, 4) for i in range(437)])
+    sectors = Market(cfg, fetcher=fake4).get_sector_ranking(force=True)
+    t.eq("板块排名拿全", len(sectors), 437)
+    t.eq("板块总数不是 3×100", len(sectors) % 100 != 0, True)
+
+
+class _FakeZtPool:
+    """模拟涨停池：只有 good_date 那天有数据，其余日期回空池。
+
+    真接口实测：非交易日回 `rc=0, data={tc:0, pool:[]}`（取数成功、确实没有），
+    而 ut 令牌不对回 `rc=205, data=null`（取数失败）。两者必须分开，所以这里严格
+    按真接口的形状返回。
+    """
+
+    def __init__(self, good_date: str, n: int, max_boards: int, rc: int = 0):
+        self.good_date = good_date
+        self.n = n
+        self.max_boards = max_boards
+        self.rc = rc
+        self.dates: list = []
+        self.stats = {"requests": 0, "errors": 0, "cache_hits": 0}
+
+    def get_json(self, url, params, host_pool=None):
+        self.dates.append(str(params.get("date")))
+        self.stats["requests"] += 1
+        if self.rc != 0:
+            return {"rc": self.rc, "data": None}
+        if str(params.get("date")) != self.good_date:
+            return {"rc": 0, "data": {"tc": 0, "pool": []}}
+        pool = [{"lbc": (self.max_boards if i == 0 else 1)} for i in range(self.n)]
+        return {"rc": 0, "data": {"tc": self.n, "pool": pool}}
+
+
+def check_ztpool_fallback(t: Suite, cfg: Config) -> None:
+    """涨停池：非交易日得回退到上一个交易日。
+
+    涨停池是唯一按日期取的数据源。不回退就会出现「涨停 0 家」旁边坐着
+    「前5板块均涨 10%」，情绪分和周期都是拿两个日期的数据拼出来的。
+    """
+    import datetime as _dt
+
+    t.head("数据层 · 涨停池回退到交易日")
+
+    real_now = utils.now
+    try:
+        sunday = _dt.datetime(2026, 8, 2, 16, 30)          # 周日
+        utils.now = lambda when=None, _f=sunday: _f
+        t.eq("周日的上一交易日是周五",
+             utils.compact_date(utils.prev_trading_day(sunday.date())), "20260731")
+
+        zt = _FakeZtPool("20260731", 68, 5)
+        st = Market(cfg, fetcher=zt).get_limit_up_stats()
+        t.eq("回退到上一交易日", st["date"], "20260731")
+        t.eq("涨停家数", st["limit_up_count"], 68)
+        t.eq("最高连板", st["max_boards"], 5)
+        t.ok("标记了 fallback", st["fallback"] is True)
+        t.ok("先试当日再往前找", zt.dates[0] == "20260802", f"实际顺序 {zt.dates}")
+
+        # 显式指定日期时不能自作主张换日子：复盘、回填都靠它拿确定的那一天。
+        zt2 = _FakeZtPool("20260731", 68, 5)
+        st2 = Market(cfg, fetcher=zt2).get_limit_up_stats(date="20260803")
+        t.eq("指定日期不回退", st2["date"], "20260803")
+        t.eq("指定日期只请求一次", len(zt2.dates), 1)
+
+        # ut 令牌失效（rc=205, data=null）不等于「今天没有涨停」。当成 0 的后果是：
+        # 情绪公式拿 0 板扣 10 分，还可能触发冰点降仓把仓位砍到 1/4——一个取数
+        # 失败悄悄变成减仓指令。这是真实踩过的坑：配置里的 ut 一直是错的。
+        zt3 = _FakeZtPool("20260731", 68, 5, rc=205)
+        st3 = Market(cfg, fetcher=zt3).get_limit_up_stats()
+        t.ok("取数失败标记 ok=False", st3["ok"] is False)
+        t.ok("取数失败不假装成 0 家", st3["limit_up_count"] is None,
+             f"got={st3['limit_up_count']}")
+        t.ok("取数失败时连板也是 None", st3["max_boards"] is None)
+        t.ok("取数失败带错误描述", bool(st3.get("error")), f"error={st3.get('error')!r}")
+        t.eq("坏令牌不往前翻日期", len(zt3.dates), 1)
+
+        # 情绪公式遇到 None 得跳过这两项，而不是当成 0 去扣分 / 降仓。
+        cls = sent_mod.compute_score({"index": {}, "sectors": [],
+                                      "breadth": {"advance_ratio": 0.20},
+                                      "limit_up": st3}, cfg)
+        t.ok("取数失败不参与最高连板扣分",
+             all(d["item"] != "最高连板" for d in cls["deltas"]),
+             f"deltas={[d['item'] for d in cls['deltas']]}")
+        t.ok("取数失败不触发冰点降仓",
+             sent_mod.classify(cls, cfg)["ice_cut"] is False)
+    finally:
+        utils.now = real_now
+
+
 def check_sentiment(t: Suite, cfg: Config, mk: FakeMarket) -> dict:
     t.head("道 · 情绪评分（§4.2 表逐项复算）")
     raw = {"index": mk.get_index(), "sectors": mk.get_sector_ranking(),
@@ -523,6 +732,52 @@ def check_seed(t: Suite, cfg: Config, mk: FakeMarket, sent: dict) -> dict:
     return res
 
 
+def check_menu(t: Suite, cfg: Config) -> None:
+    """菜单：默认只印四条建议，展开视图必须不多不少地盖住 20 项。
+
+    分组表是手工维护的，日后加一个菜单项很容易忘了归组——那个功能就从
+    界面上消失了，而且不报错。这里把两边对齐当成硬约束。
+    """
+    import datetime as _dt
+
+    from . import cli
+    from .timing import Timing
+
+    t.head("菜单 · 分组与时段建议")
+
+    keys = [k for k, _, _ in cli.MENU]
+    grouped = [k for _, ks in cli.MENU_GROUPS for k in ks]
+    t.eq("分组总数等于菜单项数", len(grouped), len(keys))
+    t.ok("分组无重复", len(set(grouped)) == len(grouped))
+    t.ok("分组无遗漏", set(grouped) == set(keys),
+         f"缺 {sorted(set(keys) - set(grouped))} 多 {sorted(set(grouped) - set(keys))}")
+
+    # 时段→建议：每个时段都得有东西可做，且不超过四条（否则就又回到平铺）。
+    real_now = utils.now
+    try:
+        for stamp in ("2026-08-03 09:00", "2026-08-03 10:05", "2026-08-03 10:40",
+                      "2026-08-03 12:17", "2026-08-03 14:10", "2026-08-03 14:50",
+                      "2026-08-03 16:30", "2026-08-02 16:30"):
+            fake = _dt.datetime.strptime(stamp, "%Y-%m-%d %H:%M")
+            utils.now = lambda when=None, _f=fake: _f
+            ks = cli.suggest_keys(Timing(cfg))
+            t.ok(f"{stamp} 建议 1-4 条且均合法",
+                 1 <= len(ks) <= 4 and len(set(ks)) == len(ks) and all(k in keys for k in ks),
+                 f"got={ks}")
+
+        # 非交易日不能推荐新开：门禁必定拦回，推了就是领着人撞墙。
+        holiday = _dt.datetime(2026, 8, 2, 16, 30)
+        utils.now = lambda when=None, _f=holiday: _f
+        t.ok("非交易日不推荐准入评估", "3" not in cli.suggest_keys(Timing(cfg)))
+
+        # 买入窗口必须推荐准入评估：一天就这 45 分钟能新开。
+        window = _dt.datetime(2026, 8, 3, 14, 10)
+        utils.now = lambda when=None, _f=window: _f
+        t.ok("买入窗口推荐准入评估", "3" in cli.suggest_keys(Timing(cfg)))
+    finally:
+        utils.now = real_now
+
+
 def check_end_to_end(t: Suite, cfg: Config, mk: FakeMarket, sent: dict) -> None:
     t.head("主流程 · run_once 端到端（§14 验收 1）")
     from . import runner
@@ -603,6 +858,9 @@ def main(verbose: bool = True, cfg: Optional[Config] = None) -> int:
 
         sent_mod.clear_cache()
         mk = FakeMarket(c)
+        check_raw_parsing(t, c)
+        check_clist_paging(t, c)
+        check_ztpool_fallback(t, c)
         sent = check_sentiment(t, c, mk)
         idn = check_identity(t, c, mk)
         lv = check_levels(t, c, mk)
@@ -611,6 +869,7 @@ def main(verbose: bool = True, cfg: Optional[Config] = None) -> int:
         check_position(t, c)
         check_gates(t, c, mk, sent)
         check_seed(t, c, mk, sent)
+        check_menu(t, c)
         check_end_to_end(t, c, mk, sent)
         return t.report()
     finally:

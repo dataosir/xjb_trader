@@ -143,6 +143,9 @@ def compute_score(raw: dict, cfg: Config) -> dict:
         "advance_ratio": ratio,
         "max_boards": boards,
         "limit_up_count": zt.get("limit_up_count"),
+        "limit_up_date": zt.get("date"),
+        "limit_up_fallback": bool(zt.get("fallback")),
+        "limit_up_error": zt.get("error"),
         "index": idx,
         "breadth": breadth,
     }
@@ -158,6 +161,9 @@ def classify(scored: dict, cfg: Config) -> dict:
     hot_n = sec.get("hot_n") or 0
     avg5 = sec.get("avg5")
     ma20_above = bool(idx.get("ma20_above"))
+    # 指数取不到时 ma20_above 也是 False，门禁会拦住新开——对一个纪律引擎来说
+    # 这个方向是对的，但不能把「不知道」写成「在下方」。
+    ma20_known = idx.get("ma20") is not None and idx.get("point") is not None
     ichg = idx.get("chg_pct")
     notes: List[str] = []
 
@@ -183,15 +189,29 @@ def classify(scored: dict, cfg: Config) -> dict:
 
     score = utils.clamp(score, 0.0, float(c("max_score", 100.0)))
 
-    # 交易姿态
+    # 交易姿态。提示只列真正触发的那几条：把三个候选原因一股脑印出来，会出现
+    # 「情绪分 84」旁边写着「情绪分偏低」这种自相矛盾的画面，读的人只能靠猜。
     allow_new = True
-    if score < float(c("stance_empty_below", 40)) or cycle == CYCLE_ICE:
+    empty_why = []
+    if score < float(c("stance_empty_below", 40)):
+        empty_why.append(f"情绪分 {score:.1f} < 40")
+    if cycle == CYCLE_ICE:
+        empty_why.append("处于冰点")
+    defend_why = []
+    if score < float(c("stance_defend_below", 55)):
+        defend_why.append(f"情绪分 {score:.1f} < 55")
+    if not ma20_above:
+        defend_why.append("上证在 MA20 下方" if ma20_known else "上证位置未知（指数取数失败）")
+    if cycle == CYCLE_EBB:
+        defend_why.append("退潮")
+
+    if empty_why:
         stance = STANCE_EMPTY
         allow_new = False
-        notes.append("姿态=空仓：情绪分低于 40 或处于冰点")
-    elif score < float(c("stance_defend_below", 55)) or (not ma20_above) or cycle == CYCLE_EBB:
+        notes.append("姿态=空仓：" + " + ".join(empty_why))
+    elif defend_why:
         stance = STANCE_DEFEND
-        notes.append("姿态=防守：情绪分偏低 / MA20 下 / 退潮")
+        notes.append("姿态=防守：" + " + ".join(defend_why))
     else:
         stance = STANCE_ATTACK
 
@@ -216,6 +236,7 @@ def classify(scored: dict, cfg: Config) -> dict:
         "ice_cut": ice_cut,
         "base_pos_mult": base_mult,
         "ma20_above": ma20_above,
+        "ma20_known": ma20_known,
         "notes": notes,
     }
 
@@ -247,11 +268,15 @@ def get_sentiment(market: Optional[Market] = None, cfg: Optional[Config] = None,
         "ice_cut": cls["ice_cut"],
         "base_pos_mult": cls["base_pos_mult"],
         "ma20_above": cls["ma20_above"],
+        "ma20_known": cls["ma20_known"],
         "index": scored["index"],
         "breadth": scored["breadth"],
         "advance_ratio": scored["advance_ratio"],
         "max_boards": scored["max_boards"],
         "limit_up_count": scored["limit_up_count"],
+        "limit_up_date": scored["limit_up_date"],
+        "limit_up_fallback": scored["limit_up_fallback"],
+        "limit_up_error": scored["limit_up_error"],
         "hot_n": sec.get("hot_n"),
         "avg5": sec.get("avg5"),
         "hot_sectors": [{"name": s["name"], "chg": s["chg"], "rank": s["rank"]} for s in sec.get("hot_sectors", [])],
@@ -277,13 +302,22 @@ def format_weather(s: dict) -> str:
         f"情绪分 {s['score']}  周期 {s['cycle']}  姿态 {s['stance']}  "
         f"新开 {'允许' if s['allow_new'] else '禁止'}",
         f"上证 {utils.num(idx.get('point'))} ({utils.pct(idx.get('chg_pct'))})  "
-        f"MA20 {utils.num(idx.get('ma20'))} → {'上方' if s.get('ma20_above') else '下方'}",
+        f"MA20 {utils.num(idx.get('ma20'))} → "
+        f"{('上方' if s.get('ma20_above') else '下方') if s.get('ma20_known') else '未知'}",
         f"涨跌比 {('%.1f%%' % (s['advance_ratio'] * 100)) if s.get('advance_ratio') is not None else '—'}"
         f"（涨 {(s.get('breadth') or {}).get('rising')} / 跌 {(s.get('breadth') or {}).get('falling')}）  "
-        f"最高连板 {s.get('max_boards')}  涨停 {s.get('limit_up_count')} 家",
+        f"最高连板 {utils.num(s.get('max_boards'), 0)}  涨停 {utils.num(s.get('limit_up_count'), 0)} 家",
         f"热点板块 {s.get('hot_n')} 个  前5板块均涨 {utils.pct(s.get('avg5'))}  "
         f"半仓乘数(情绪) {s.get('base_pos_mult')}",
     ]
+    if s.get("limit_up_error"):
+        lines.append(f"! 数据缺口 {s['limit_up_error']}")
+    # 非交易日（或盘前）涨停池会回退到上一个交易日。不标出日子的话，屏上就是
+    # 一个无法分辨的数字——而它和旁边的板块涨幅到底是不是同一天，直接影响周期判断。
+    if s.get("limit_up_fallback") and s.get("limit_up_date"):
+        lines.append(f"· 涨停数据来自上一交易日 {s['limit_up_date']}")
+    if (s.get("breadth") or {}).get("exact") is False:
+        lines.append("· 涨跌家数探测预算用尽，上面的值是估值")
     if s.get("hot_sectors"):
         top = "  ".join(f"{x['name']}{x['chg']:+.2f}%" for x in s["hot_sectors"][:6])
         lines.append(f"热点：{top}")
