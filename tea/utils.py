@@ -1,4 +1,4 @@
-"""通用工具：原子写入、JSON 读写、日期/交易日、数值与格式化。
+"""通用工具：原子写入、JSON 读写、日期/交易日、数值与格式化、进度计时。
 
 所有落盘文件统一走 atomic_write（写 .tmp 再 rename），避免半截文件。
 """
@@ -8,8 +8,11 @@ import datetime as _dt
 import json
 import os
 import random
+import sys
 import tempfile
-from typing import Any, Iterable, Optional
+import time
+from contextlib import contextmanager
+from typing import Any, Iterable, Iterator, Optional
 
 # ---------------------------------------------------------------- 时间/日期
 
@@ -110,28 +113,46 @@ def read_json(path: str, default: Any = None) -> Any:
         return default
 
 
-def append_jsonl(path: str, record: dict) -> str:
-    """追加一行 JSONL（机器可读追溯）。append 语义下不做原子替换。"""
+def append_jsonl(path: str, record: dict, fsync: bool = True) -> str:
+    """追加一行 JSONL（机器可读追溯）。append 语义下不做原子替换。
+
+    默认 fsync=True：写完立刻 flush + fsync，落盘后才返回，避免进程/机器崩溃时
+    丢掉留在 OS 缓存里的最后几行（accumulator / seed_trace / seed_records 都是追溯
+    数据，丢行等于丢证据）。高频批量写入且可容忍丢行的极端场景可传 fsync=False。
+    """
     ensure_dir(os.path.dirname(os.path.abspath(path)))
     with open(path, "a", encoding="utf-8") as f:
         f.write(json.dumps(record, ensure_ascii=False, default=str) + "\n")
+        if fsync:
+            f.flush()
+            os.fsync(f.fileno())
     return path
 
 
-def read_jsonl(path: str) -> list:
-    out = []
+def read_jsonl(path: str, io: Any = None) -> list:
+    """读 JSONL，坏行跳过但不静默：结束时汇总告警一次（io 优先，否则 stderr）。"""
+    out: list = []
+    bad: list = []
     try:
         with open(path, "r", encoding="utf-8") as f:
-            for line in f:
+            for lineno, line in enumerate(f, 1):
                 line = line.strip()
                 if not line:
                     continue
                 try:
                     out.append(json.loads(line))
                 except ValueError:
-                    continue
+                    bad.append(lineno)
     except OSError:
         return out
+    if bad:
+        msg = (f"[read_jsonl] 忽略 {len(bad)} 条坏行 in {path}"
+               f"（行号 {', '.join(str(n) for n in bad[:10])}"
+               f"{' ...' if len(bad) > 10 else ''}）")
+        if io is not None:
+            tell(io, msg)
+        else:
+            print(msg, file=sys.stderr)
     return out
 
 
@@ -152,7 +173,16 @@ def clamp(v: float, lo: float, hi: float) -> float:
 
 
 def safe_div(a: Optional[float], b: Optional[float], default: Optional[float] = None) -> Optional[float]:
-    if a is None or b in (None, 0):
+    """除法兜底：缺值返回 default；0 分母同样返回 default（不抛 ZeroDivisionError）。
+
+    两种情况分开判断，语义明确：
+    - a/b 任一为 None（数据缺失）→ default
+    - b == 0（分母为零，含 -0.0）→ default
+    需要“0 分母必须报错”的调用方请直接写 a / b，不要用本函数。
+    """
+    if a is None or b is None:
+        return default
+    if b == 0:
         return default
     return a / b
 
@@ -226,6 +256,15 @@ def is_st(name: str) -> bool:
     return "ST" in nm or nm.startswith("*")
 
 
+_FULLWIDTH = {'０': '0', '１': '1', '２': '2', '３': '3', '４': '4', '５': '5',
+              '６': '6', '７': '7', '８': '8', '９': '9', '．': '.', '－': '-'}
+
+
+def normalize_digits(raw: str) -> str:
+    """全角数字/小数点/负号→半角，兼容中文输入法下的误输入。"""
+    return ''.join(_FULLWIDTH.get(c, c) for c in (raw or ""))
+
+
 def norm_code(raw: str) -> str:
     """规范化股票代码：去前缀 sh/sz、补零到 6 位。"""
     c = (raw or "").strip().upper()
@@ -235,3 +274,24 @@ def norm_code(raw: str) -> str:
     c = c.lstrip(".")
     c = "".join(ch for ch in c if ch.isdigit())
     return c.zfill(6) if c else ""
+
+
+# ---------------------------------------------------------------- 进度/计时
+
+def tell(io: Any, text: str) -> None:
+    """可选 io 的进度提示：io 为 None（自测/库调用）时静默。"""
+    if io is not None:
+        io.say(text)
+
+
+@contextmanager
+def timed(label: str, io: Any = None, threshold: float = 0.0) -> Iterator[None]:
+    """计时上下文：耗时 ≥threshold 秒才打印，命中缓存的快操作不刷屏。
+
+    抛异常时不打印——失败的操作不该抬一个“✓”出来。
+    """
+    start = time.time()
+    yield
+    elapsed = time.time() - start
+    if io is not None and elapsed >= threshold:
+        io.say(f"  ✓ {label} ({elapsed:.1f}s)")
