@@ -11,11 +11,13 @@ import copy
 import os
 from typing import Any, Dict, Optional
 
-from tea.core import utils
+from tea.core import paths, utils
 
-CONFIG_ENV = "TEA_CONFIG"
-HOME_ENV = "TEA_HOME"
-CONFIG_NAME = "tea_config.json"
+# 路径解析统一由 core.paths 负责（$TEA_HOME > ~/.tea/ > CWD），这里只做别名转发，
+# 让 config_store.HOME_ENV 这类既有引用保持可用。
+CONFIG_ENV = paths.CONFIG_ENV
+HOME_ENV = paths.HOME_ENV
+CONFIG_NAME = paths.CONFIG_NAME
 
 #: 全部数据源（顺序即优先级），DEFAULTS 与旧配置迁移共用一份
 ALL_DATA_SOURCES = ["eastmoney", "tencent", "sina", "netease", "ifeng"]
@@ -616,11 +618,12 @@ def count_params(node: Any = _MISSING) -> int:
 
 
 def home_dir() -> str:
-    return os.environ.get(HOME_ENV) or os.getcwd()
+    """运行时基准目录。打包版落在 ~/.tea/，源码版仍是 CWD。"""
+    return str(paths.data_dir())
 
 
 def config_path() -> str:
-    return os.environ.get(CONFIG_ENV) or os.path.join(home_dir(), CONFIG_NAME)
+    return str(paths.config_path())
 
 
 class Config:
@@ -702,6 +705,12 @@ def load_config(path: Optional[str] = None, reload: bool = False) -> Config:
         return _CACHED
     p = path or config_path()
     raw = utils.read_json(p, default={}) or {}
+    # 打包版首次启动：~/.tea/ 里还没有配置，就拿随包模板做种子。没带模板
+    # （默认就不带，见 packaging/build.py --bundle-config）则照旧路走 DEFAULTS。
+    if not raw and paths.is_frozen():
+        tmpl = paths.bundled_config()
+        if tmpl is not None:
+            raw = utils.read_json(str(tmpl), default={}) or {}
     # 没有配置文件就无从迁移：新用户直接拿 DEFAULTS（已经是 5 源），
     # 也不应该在首次启动向导之前就悄悄写出一份配置。
     if raw and os.path.exists(p):

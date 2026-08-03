@@ -29,6 +29,9 @@ wheels/
 *.egg
 .eggs/
 MANIFEST
+# PyInstaller（packaging/tea.spec 是手写规格，要入库；备份与缓存不要）
+*.spec.bak
+packaging/__pycache__/
 
 # 虚拟环境
 .venv/

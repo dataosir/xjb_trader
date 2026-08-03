@@ -34,6 +34,8 @@ dependencies = []
 [project.optional-dependencies]
 # requests 可用时优先使用（连接复用，抓取更稳），不装则自动回退 urllib
 fast = ["requests>=2.25"]
+# 打包用，dev-only：运行时用不到，packaging/build.py 缺了会自动装
+build = ["pyinstaller>=5.13"]
 
 [project.scripts]
 tea = "tea.runtime.cli:main"

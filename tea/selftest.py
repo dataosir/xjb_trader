@@ -10,13 +10,14 @@ from __future__ import annotations
 import contextlib
 import io as io_mod
 import os
+import sys
 import tempfile
 from typing import Any, Dict, List, Optional
 
 from .analysis import expectancy as exp_mod, identity as ident_mod, sentiment as sent_mod
 from .config import config_store
 from .config.config_store import Config
-from .core import utils
+from .core import paths, utils
 from .data import Market, MarketError, indicators
 from .data.fetcher import Fetcher
 from .portfolio import plan as plan_mod, portfolio
@@ -1565,6 +1566,146 @@ def check_onboarding(t: Suite, home: str) -> None:
     t.ok("跳过仍打标记（不再纠缠）", not onboarding.is_first_run(cfg3))
 
 
+# ==================================================================== 路径 / 打包
+
+def check_paths(t: Suite) -> None:
+    """运行时数据目录三级优先级：$TEA_HOME > ~/.tea/（打包版）> CWD（源码版）。
+
+    打包成 .app / .exe 后可执行文件内部不可写，又不能因此改变源码运行的落盘
+    位置（用户现有的 ./data 得原地不动），所以两种形态要分开验。
+    """
+    t.head("路径 · 运行时数据目录")
+    old_home = os.environ.get(paths.HOME_ENV)
+    old_cfg = os.environ.get(paths.CONFIG_ENV)
+    old_frozen = getattr(sys, "frozen", None)
+    # 两个分支会真的在 $HOME 下建目录（正是被测行为），记下原本存不存在，
+    # 自测结束后把自己建的空目录清掉，不往用户家目录里留渣。
+    probe = os.path.join(os.path.expanduser("~"), ".tea_expand_probe")
+    user_dir = os.path.join(os.path.expanduser("~"), paths.USER_DIR)
+    pre_existing = {p for p in (probe, user_dir) if os.path.isdir(p)}
+
+    def _restore() -> None:
+        for k, v in ((paths.HOME_ENV, old_home), (paths.CONFIG_ENV, old_cfg)):
+            if v is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = v
+        if old_frozen is None:
+            if hasattr(sys, "frozen"):
+                del sys.frozen
+        else:
+            sys.frozen = old_frozen
+        for p in (probe, user_dir):
+            if p in pre_existing:
+                continue
+            try:
+                os.rmdir(p)        # 只能删空目录：里面真有数据就不碰
+            except OSError:
+                pass
+
+    try:
+        tmp = tempfile.mkdtemp(prefix="tea_paths_")
+        os.environ.pop(paths.CONFIG_ENV, None)
+
+        # ---- ① $TEA_HOME 最优先（源码版）
+        os.environ[paths.HOME_ENV] = tmp
+        if hasattr(sys, "frozen"):
+            del sys.frozen
+        t.eq("TEA_HOME 直接定位基准目录", str(paths.data_dir()), tmp)
+        t.eq("配置落在基准目录下", str(paths.config_path()),
+             os.path.join(tmp, paths.CONFIG_NAME))
+
+        # ---- ② $TEA_HOME 即使在打包版也压过 ~/.tea（用户显式指定优先）
+        sys.frozen = True
+        t.eq("打包版下 TEA_HOME 仍然最优先", str(paths.data_dir()), tmp)
+        t.ok("is_frozen 识别打包运行", paths.is_frozen() is True)
+
+        # ---- ③ 打包版无 TEA_HOME → ~/.tea/
+        os.environ.pop(paths.HOME_ENV, None)
+        t.eq("打包版默认写 ~/.tea/", str(paths.data_dir()), user_dir)
+        t.ok("~/.tea/ 自动创建", os.path.isdir(user_dir))
+
+        # ---- ④ 源码版无 TEA_HOME → CWD（历史行为不变）
+        del sys.frozen
+        t.eq("源码版默认回落 CWD", str(paths.data_dir()), os.getcwd())
+        t.ok("源码版不自称打包运行", paths.is_frozen() is False)
+
+        # ---- ⑤ $TEA_CONFIG 跌过基准目录
+        explicit = os.path.join(tmp, "elsewhere.json")
+        os.environ[paths.CONFIG_ENV] = explicit
+        t.eq("TEA_CONFIG 直指配置文件", str(paths.config_path()), explicit)
+        os.environ.pop(paths.CONFIG_ENV, None)
+
+        # ---- ⑥ ~ 展开（用户手写 TEA_HOME=~/x 时 shell 不一定帮展）
+        os.environ[paths.HOME_ENV] = os.path.join("~", ".tea_expand_probe")
+        t.eq("TEA_HOME 里的 ~ 会展开", str(paths.data_dir()), probe)
+
+        # ---- ⑦ 转发一致：config_store 不再自己算路径
+        os.environ[paths.HOME_ENV] = tmp
+        t.eq("config_store.home_dir 走 paths", config_store.home_dir(), str(paths.data_dir()))
+        t.eq("config_store.config_path 走 paths",
+             config_store.config_path(), str(paths.config_path()))
+        t.eq("环境变量常量同一份",
+             (config_store.HOME_ENV, config_store.CONFIG_ENV, config_store.CONFIG_NAME),
+             (paths.HOME_ENV, paths.CONFIG_ENV, paths.CONFIG_NAME))
+
+        # ---- ⑧ Config 实际落盘仍在基准目录下的 data/ 子目录
+        c = Config({}, path=os.path.join(tmp, "probe.json"))
+        t.eq("data 子目录拼在基准目录下", c.data_dir(), os.path.join(tmp, "data"))
+        t.ok("data_file 落在沙箱内",
+             c.data_file("watch_pool_file").startswith(tmp), c.data_file("watch_pool_file"))
+    finally:
+        _restore()
+
+
+def check_packaging(t: Suite) -> None:
+    """打包规格的隐式导入清单必须盖住磁盘上所有模块。
+
+    tea 大量走「按字符串取实现」（data.providers 按 market.data_sources 选源、
+    phases 由菜单分派），PyInstaller 静态分析看不到，漏一个就是用户点到那个
+    菜单才 ImportError 崩——而且只在打包版上复现。新增模块忘了同步 spec 时，
+    这一条当场变红，不用等到发给用户。
+    """
+    t.head("打包 · spec 隐式导入")
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    spec_path = os.path.join(root, "packaging", "tea.spec")
+    if not os.path.exists(spec_path):
+        t.ok("packaging/tea.spec 存在", False, spec_path)
+        return
+    t.ok("packaging/tea.spec 存在", True)
+    with open(spec_path, "r", encoding="utf-8") as f:
+        spec = f.read()
+
+    # 磁盘上的真实模块名（__init__.py 折成包名）
+    mods = set()
+    pkg_root = os.path.join(root, "tea")
+    for dirpath, dirnames, filenames in os.walk(pkg_root):
+        dirnames[:] = [d for d in dirnames if d != "__pycache__"]
+        for name in filenames:
+            if not name.endswith(".py"):
+                continue
+            rel = os.path.relpath(os.path.join(dirpath, name), root)
+            parts = rel[:-3].split(os.sep)
+            if parts[-1] == "__init__":
+                parts.pop()
+            mods.add(".".join(parts))
+    missing = sorted(m for m in mods if f'"{m}"' not in spec)
+    t.ok(f"{len(mods)} 个模块全在 hiddenimports 里",
+         not missing, "漏：" + ", ".join(missing) if missing else "")
+    t.ok("数据源子包逐个列出",
+         all(f'"tea.data.providers.{p}"' in spec
+             for p in ("eastmoney", "tencent", "sina", "netease", "ifeng")))
+
+    # macOS bundle 与控制台：交互式 CLI 不能被打成哑巴
+    t.ok("bundle id 为 com.dataosir.tea", '"com.dataosir.tea"' in spec)
+    t.ok("CFBundleName = TEA", '"CFBundleName": APP_NAME' in spec and 'APP_NAME = "TEA"' in spec)
+    t.ok("LSBackgroundOnly 为 False", '"LSBackgroundOnly": False' in spec)
+    t.ok("入口点是 tea/__main__.py", '"tea", "__main__.py"' in spec)
+    t.ok("默认保留控制台", 'CONSOLE = os.environ.get("TEA_NO_CONSOLE") != "1"' in spec)
+    t.ok("测试/科计包已排除",
+         all(f'"{x}"' in spec for x in ("pytest", "ruff", "numpy")))
+
+
 # ==================================================================== 入口
 
 def main(verbose: bool = True, cfg: Optional[Config] = None) -> int:
@@ -1606,6 +1747,8 @@ def main(verbose: bool = True, cfg: Optional[Config] = None) -> int:
         check_menu(t, c)
         check_config_migration(t, tmp)
         check_onboarding(t, tmp)
+        check_paths(t)
+        check_packaging(t)
         check_end_to_end(t, c, mk, sent)
         return t.report()
     finally:

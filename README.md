@@ -3,7 +3,7 @@
 [![CI](https://github.com/dataosir/xjb_trader/actions/workflows/ci.yml/badge.svg)](https://github.com/dataosir/xjb_trader/actions/workflows/ci.yml)
 [![Python](https://img.shields.io/badge/python-3.8%2B-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![自测](https://img.shields.io/badge/selftest-245%2F245-brightgreen.svg)](#十离线自测)
+[![自测](https://img.shields.io/badge/selftest-310%2F310-brightgreen.svg)](#十离线自测)
 
 > 计划你的交易，交易你的计划。宁可空仓，不强行凑票。
 
@@ -488,7 +488,7 @@ python3 -m tea selftest
 
 覆盖范围：情绪分逐项复算 + 冰点降仓、身份 6 维 + 分数夹紧 + 杂毛强制降级、ATR(14) + 止损止盈 + 含滑点 R:R + 反推止盈、9 分共振六维逐项 + 扣分项、VETO 全部阈值边界（含 20cm ×2 放大与权限）、仓位与期望值公式、三道门禁 7 条规则、种子四步流、行情解析量级（fltt=2 不再缩放，含尺度无关的涨幅自洽断言）、clist 翻页（精确涨跌家数 + 板块成分不被前 100 名截断）、涨停池按交易日回退、**五源降级链（四家报价源单位对齐 / 凤凰开高收低异序 / 部分能力静默跳过 / 错误汇总只列真失败）**、菜单分组与时段建议、首次启动向导（落盘 / 输入校验 / 标记幂等）、`run_once` 端到端（BUY → 灰度仓 → 补确认仓 → 平仓 → 门禁拦截当日第二次评估）。
 
-当前：**245/245 通过**。
+当前：**310/310 通过**。
 
 自测在临时 `TEA_HOME` 沙箱中运行，不会碰你的真实数据与报告。
 
@@ -515,7 +515,51 @@ python3 -m tea selftest
 
 ---
 
-## 十二、参与与许可
+## 十二、打包发布
+
+在**自己电脑上调试完**，一键打成可分发的桌面程序：
+
+```bash
+python3 packaging/build.py
+```
+
+脚本按 `sys.platform` 自动选形态，不用记参数：
+
+| 在哪台机器上跑 | 产物 | 形态 |
+|---|---|---|
+| macOS | `dist/TEA.app` | onedir + .app bundle |
+| Windows | `dist/TEA.exe` | onefile 单文件 |
+
+> PyInstaller **不能交叉编译**：要 Windows 的 `.exe` 就得在 Windows 上跑一次，Mac 上只能出 `.app`。在其他系统上执行会直接报错并提示改用源码运行。
+
+首次打包会自动 `pip install pyinstaller`（dev-only 依赖，运行时用不到；也可以先 `pip install '.[build]'`）。
+
+常用开关：
+
+| 参数 | 作用 |
+|---|---|
+| `--clean` | 打包前先清掉 `dist/` 和 `build/` |
+| `--onefile` | 强制单文件（macOS 上会得到命令行可执行文件而非 `.app`） |
+| `--no-console` | 隐藏控制台，**仅 Windows**；TEA 是交互式 CLI，默认保留 |
+| `--bundle-config` | 把 `tea_config.json` 作为默认模板打进包（默认不打，见下） |
+
+### 打包版的数据写在哪
+
+`.app` / `.exe` 内部是只读的（macOS 还要过签名校验），持仓与缓存不能往里写。所以运行时数据目录按三级优先级解析（`tea/core/paths.py`）：
+
+| 优先级 | 位置 | 何时生效 |
+|---|---|---|
+| ① | `$TEA_HOME` | 你显式设了就以你的为准 |
+| ② | `~/.tea/` | 打包版默认，自动创建 |
+| ③ | 当前工作目录 | 源码运行，**行为与以前完全一致** |
+
+也就是说：源码跑还是落在仓库根的 `data/` 与 `reports/`，打包版跑落在 `~/.tea/data/` 与 `~/.tea/reports/`，两者互不干扰。想让打包版也用某个固定目录，设 `TEA_HOME=/path/to/dir` 即可。
+
+> **别把带隐私的配置打进包。** `tea_config.json` 可能含代理账号密码与本金，因此默认**不**随包分发（这也是它被 `.gitignore` 排除的原因）。确实要带一份默认模板给自己用时才加 `--bundle-config`，且不要把产物转发他人。
+
+---
+
+## 十三、参与与许可
 
 - 提 Issue / PR 前请看 [CONTRIBUTING.md](CONTRIBUTING.md)，其中说明了一条硬规矩：**改动任何公式或阈值，必须同步更新 `selftest.py` 里的断言**。
 - 版本变更记录在 [CHANGELOG.md](CHANGELOG.md)。
