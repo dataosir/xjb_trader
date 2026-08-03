@@ -19,6 +19,15 @@ CONFIG_NAME = "tea_config.json"
 
 DEFAULTS: Dict[str, Any] = {
     "version": 1,
+    # ---------------------------------------------------------- 元信息
+    # initialized 是「首次启动向导」的唯一判据：配置文件不存在、或存在但这里仍是
+    # False（老配置升级上来就是这种），都会在进主菜单前引导一次。
+    "meta": {
+        "initialized": False,
+        "initialized_at": None,
+        "wizard_version": 0,
+        "wizard_skipped": False,
+    },
     # ---------------------------------------------------------- 路径
     "paths": {
         "data_dir": "data",
@@ -97,6 +106,12 @@ DEFAULTS: Dict[str, Any] = {
         # 否则代理连不上会 ProxyError 全崩。真需要代理取数（如境外）再置 True，
         # 或直接配 proxy_pool。
         "use_env_proxy": False,
+        # 重试时在屏上出一声（一次超时 8s，不提示就像程序死了）
+        "show_progress": True,
+        # 重试提示的最小间隔（秒）：并发/密集重试时按此节流，避免刷屏
+        "retry_notice_gap_sec": 2.5,
+        # 请求耗时日志只留最近 N 条（内存内，不落盘）
+        "request_log_cap": 200,
         # 缓存
         "quote_cache_sec": 20,
         "kline_cache_sec": 300,
@@ -268,6 +283,7 @@ DEFAULTS: Dict[str, Any] = {
         "check_turnover": True,
         "check_bias": True,
         "check_intraday": True,
+        "limit_up_pct_base": 10.0,
         "soft_items": ["intraday_high", "bias_ma20", "near_limit_up", "chase_high"],
     },
     # ---------------------------------------------------------- 权限
@@ -335,6 +351,8 @@ DEFAULTS: Dict[str, Any] = {
         "require_standard_window_for_buy": True,
         "block_new_eval_when_index_below_ma20": True,
         "cancel_high_score_min": 7,
+
+        "defend_stance_bump": 1,
     },
     # ---------------------------------------------------------- 种子扫描细则
     "seed": {
@@ -353,7 +371,11 @@ DEFAULTS: Dict[str, Any] = {
         "mild_cap_low": 50.0,
         "mild_cap_high": 300.0,
         "mild_target_ratio": 0.20,
+        "mild_chg_below_limit_up": 0.2,
+        "mild_score_max": 100.0,
         "sector_relax_score": 60.0,
+        "sector_relax_score_nozt": 70.0,
+        "sector_relax_rank_nozt": 12,
         "diversify_replace_last": True,
         "shadow_bonus": 18.0,
         "shadow_near_rank": 6,
@@ -381,7 +403,7 @@ DEFAULTS: Dict[str, Any] = {
         "hot_identity_relax": 62,
         "front_row_topk": 3,
         "front_row_min_turnover": 1.5,
-        "cap_min": 50.0,
+        "cap_min": 30.0,
         "cap_max": 300.0,
         "turnover_max": 20.0,
         "leader_pass_bonus": 1,
@@ -395,6 +417,31 @@ DEFAULTS: Dict[str, Any] = {
         "sprout_scan_enabled": True,
         "member_fetch_cap": 60,
         "candidate_fetch_cap": 30,
+        # pick_score 系统分权重与分档（默认与历史硬编码一致）
+        "pick": {
+            "sector_position_weight": 35.0,
+            "sector_rank_denom": 30.0,
+            "inner_position_weight": 25.0,
+            "inner_default_pct": 0.6,
+            "chg_weight": 20.0,
+            "chg_penalty_per_pct": 5.0,
+            "turnover_none_score": 5.0,
+            "turnover_score_brackets": [
+                {"min": 3.0, "max": 10.0, "score": 10.0},
+                {"min": 2.0, "max": 15.0, "score": 6.0},
+                {"min": 0.0, "max": 100.0, "score": 3.0},
+            ],
+            "cap_none_score": 5.0,
+            # 首个命中生效（_bracket_score），所以档位顺序即优先级：
+            # 80-200 亿→10 分；50-80 亿走第二档→8 分；30-50 亿（cap_min 下调到 30
+            # 亿后新增的区间）→6 分，不再直接掉到兜底档；<30 或 >300 亿兜底 4 分。
+            "cap_score_brackets": [
+                {"min": 80.0, "max": 200.0, "score": 10.0},
+                {"min": 50.0, "max": 300.0, "score": 8.0},
+                {"min": 30.0, "max": 50.0, "score": 6.0},
+                {"min": 0.0, "max": 1000.0, "score": 4.0},
+            ],
+        },
     },
     # ---------------------------------------------------------- 仓位
     "position": {

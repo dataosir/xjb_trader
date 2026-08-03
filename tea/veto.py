@@ -18,10 +18,22 @@ KIND_SOFT = "soft"
 BOARD_NAMES = {"main": "主板", "gem": "创业板", "star": "科创板", "bse": "北交所"}
 
 
-def _scale(pct_threshold: float, quote: dict) -> float:
-    """按标的涨停幅缩放阈值（10cm 基准）。"""
-    cap = quote.get("limit_up_pct") or utils.limit_up_pct(quote.get("code", ""), quote.get("name", ""))
-    return pct_threshold * (cap / 10.0)
+def _scale(pct_threshold: float, quote: dict, cfg: Optional[Config] = None) -> float:
+    """按标的涨停幅缩放阈值（10cm 基准）。
+
+    base 被配成 0/负数（配置写错）时静默回落为不缩放，而不是 ZeroDivisionError
+    炸掉整个 VETO 检查；本函数是纯函数拿不到 io，所以不做提示。
+    cap 拿不到（None/0）时回落到代码/名称推导的涨停幅，仍拿不到则不缩放。
+    """
+    cfg = cfg or load_config()
+    base = utils.to_float(cfg.get("veto.limit_up_pct_base", 10.0), 0.0) or 0.0
+    if base <= 0:
+        return pct_threshold
+    cap = utils.to_float(quote.get("limit_up_pct"), None) or utils.limit_up_pct(
+        quote.get("code", ""), quote.get("name", ""))
+    if not cap or cap <= 0:
+        return pct_threshold
+    return pct_threshold * (cap / base)
 
 
 def board_allowed(code: str, cfg: Optional[Config] = None) -> bool:
@@ -75,8 +87,8 @@ def check(quote: dict, ind: Optional[dict] = None, identity: Optional[dict] = No
 
     # ③ 涨停 / 接近涨停
     if cfg.get("veto.check_limit_up", True) and chg is not None:
-        zone = _scale(float(cfg.s("veto_limit_zone_pct", 9.5)), quote)
-        near = _scale(float(cfg.s("veto_near_limit_pct", 9.0)), quote)
+        zone = _scale(float(cfg.s("veto_limit_zone_pct", 9.5)), quote, cfg)
+        near = _scale(float(cfg.s("veto_near_limit_pct", 9.0)), quote, cfg)
         if chg >= zone:
             veto("limit_up", "涨停/封板", KIND_HARD,
                  f"涨幅 {chg:.2f}% ≥ {zone:.2f}%（涨停区，不可追板）", chg, zone)

@@ -7,7 +7,10 @@
 """
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional, Tuple
+import os
+import time
+from contextlib import contextmanager
+from typing import Any, Dict, Iterator, List, Optional, Tuple
 
 from . import followthrough, identity as ident_mod, preflight, seed_trace, utils
 from . import veto as veto_mod
@@ -62,61 +65,124 @@ def tier_params(tier: str, cfg: Config) -> dict:
 
 # ------------------------------------------------------------------ 系统分
 
+def _bracket_score(value: Optional[float], brackets: List[dict], none_score: float) -> float:
+    """分档取分：value 落入首个 [min, max] 区间取其 score；无值回落 none_score；
+    全不命中回落最后一档（兜底档）。"""
+    if value is None:
+        return float(none_score)
+    for b in (brackets or []):
+        if float(b.get("min", 0.0)) <= value <= float(b.get("max", 0.0)):
+            return float(b.get("score", 0.0))
+    return float(brackets[-1].get("score", 0.0)) if brackets else 0.0
+
+
 def pick_score(member: dict, sector: dict, cfg: Config) -> dict:
     """系统分（0~100）：板块位置 35 + 板块内位置 25 + 涨幅贴合 20 + 换手 10 + 市值 10。"""
+    p = lambda k, d=None: cfg.get(f"seed.pick.{k}", d)
     parts: Dict[str, float] = {}
     s_rank = sector.get("rank") or 99
-    parts["板块位置"] = utils.clamp(35.0 * (1.0 - (s_rank - 1) / 30.0), 0.0, 35.0)
+    sec_w = float(p("sector_position_weight", 35.0))
+    sec_denom = float(p("sector_rank_denom", 30.0))
+    parts["板块位置"] = utils.clamp(sec_w * (1.0 - (s_rank - 1) / sec_denom), 0.0, sec_w)
 
     rank_pct = member.get("rank_pct")
-    parts["板块内位置"] = utils.clamp(25.0 * (1.0 - (rank_pct if rank_pct is not None else 0.6)), 0.0, 25.0)
+    inner_w = float(p("inner_position_weight", 25.0))
+    inner_default = float(p("inner_default_pct", 0.6))
+    parts["板块内位置"] = utils.clamp(
+        inner_w * (1.0 - (rank_pct if rank_pct is not None else inner_default)), 0.0, inner_w)
 
     lo = float(cfg.get("seed.strict_min_chg", 3.0))
     hi = float(cfg.get("seed.strict_max_chg", 5.5))
+    chg_w = float(p("chg_weight", 20.0))
+    chg_penalty = float(p("chg_penalty_per_pct", 5.0))
     chg = member.get("chg")
     if chg is None:
         parts["涨幅贴合"] = 0.0
     elif lo <= chg <= hi:
-        parts["涨幅贴合"] = 20.0
+        parts["涨幅贴合"] = chg_w
     else:
         over = (chg - hi) if chg > hi else (lo - chg)
-        parts["涨幅贴合"] = utils.clamp(20.0 - over * 5.0, 0.0, 20.0)
+        parts["涨幅贴合"] = utils.clamp(chg_w - over * chg_penalty, 0.0, chg_w)
 
-    to = member.get("turnover")
-    if to is None:
-        parts["换手"] = 5.0
-    elif 3.0 <= to <= 10.0:
-        parts["换手"] = 10.0
-    elif 2.0 <= to <= 15.0:
-        parts["换手"] = 6.0
-    else:
-        parts["换手"] = 3.0
+    parts["换手"] = _bracket_score(
+        member.get("turnover"), p("turnover_score_brackets", []), p("turnover_none_score", 5.0))
 
-    cap = member.get("cap_yi")
-    if cap is None:
-        parts["市值"] = 5.0
-    elif 80.0 <= cap <= 200.0:
-        parts["市值"] = 10.0
-    elif 50.0 <= cap <= 300.0:
-        parts["市值"] = 8.0
-    else:
-        parts["市值"] = 4.0
+    parts["市值"] = _bracket_score(
+        member.get("cap_yi"), p("cap_score_brackets", []), p("cap_none_score", 5.0))
 
     total = sum(parts.values())
     return {"score": round(total, 1), "parts": {k: round(v, 1) for k, v in parts.items()}}
 
 
+# ------------------------------------------------------------------ VETO 明细
+
+def veto_detail(items: List[dict]) -> str:
+    """VETO 追踪明细：每项展开为“条件（当前值 / 阈值）”，无值项退回否决说明。"""
+    out: List[str] = []
+    for it in items:
+        v, th = it.get("value"), it.get("threshold")
+        if v is None or th is None:
+            out.append(f"{it['label']}（{it.get('detail') or '—'}）")
+            continue
+        # 分时位置是 0~1 比例，其余（涨幅 / 换手 / 乖离）是百分数
+        fmt = ((lambda x: f"{x:.0%}") if str(it.get("name") or "").startswith("intraday")
+               else (lambda x: f"{x:.2f}%"))
+        out.append(f"{it['label']}（当前 {fmt(v)} / 阈值 {fmt(th)}）")
+    return "；".join(out)
+
+
 # ------------------------------------------------------------------ 影子池
 
+try:  # Unix 才有 fcntl；Windows 下降级为无锁（保持原行为）
+    import fcntl as _fcntl
+except ImportError:  # pragma: no cover - 仅 Windows
+    _fcntl = None
+
+
+@contextmanager
+def _shadow_lock(cfg: Config, exclusive: bool) -> Iterator[None]:
+    """影子池文件锁：防两个 seed-plan 进程互相覆盖 shadow_pool.json。
+
+    锁加在旁路 sidecar（.lock）上而不是 json 本身：写入走 atomic_write（os.replace），
+    目标 inode 会被换掉，锁在本体上护不住。读取取共享锁，写入取独占锁。
+    拿不到锁（无 fcntl / 文件系统不支持）时不阻断业务，退回无锁。
+    """
+    if _fcntl is None:
+        yield
+        return
+    lock_path = cfg.data_file("shadow_pool_file") + ".lock"
+    fh = None
+    try:
+        utils.ensure_dir(os.path.dirname(os.path.abspath(lock_path)))
+        fh = open(lock_path, "a+")
+        _fcntl.flock(fh.fileno(), _fcntl.LOCK_EX if exclusive else _fcntl.LOCK_SH)
+    except OSError:
+        if fh is not None:
+            fh.close()
+            fh = None
+    try:
+        yield
+    finally:
+        if fh is not None:
+            try:
+                _fcntl.flock(fh.fileno(), _fcntl.LOCK_UN)
+            except OSError:
+                pass
+            fh.close()
+
+
 def load_shadow(cfg: Config) -> dict:
-    return utils.read_json(cfg.data_file("shadow_pool_file"), default=None) or {"date": None, "sectors": []}
+    with _shadow_lock(cfg, exclusive=False):
+        return (utils.read_json(cfg.data_file("shadow_pool_file"), default=None)
+                or {"date": None, "sectors": []})
 
 
 def save_shadow(cfg: Config, sectors: List[dict]) -> str:
-    return utils.write_json(cfg.data_file("shadow_pool_file"), {
-        "date": utils.today_str(),
-        "sectors": [{"bk": s["bk"], "name": s["name"], "score": s["total_score"]} for s in sectors],
-    })
+    with _shadow_lock(cfg, exclusive=True):
+        return utils.write_json(cfg.data_file("shadow_pool_file"), {
+            "date": utils.today_str(),
+            "sectors": [{"bk": s["bk"], "name": s["name"], "score": s["total_score"]} for s in sectors],
+        })
 
 
 class Screener:
@@ -127,26 +193,37 @@ class Screener:
         self.mk = market or Market(self.cfg)
 
     # ============================================================== 第 1 步
-    def rank_sectors(self, tracer: Optional[seed_trace.Tracer] = None) -> dict:
+    def rank_sectors(self, tracer: Optional[seed_trace.Tracer] = None,
+                     io: Any = None) -> dict:
         cfg = self.cfg
         c = lambda k, d=None: cfg.get(f"seed.{k}", d)
         topn = int(c("sector_scan_topn", 30))
-        sectors = self.mk.get_sector_ranking()[:topn]
+        utils.tell(io, "  ⏳ 获取板块排名...")
+        with utils.timed("板块排名", io, threshold=0.5):
+            sectors = self.mk.get_sector_ranking()[:topn]
         shadow = load_shadow(cfg)
         shadow_names = {s.get("bk") for s in shadow.get("sectors", [])}
         scored: List[dict] = []
 
-        for s in sectors:
+        # 每个板块的成分股都要单独拉（大板块还要翻页），这里是种子扫描最慢的一段。
+        total_n_sectors = len(sectors)
+        utils.tell(io, f"  ⏳ 扫描 {total_n_sectors} 个板块的成分股...")
+        for i, s in enumerate(sectors, 1):
+            t0 = time.time()
             try:
                 members = self.mk.get_sector_members(s["bk"])
             except Exception as exc:
                 if tracer:
                     tracer.add_sector(s["name"], "成分股拉取失败", str(exc), bk=s["bk"])
+                utils.tell(io, f"    · [{i}/{total_n_sectors}] {s['name']} 拉取失败")
                 continue
             if not members:
                 if tracer:
                     tracer.add_sector(s["name"], "成分股为空", bk=s["bk"])
+                utils.tell(io, f"    · [{i}/{total_n_sectors}] {s['name']} 成分股为空")
                 continue
+            utils.tell(io, f"    · [{i}/{total_n_sectors}] {s['name']} {len(members)} 只"
+                           f" ({time.time() - t0:.1f}s)")
             total_n = len(members)
             limit_ups = count_limit_ups(members)
             ups = sum(1 for m in members if (m.get("chg") or 0) > 0)
@@ -154,7 +231,7 @@ class Screener:
                     if m.get("chg") is not None and float(c("mild_chg_low", 3.0)) <= m["chg"] <= float(c("mild_chg_high", 5.5))
                     and m.get("cap_yi") is not None
                     and float(c("mild_cap_low", 50.0)) <= m["cap_yi"] <= float(c("mild_cap_high", 300.0))
-                    and m["chg"] < utils.limit_up_pct(m.get("code", ""), m.get("name", "")) - 0.2]
+                    and m["chg"] < utils.limit_up_pct(m.get("code", ""), m.get("name", "")) - float(c("mild_chg_below_limit_up", 0.2))]
             mild_ratio = len(mild) / total_n if total_n else 0.0
 
             rank_score = max(0.0, float(c("rank_score_base", 40.0)) - s["rank"] * float(c("rank_score_step", 3.0)))
@@ -164,7 +241,8 @@ class Screener:
                          if float(c("chg_score_low", 2.0)) <= (s.get("chg") or 0) <= float(c("chg_score_high", 8.0))
                          else 0.0)
             heat = rank_score + zt_score + chg_score
-            mild_score = min(mild_ratio / float(c("mild_target_ratio", 0.20)) * 100.0, 100.0)
+            mild_score = min(mild_ratio / float(c("mild_target_ratio", 0.20)) * float(c("mild_score_max", 100.0)),
+                             float(c("mild_score_max", 100.0)))
             total_score = heat * float(c("heat_weight", 0.65)) + mild_score * float(c("mild_weight", 0.35))
 
             shadow_bonus = float(c("shadow_bonus", 18.0)) if s["bk"] in shadow_names else 0.0
@@ -181,15 +259,24 @@ class Screener:
             scored.append(entry)
 
         # 板块硬门槛：排名 ≤8 且 涨停 ≥2 家（或 涨停1家 + 综合分 ≥60）
+        # 弱市补充通道：0 涨停但综合分 ≥70 且排名前 12（弱市中好板块常无涨停）
         min_rank = int(cfg.s("seed_min_sector_rank", 8))
         min_zt = int(cfg.s("seed_min_sector_limit_up", 2))
         relax_score = float(c("sector_relax_score", 60.0))
+        relax_score_nozt = float(c("sector_relax_score_nozt", 70.0))
+        relax_rank_nozt = int(c("sector_relax_rank_nozt", 12))
         qualified = []
         for e in scored:
             ok_hard = e["rank"] <= min_rank and e["limit_up_count"] >= min_zt
             ok_relax = e["limit_up_count"] >= 1 and e["total_score"] >= relax_score
-            if ok_hard or ok_relax:
-                e["gate"] = "硬门槛" if ok_hard else f"放宽（涨停1家+综合分≥{relax_score:.0f}）"
+            ok_nozt = e["limit_up_count"] == 0 and e["total_score"] >= relax_score_nozt and e["rank"] <= relax_rank_nozt
+            if ok_hard or ok_relax or ok_nozt:
+                if ok_hard:
+                    e["gate"] = "硬门槛"
+                elif ok_relax:
+                    e["gate"] = f"放宽（涨停1家+综合分≥{relax_score:.0f}）"
+                else:
+                    e["gate"] = f"放宽（综合分≥{relax_score_nozt:.0f} 无涨停）"
                 qualified.append(e)
             elif tracer:
                 tracer.add_sector(e["name"], "板块硬门槛不足",
@@ -227,7 +314,7 @@ class Screener:
         cfg = self.cfg
         p = tier_params(tier, cfg)
         out: List[dict] = []
-        cap_min = float(cfg.get("seed.cap_min", 50.0))
+        cap_min = float(cfg.get("seed.cap_min", 30.0))
         to_max = float(cfg.get("seed.turnover_max", 20.0))
         front_k = int(cfg.get("seed.front_row_topk", 3))
         front_to = float(cfg.get("seed.front_row_min_turnover", 1.5))
@@ -252,7 +339,7 @@ class Screener:
                 if not veto_mod.board_allowed(code, cfg):
                     trace("板块无权限", veto_mod.BOARD_NAMES.get(utils.board_of(code), "?"))
                     continue
-                near = float(cfg.s("veto_near_limit_pct", 9.0)) * (utils.limit_up_pct(code, name) / 10.0)
+                near = float(cfg.s("veto_near_limit_pct", 9.0)) * (utils.limit_up_pct(code, name) / float(cfg.get("veto.limit_up_pct_base", 10.0)))
                 if chg is not None and chg >= near:
                     trace("涨停/接近涨停", f"涨幅 {chg:.2f}% ≥ {near:.2f}%")
                     continue
@@ -336,13 +423,17 @@ class Screener:
 
     # ============================================================== 第 3 步
     def veto_filter(self, candidates: List[dict], sent: Optional[dict],
-                    tracer: Optional[seed_trace.Tracer] = None) -> dict:
+                    tracer: Optional[seed_trace.Tracer] = None, io: Any = None) -> dict:
         """逐只拉行情做 VETO：软否决→观察轨，硬否决→REJECT。"""
         cfg = self.cfg
         cap = int(cfg.get("seed.candidate_fetch_cap", 30))
         passed: List[dict] = []
         soft: List[dict] = []
-        for cand in candidates[:cap]:
+        batch = candidates[:cap]
+        # 逐只预审要拉行情 + 日 K，一只两次请求，候选多时这段同样以分钟计。
+        utils.tell(io, f"  ⏳ 逐只预审 {len(batch)} 只候选（行情 + VETO）...")
+        for i, cand in enumerate(batch, 1):
+            utils.tell(io, f"    · [{i}/{len(batch)}] {cand['code']} {cand['name']}")
             try:
                 ev = preflight.evaluate(
                     cand["code"], self.mk, cfg, sent=sent, sector=cand["sector"],
@@ -357,7 +448,9 @@ class Screener:
             if vt.get("rejected"):
                 if tracer:
                     tracer.add(seed_trace.STEP_VETO, cand["code"], cand["name"], "硬否决",
-                               "；".join(i["label"] for i in vt["hard"]), tier=cand["tier"])
+                               f"{veto_detail(vt['hard'])} → 直接 REJECT（不进观察轨）",
+                               tier=cand["tier"], sector=cand.get("sector_name"), chg=cand.get("chg"),
+                               veto_items=[i["name"] for i in vt["hard"]])
                 continue
             if vt.get("soft"):
                 ev["track"] = watch_pool.TRACK_WATCH
@@ -365,7 +458,10 @@ class Screener:
                 soft.append(ev)
                 if tracer:
                     tracer.add(seed_trace.STEP_VETO, cand["code"], cand["name"], "软否决→观察轨",
-                               "；".join(i["label"] for i in vt["soft"]), tier=cand["tier"])
+                               f"{veto_detail(vt['soft'])}；无硬否决 → 划入观察轨等回踩后重新预审"
+                               f"（触发条件：{'；'.join(ev['triggers']) or '—'}）",
+                               tier=cand["tier"], sector=cand.get("sector_name"), chg=cand.get("chg"),
+                               veto_items=[i["name"] for i in vt["soft"]])
                 continue
             passed.append(ev)
         return {"passed": passed, "soft": soft}
@@ -413,7 +509,7 @@ class Screener:
 
     # ============================================================== 前夕观察
     def eve_scan(self, sectors: List[dict], sent: Optional[dict],
-                 tracer: Optional[seed_trace.Tracer] = None) -> List[dict]:
+                 tracer: Optional[seed_trace.Tracer] = None, io: Any = None) -> List[dict]:
         """前夕观察（1%~3% 涨幅窗）：仅观察/报告，永不写计划。"""
         cfg = self.cfg
         cands = self.screen_tier(sectors, TIER_EVE, tracer)
@@ -442,13 +538,13 @@ class Screener:
 
     # ============================================================== 主流程
     def seed_scan(self, sent: Optional[dict] = None, include_eve: bool = True,
-                  write_trace: bool = True) -> dict:
+                  write_trace: bool = True, io: Any = None) -> dict:
         """种子扫描四步流总入口。"""
         cfg = self.cfg
         tracer = seed_trace.Tracer(cfg)
-        sent = sent if sent is not None else get_sentiment(self.mk, cfg)
+        sent = sent if sent is not None else get_sentiment(self.mk, cfg, io=io)
 
-        step1 = self.rank_sectors(tracer)
+        step1 = self.rank_sectors(tracer, io=io)
         sectors = step1["top"]
         result: Dict[str, Any] = {
             "at": utils.now().strftime("%Y-%m-%d %H:%M"), "scan_id": tracer.scan_id,
@@ -459,16 +555,18 @@ class Screener:
             "notes": [], "verdict": VERDICT_EMPTY,
         }
         if not sectors:
-            result["notes"].append("无板块通过硬门槛（排名≤8 且涨停≥2家 / 涨停1家+综合分≥60）")
+            result["notes"].append("无板块通过硬门槛（排名≤8 且涨停≥2家 / 涨停1家+综合分≥60 / 无涨停+综合分≥70且排名≤12）")
             tracer.note(result["notes"][-1])
             if write_trace:
                 result["trace"] = tracer.flush()
             return result
 
+        utils.tell(io, "  ⏳ 执行筛选（三档涨幅窗）...")
         cands, tier, notes = self.screen_with_downgrade(sectors, step1["max_sector_chg"], tracer)
         result["tier"], result["notes"] = tier, notes
 
-        vf = self.veto_filter(cands, sent, tracer)
+        vf = self.veto_filter(cands, sent, tracer, io=io)
+        utils.tell(io, "  ⏳ 汇总三档输出...")
         out = self.preflight_outputs(vf["passed"], tracer)
         watch_items = vf["soft"] + out["watch"]
 
@@ -480,8 +578,10 @@ class Screener:
         result["soft_n"] = len(vf["soft"])
 
         if include_eve:
+            utils.tell(io, "  ⏳ 前夕观察扫描...")
             try:
-                result["eve"] = self.eve_scan(sectors, sent, tracer)
+                with utils.timed("前夕观察扫描", io, threshold=0.5):
+                    result["eve"] = self.eve_scan(sectors, sent, tracer, io=io)
             except Exception as exc:
                 result["notes"].append(f"前夕观察扫描异常：{exc}")
 

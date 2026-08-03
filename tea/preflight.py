@@ -279,8 +279,9 @@ def effective_threshold(identity: Optional[dict] = None, sent: Optional[dict] = 
         th += inc
         notes.append(f"历史样本不足 +{inc}")
     if sent and sent.get("stance") == "防守":
-        th += 1
-        notes.append("防守姿态 +1")
+        bump_defend = int(cfg.s("defend_stance_bump", 1))
+        th += bump_defend
+        notes.append(f"防守姿态 +{bump_defend}")
     if seed_leader_relax and ident_mod.is_leader(identity or {}):
         floor = int(cfg.get("seed.leader_pass_floor", 6))
         relax = int(cfg.get("seed.leader_pass_bonus", 1))
