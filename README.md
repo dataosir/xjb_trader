@@ -3,7 +3,7 @@
 [![CI](https://github.com/dataosir/xjb_trader/actions/workflows/ci.yml/badge.svg)](https://github.com/dataosir/xjb_trader/actions/workflows/ci.yml)
 [![Python](https://img.shields.io/badge/python-3.8%2B-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![自测](https://img.shields.io/badge/selftest-310%2F310-brightgreen.svg)](#十离线自测)
+[![自测](https://img.shields.io/badge/selftest-335%2F335-brightgreen.svg)](#十离线自测)
 
 > 计划你的交易，交易你的计划。宁可空仓，不强行凑票。
 
@@ -332,6 +332,8 @@ R:R = (目标价 - 买入价×1.005) / (买入价×1.005 - 止损价×0.995)
 | `data/seed_trace.jsonl` | 落选追溯（结构化） |
 | `data/accumulator.jsonl` | 当日累积事件 |
 | `data/.tea_sector_cache.json` | 板块成分多级缓存 |
+| `data/seed_records.jsonl` | 种子扫描结果存档（结构化，供后续统计与追溯） |
+| `data/shadow_pool.json` | 影子持仓池（种子扫描留痕，供样本积累与效果对比） |
 | `reports/TRADE_CHECK_*.md` | 单标的准入报告 |
 | `reports/SEED_*.md` | 种子扫描报告 |
 | `reports/SEED_TRACE.md` | 落选追溯（可读版） |
@@ -488,7 +490,7 @@ python3 -m tea selftest
 
 覆盖范围：情绪分逐项复算 + 冰点降仓、身份 6 维 + 分数夹紧 + 杂毛强制降级、ATR(14) + 止损止盈 + 含滑点 R:R + 反推止盈、9 分共振六维逐项 + 扣分项、VETO 全部阈值边界（含 20cm ×2 放大与权限）、仓位与期望值公式、三道门禁 7 条规则、种子四步流、行情解析量级（fltt=2 不再缩放，含尺度无关的涨幅自洽断言）、clist 翻页（精确涨跌家数 + 板块成分不被前 100 名截断）、涨停池按交易日回退、**五源降级链（四家报价源单位对齐 / 凤凰开高收低异序 / 部分能力静默跳过 / 错误汇总只列真失败）**、菜单分组与时段建议、首次启动向导（落盘 / 输入校验 / 标记幂等）、`run_once` 端到端（BUY → 灰度仓 → 补确认仓 → 平仓 → 门禁拦截当日第二次评估）。
 
-当前：**310/310 通过**。
+当前：**335/335 通过**。
 
 自测在临时 `TEA_HOME` 沙箱中运行，不会碰你的真实数据与报告。
 
