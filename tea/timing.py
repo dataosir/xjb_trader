@@ -88,6 +88,8 @@ class Timing:
             return "种子扫描(14:30)"
         if self.in_session(t):
             return "盘中"
+        if cur < to_minutes(self.cfg.get("timing.session_pm_start")):
+            return "午间休市"        # 11:30–13:00 不是盘后，菜单每次都印这个词，别误导
         return "盘后"
 
     def describe(self, when: Optional[_dt.datetime] = None) -> str:

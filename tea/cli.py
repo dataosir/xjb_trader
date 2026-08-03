@@ -300,24 +300,75 @@ MENU = [
     ("20", "离线自测", ["selftest"]),
 ]
 
+# 展开视图按场景分组：20 条平铺时无从下手，分成 6 组后每组只有 2–4 条。
+# 编号沿用 MENU，不重排——文档、README、肌肉记忆都指着这些数字。
+MENU_GROUPS = [
+    ("道法 · 先看天气", ["1", "2"]),
+    ("准入 · 买之前", ["3", "4"]),
+    ("计划 · 次日", ["5", "6", "7"]),
+    ("持仓 · 买之后", ["10", "11", "12"]),
+    ("复盘 · 收盘后", ["9", "8", "16", "17", "18", "13", "14", "15"]),
+    ("工具", ["19", "20"]),
+]
 
-def print_menu(io: IO, cfg: Config) -> None:
+
+def suggest_keys(tm: Timing) -> list:
+    """挑出此刻真正该做的几项，最多四条。
+
+    同一时刻有意义的操作从来不超过四个：非交易日只能复盘和演练，买入窗口外
+    再怎么评估也会被门禁挡回来。默认视图只印这几条，其余的按 m 展开。
+    """
+    if not tm.is_trading_day():
+        return ["9", "5", "2", "1"]
+
+    keys = []
+    if tm.is_buy_window():
+        keys += ["3", "7"]                      # 唯一新开窗口，先看计划再评估
+    if tm.is_seed_window():
+        keys += ["5"]                            # 14:30 扫种子、写次日计划
+    if tm.is_plan_recheck_window() or tm.is_overnight_review_window():
+        keys += ["6", "7"]
+    if tm.is_after_close():
+        keys += ["9", "5"]
+    if not keys:
+        keys = ["1", "8"] if tm.in_session() else ["1", "7"]  # 盘中盯观察池，盘前看计划
+    keys += ["10", "2"]                          # 持仓和今日状态任何时候都想看
+
+    out = []
+    for k in keys:
+        if k not in out:
+            out.append(k)
+    return out[:4]
+
+
+def print_menu(io: IO, cfg: Config, full: bool = False) -> None:
     tm = Timing(cfg)
+    labels = {k: label for k, label, _ in MENU}
     io.say("")
     io.say("=" * 56)
     io.say(f"XJB_TRADE (TEA) {__version__}　{tm.describe()}")
     io.say("  计划你的交易，交易你的计划。宁可空仓，不强行凑票。")
     io.say("=" * 56)
-    for key, label, _ in MENU:
-        io.say(f"  {key:>2}. {label}")
-    io.say("   q. 退出")
+    if full:
+        for title, keys in MENU_GROUPS:
+            io.say(f"  ── {title} ──")
+            for k in keys:
+                io.say(f"  {k:>2}. {labels[k]}")
+        io.say("   c. 收起，只看此刻该做的")
+    else:
+        io.say(f"  此刻（{tm.phase()}）建议：")
+        for k in suggest_keys(tm):
+            io.say(f"  {k:>2}. {labels[k]}")
+        io.say("   m. 展开全部 20 项")
+    io.say("   q. 退出　│　1-20 任意编号都可直接输入")
 
 
 def menu_loop(cfg: Config) -> int:
     io = _io()
     table = {k: argv for k, _, argv in MENU}
+    full = False
     while True:
-        print_menu(io, cfg)
+        print_menu(io, cfg, full)
         try:
             choice = input("\n请选择> ").strip()
         except (EOFError, KeyboardInterrupt):
@@ -325,6 +376,14 @@ def menu_loop(cfg: Config) -> int:
             return 0
         if choice in ("q", "Q", "quit", "exit"):
             return 0
+        if choice in ("m", "M"):
+            full = True
+            continue
+        if choice in ("c", "C"):
+            full = False
+            continue
+        if not choice:
+            continue          # 直接回车是想再看一眼菜单，不是选错了
         argv = table.get(choice)
         if not argv:
             io.say("  无此选项")
