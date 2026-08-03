@@ -471,6 +471,7 @@ def check_host_failover(t: Suite, cfg: Config) -> None:
     good = pool[2]
 
     tr = _FlakyTransport(cfg, dead)
+    tr.f.retries = len(pool)                       # 本例专测「轮不同节点」，把次数放开
     # 单次请求：哪怕连撞两个坏节点，重试也应落到好节点上
     js = tr.get_json(url, {"pn": 1}, host_pool="cdn_hosts_quote")
     t.ok("绕开坏节点最终取到数据", js.get("ok") == 1, f"hits={tr.hits}")
@@ -486,15 +487,17 @@ def check_host_failover(t: Suite, cfg: Config) -> None:
     t.ok("坏节点已知时首选好节点", tr.hits[0] == good, f"first={tr.hits[:1]}")
     t.ok("该请求仍成功", js2.get("ok") == 1)
 
-    # 整池全坏：不能因为都在黑名单里就放弃，仍要把所有节点都试一遍
+    # 整池全坏：不能因为都在黑名单里就放弃，仍要逐次换不同节点试
     tr_all = _FlakyTransport(cfg, set(pool))
+    tr_all.f.retries = len(pool)
     tr_all.f._dead_hosts = set(pool)
     try:
         tr_all.get_json(url, {"pn": 1}, host_pool="cdn_hosts_quote")
         t.ok("全坏时抛错", False)
     except Exception:
         t.ok("全坏时抛错", True)
-    t.eq("全坏也把每个节点都试到", len(set(tr_all.hits)), len(pool))
+    t.eq("retries 够时每个节点都试到（逐次换节点而非反复撞同一个）",
+         len(set(tr_all.hits)), len(pool))
 
     # ---- 板块成分股：东财独家、无家可降，而种子扫描要扫 30 个板块×多页。
     # 东财整体不可用时每一环都死磕到顶，总耗时就从几十秒满到几分钟。
@@ -510,19 +513,124 @@ def check_host_failover(t: Suite, cfg: Config) -> None:
 
     fetcher._do_get = always_down  # type: ignore[assignment]
     mkt = Market(cfg, fetcher=fetcher)
-    floor = max(int(cfg.get("market.member_retries", 2)), len(pool))  # 节点池仍要试完
+    member_retries = max(1, int(cfg.get("market.member_retries", 2)))  # 节点池不再抬高它
     try:
         mkt.get_sector_members("BK0001")
         t.ok("成分股全失败时报错", False)
     except MarketError:
         t.ok("成分股全失败时报错", True)
-    t.eq("成分股重试单独削到 member_retries", len(tries), floor)
+    t.eq("成分股重试单独削到 member_retries", len(tries), member_retries)
     tries.clear()
     try:
         mkt.get_sector_ranking(force=True)
     except MarketError:
         pass
     t.eq("作用域用完即还原（其余取数点仍按全局重试）", len(tries), 8)
+
+    # ---- 重试次数不再被节点池大小抬高：retries=2 就只试 2 次，报错文案同步报 2。
+    # 真实踩坑：旧实现取 max(retries, len(hosts))，kline 池 4 个节点把一家源的死磕
+    # 拉到 4×8s，降级链要等半分钟才轮得到下家——广度该由链提供，不是节点池。
+    f_cap = Fetcher(cfg)
+    f_cap.delay_base = f_cap.delay_spread = f_cap.delay_after_error = 0.0
+    f_cap.show_progress = False
+    f_cap.retries = 2
+    cap_hits: List[str] = []
+
+    def cap_down(full_url, **kw):
+        cap_hits.append(full_url)
+        raise OSError("Remote end closed connection without response")
+
+    f_cap._do_get = cap_down  # type: ignore[assignment]
+    try:
+        f_cap.get_json(cfg.get("market.kline_url"), {"secid": "1.600519"},
+                       host_pool="cdn_hosts_kline")
+        t.ok("retries=2 全失败时报错", False)
+    except MarketError as exc:
+        t.ok("retries=2 全失败时报错", True)
+        t.ok("异常文案报真实尝试次数（非节点池大小）",
+             "请求失败(2次):" in str(exc), str(exc))
+    t.eq("retries=2 就只发 2 次请求（kline 池有 4 个节点）", len(cap_hits), 2)
+
+    # ---- 首选节点记忆：同 pool_key 高频请求应优先复用上次成功的节点（少走弯路）
+    tr_pref = _FlakyTransport(cfg, set())          # 全活：谁都能通
+    tr_pref.get_json(url, {"pn": 1}, host_pool="cdn_hosts_quote")
+    first_host = tr_pref.hits[-1]                   # 第 1 次成功落在哪个节点
+    tr_pref.hits.clear()
+    tr_pref.get_json(url, {"pn": 2}, host_pool="cdn_hosts_quote")
+    second_first = tr_pref.hits[0]
+    tr_pref.hits.clear()
+    tr_pref.get_json(url, {"pn": 3}, host_pool="cdn_hosts_quote")
+    third_first = tr_pref.hits[0]
+    t.eq("首选记忆 · 第2次首访=第1次成功节点", second_first, first_host)
+    t.eq("首选记忆 · 第3次首访=第1次成功节点", third_first, first_host)
+    t.eq("首选节点已落入 _preferred_host",
+         tr_pref.f._preferred_host.get("cdn_hosts_quote"), first_host)
+    # 首选节点突然敲不开：失败路径应把它从偏好里清掉，不再顽固复用
+    tr_pref.dead = {first_host}
+    tr_pref.hits.clear()
+    tr_pref.get_json(url, {"pn": 4}, host_pool="cdn_hosts_quote")
+    t.ok("首选节点死亡后清掉偏好（改记新的成功节点）",
+         tr_pref.f._preferred_host.get("cdn_hosts_quote") != first_host,
+         f"pref={tr_pref.f._preferred_host}")
+
+    # ---- requests 分支容错解码：生僻股名（GB2312 越界字节）不能整条 UnicodeDecodeError
+    class _FakeResp:
+        def __init__(self, content):
+            self.content = content
+            self.encoding = None
+
+        def raise_for_status(self):
+            pass
+
+        @property
+        def text(self):                            # 默认路径 strict：越界字节会崩
+            return self.content.decode(self.encoding or "utf-8", "strict")
+
+    class _FakeSession:
+        trust_env = False
+
+        def __init__(self, content):
+            self._content = content
+
+        def get(self, url_, headers=None, timeout=None, proxies=None):
+            return _FakeResp(self._content)
+
+    fdec = Fetcher(cfg)
+    bad_bytes = "㵘财".encode("utf-8") + b"\xff"    # GB2312 里没有的序列 + 越界字节
+    strict_crashed = False
+    try:
+        bad_bytes.decode("gb2312")                 # 默认 strict
+    except UnicodeDecodeError:
+        strict_crashed = True
+    t.ok("前提成立：越界字节在 strict 下确会崩", strict_crashed)
+    fdec._sess = _FakeSession(bad_bytes)
+    dec = fdec._do_get("http://qt.gtimg.cn/q=sh600519", encoding="gb2312")
+    t.ok("requests 分支容错解码不 crash 且保留 U+FFFD",
+         isinstance(dec, str) and "\ufffd" in dec, repr(dec))
+
+    # ---- 零请求的统计行是废话：stats_line 应返回空串让调用方跳过
+    fz = Fetcher(cfg)
+    t.eq("Fetcher 零请求统计行为空串", fz.stats_line(), "")
+    fz.stats["requests"] = 3
+    t.ok("有请求时统计行照常输出",
+         fz.stats_line() != "" and "网络请求" in fz.stats_line(), fz.stats_line())
+
+    # ---- 板块缓存 schema 版本化：结构不匹配（含旧格式无 __version__）删缓存重拉
+    from .data.market import SECTOR_CACHE_SCHEMA_VERSION
+    mkt_sc = Market(cfg)
+    sc_path = cfg.data_file("sector_cache_file")
+    utils.write_json(sc_path, {"ver": mkt_sc.SECTOR_CACHE_VER, "ts": 32503680000.0,
+                               "date": "2026-08-03", "sectors": [{"bk": "BK0001"}]})
+    t.ok("旧格式缓存（无 __version__）读取返回 None", mkt_sc._sector_disk_load() is None)
+    t.ok("schema 不匹配触发缓存文件删除", not os.path.exists(sc_path))
+    mkt_sc._sector_disk_save([{"bk": "BK0001", "name": "光伏", "chg": 1.0, "rank": 1}])
+    loaded = mkt_sc._sector_disk_load()
+    t.ok("v1 格式写入后正常读回 data",
+         bool(loaded) and loaded[0]["bk"] == "BK0001", str(loaded))
+    raw_sc = utils.read_json(sc_path)
+    t.eq("落盘顶层含 __version__", raw_sc.get("__version__"), SECTOR_CACHE_SCHEMA_VERSION)
+    t.ok("落盘 data 包裹原有缓存内容",
+         isinstance(raw_sc.get("data"), dict) and "sectors" in raw_sc["data"], str(raw_sc))
 
 
 # ============================================== 多数据源：五家的固定响应
@@ -947,6 +1055,63 @@ def check_providers(t: Suite, cfg: Config) -> None:
     t.eq("Market.get_klines 走降级链", mkt.get_klines("600519")[-1]["close"],
          1350.60, tol=1e-6)
     t.eq("两项都由腾讯接手", mkt.provider.last_source.get("quote"), "tencent")
+
+    # ---- _has_data 按 method 判有效性：半成品响应不能被当成命中
+    from .data.providers.base import ChainedProvider, IDataProvider, _has_data
+    t.ok("_has_data quote · 半成品无 price 判无数据",
+         not _has_data({"code": "600519"}, "quote"))
+    t.ok("_has_data quote · price>0 才算有数据",
+         _has_data({"code": "600519", "price": _MT_PRICE}, "quote")
+         and not _has_data({"code": "600519", "price": 0}, "quote"))
+    t.ok("_has_data klines · 首元素 close>0 才算有",
+         _has_data([{"close": 10.0}], "klines")
+         and not _has_data([{"close": 0}], "klines") and not _has_data([], "klines"))
+    t.ok("_has_data index · 需 point>0（指数的价位字段是 point）",
+         _has_data({"point": 3200.0}, "index_snapshot")
+         and not _has_data({"point": 0}, "index_snapshot"))
+
+    class _HalfQuote(IDataProvider):
+        name = "half"
+
+        def fetch_quote(self, code: str) -> dict:
+            return {"code": code}          # 半成品：非空 dict、无 error、却缺 price
+
+    class _GoodQuote(IDataProvider):
+        name = "good"
+
+        def fetch_quote(self, code: str) -> dict:
+            return {"code": code, "price": _MT_PRICE}
+
+    chain = ChainedProvider([_HalfQuote(cfg, None), _GoodQuote(cfg, None)], cfg=cfg)
+    got = chain.fetch_quote("600519")
+    t.eq("半成品响应触发继续降级到下家", chain.last_source.get("quote"), "good")
+    t.eq("降级后拿到有效价格", got.get("price"), _MT_PRICE)
+
+    # ---- 网易 JSONP 空对象：fetch_quote 应 raise MarketError（而非 AttributeError），
+    #      降级链应能捕获并 fallback 到下家
+    from .data.providers.netease import NeteaseProvider
+
+    class _EmptyNeteaseFetcher:
+        def get_text(self, url, *a, **k):
+            return "_ntes_quote_callback({});"     # 剥完外壳是空对象
+
+    ne_empty = NeteaseProvider(cfg, _EmptyNeteaseFetcher())
+    try:
+        ne_empty.fetch_quote("600519")
+        t.ok("网易空响应 raise MarketError", False)
+    except MarketError:
+        t.ok("网易空响应 raise MarketError", True)
+    except AttributeError:
+        t.ok("网易空响应 raise MarketError", False, "误抛 AttributeError")
+    chain = ChainedProvider([NeteaseProvider(cfg, _EmptyNeteaseFetcher()),
+                             _GoodQuote(cfg, None)], cfg=cfg)
+    got = chain.fetch_quote("600519")
+    t.eq("网易空响应后降级到下家", chain.last_source.get("quote"), "good")
+
+    # ---- 零请求零命中的源摘要为空串（不打“网络请求 0 次”废话行）
+    mock = _MockSources()                          # requests=0 / errors=0 / 无命中
+    chain = build_provider(cfg, mock, ALL)
+    t.eq("零请求零命中的源摘要为空串", chain.provider_stats_line(), "")
 
 
 def check_sentiment(t: Suite, cfg: Config, mk: FakeMarket) -> dict:

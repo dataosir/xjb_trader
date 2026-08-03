@@ -56,6 +56,8 @@ class Fetcher:
         self._last_retry_notice = 0.0
         self._proxy_idx = 0
         self._dead_hosts: set = set()  # 本次会话里连接刚敲不开的 CDN 节点，下次排到最后试
+        # pool_key → 上次成功的 host：同 URL 高频请求少走弯路（节点死亡时清掉偏好）
+        self._preferred_host: dict = {}
         self._sess = requests.Session() if requests else None
         # 东财是国内站。shell 里为翻墙配的 http_proxy/https_proxy 会被 requests 默认
         # 读走，把域名请求硬塞进代理——代理一连不上就 ProxyError 全崩。除非用户显式
@@ -109,6 +111,12 @@ class Fetcher:
             return [None]
         random.shuffle(pool)
         pool.sort(key=lambda h: h in self._dead_hosts)  # 活（False）在前，死（True）在后
+        # 上次成功的节点若仍活着，顶到最前：同 pool_key 的高频请求（涨跌家数二分
+        # ~9 次）少走弯路，不必每次重新撞运气。
+        pref = self._preferred_host.get(pool_key) if pool_key else None
+        if pref and pref in pool and pref not in self._dead_hosts:
+            pool.remove(pref)
+            pool.insert(0, pref)
         return pool
 
     def _throttle(self) -> None:
@@ -127,8 +135,10 @@ class Fetcher:
             del self.log[:-self.log_cap]
 
     def stats_line(self) -> str:
-        """一行网络开销摘要（给长流程收尾用）。"""
+        """一行网络开销摘要（给长流程收尾用）。零请求时返回空串，调用方判空跳过。"""
         s = self.stats
+        if not s.get("requests"):
+            return ""
         return (f"网络请求 {s['requests']} 次（失败 {s['errors']}，"
                 f"缓存命中 {s['cache_hits']}，累计 {s['total_sec']:.1f}s）")
 
@@ -183,9 +193,11 @@ class Fetcher:
         if self.offline:
             raise MarketError("离线模式已开启，禁止发起网络请求")
         hosts = self._host_order(host_pool)
-        # 至少把池子里每个节点都试一遍：老配置可能把 retries 钉在 3，而 kline 池有 4
-        # 个节点，只轮 3 次就可能永远轮不到唯一还活着的那个。取 max 保证单次请求覆盖全池。
-        attempts = max(self.retries, len(hosts))
+        # 单次请求就按 retries 死磕这么多次，不再为「把节点池轮完」而加码：节点池是
+        # 同一家源的几个 CDN 入口，整池试完的前提是这家源真有救；而降级链上还有四家
+        # 备源，广度由链来提供。硬凑 len(hosts) 只会把降级往后拖（kline 池 4 个节点
+        # ×8s 超时 = 白等半分钟）。逐次仍换不同节点，覆盖面在 retries 内尽量铺开。
+        attempts = max(1, self.retries)
         last_err: Optional[Exception] = None
         for attempt in range(attempts):
             host = hosts[attempt % len(hosts)]  # 逐次换不同节点，而不是反复随机
@@ -205,6 +217,8 @@ class Fetcher:
                 self._record(url, host, self._last_req - t0, True)
                 if host:
                     self._dead_hosts.discard(host)  # 这回通了，从黑名单里放出来
+                    if host_pool:
+                        self._preferred_host[host_pool] = host  # 记住这次成功的节点
                 return parse(raw)
             except Exception as exc:  # 网络/解析异常统一退避重试
                 last_err = exc
@@ -213,6 +227,8 @@ class Fetcher:
                 self._record(url, host, self._last_req - t0, False)
                 if host:
                     self._dead_hosts.add(host)  # 该节点敲不开，后续请求尽量绕开
+                    if host_pool and self._preferred_host.get(host_pool) == host:
+                        self._preferred_host.pop(host_pool, None)  # 首选节点死了，清掉偏好
                 time.sleep(self.delay_after_error * (self.backoff ** attempt))
         # 一次超时就是 8 秒卡死，不出声的话屏上就是凭空停一分钟。但逐次重试都报
         # 「网络抖动，正在重试」是无信息重复：紧接着上层降级链就会说清「谁挂了、改用谁」
@@ -239,8 +255,11 @@ class Fetcher:
             resp.raise_for_status()
             if encoding:
                 # 这几家不在响应头里报编码，requests 会猜成 ISO-8859-1，中文全成乱码，
-                # 名称对不上 ST/涨停判定就跟着错。
+                # 名称对不上 ST/涨停判定就跟着错；且默认 strict 解码遇到生僻股名越界的
+                # 字节会 UnicodeDecodeError 整条崩。保留 encoding 原意的同时拿 bytes 手动
+                # 以 replace 解码，与下面 urllib 回退路径行为一致（U+FFFD 至少留个线索）。
                 resp.encoding = encoding
+                return resp.content.decode(encoding, errors="replace")
             return resp.text
         req = urllib.request.Request(full_url, headers=headers)
         if proxy:
@@ -251,4 +270,4 @@ class Fetcher:
             handler = urllib.request.ProxyHandler({})  # 空字典＝显式禁用代理，别读环境变量
         opener = urllib.request.build_opener(handler) if handler is not None else urllib.request.build_opener()
         with opener.open(req, timeout=self.timeout) as r:
-            return r.read().decode(encoding or "utf-8", "ignore")
+            return r.read().decode(encoding or "utf-8", "replace")

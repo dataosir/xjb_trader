@@ -41,6 +41,10 @@ class NeteaseProvider(IDataProvider):
         nc = netease_code(prefix, c)
         raw = self.fetcher.get_text(self.cfg.get("market.netease_quote_url") + nc)
         d = _strip_jsonp(raw).get(nc) or {}
+        if not d:
+            # JSONP 外壳解出来是空对象（`_ntes_quote_callback({});`）：直接抛错，
+            # 让降级链能捕获并 fallback，而不是往下 d.get(...) 触发 AttributeError。
+            raise MarketError(f"网易 quote 空响应: {nc}")
         price = utils.to_float(d.get("price"))
         if not price:
             raise MarketError(f"网易行情无有效价格: {c}")

@@ -409,7 +409,7 @@ python3 -m tea config set market.data_sources '["eastmoney","tencent","sina"]'
 python3 -m tea config set market.data_sources '["eastmoney"]'
 ```
 
-单源时的用户反馈由抓取层兜底：某个域名的重试全部用尽时报一句 `⏳ push2.eastmoney.com 网络抖动（3 次尝试均失败），即将切换...`（重试过程中不再逐次刷屏，节流间隔见 `market.retry_notice_gap_sec`）。
+单源时的用户反馈由抓取层兜底：某个域名的重试全部用尽时报一句 `⏳ push2.eastmoney.com 网络抖动（2 次尝试均失败），即将切换...`（重试过程中不再逐次刷屏，节流间隔见 `market.retry_notice_gap_sec`）。
 
 ---
 

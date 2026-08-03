@@ -14,6 +14,9 @@ tea_config.*.json
 # 板块缓存
 .tea_sector_cache.json
 
+# review 过程的历史 diff 转储与消息草稿，不进版本库
+.tmp_review/
+
 # ---------------------------------------------------------------- Python
 __pycache__/
 *.py[cod]

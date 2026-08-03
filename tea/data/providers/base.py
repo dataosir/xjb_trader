@@ -134,10 +134,33 @@ class IDataProvider:
         raise NotImplementedError(f"{self.name} 不提供指数快照")
 
 
-def _has_data(res: Any) -> bool:
-    """结果是否算「拿到了数据」（空壳/带 error 的一律当没拿到，继续降级）。"""
+def _has_data(res: Any, method: str) -> bool:
+    """结果是否算「拿到了数据」，按 method 精细判断（否则继续降级）。
+
+    半成品响应（例如某家源走了异常分支只回 `{"code": "600519"}` 而缺 price）在旧的
+    「非空 dict 且无 error」判据下会被误认成命中、就地停止降级。这里按各方法真正
+    的关键字段验一遍，缺字段 / 零值一律当没拿到，让降级链接着问下一家。
+    注：指数快照的价位字段名为 point（见 index_double_route），不是 price。
+    """
     if res is None:
         return False
+    if method == "quote":
+        if not isinstance(res, dict) or res.get("error"):
+            return False
+        price = utils.to_float(res.get("price"))
+        return price is not None and price > 0
+    if method == "klines":
+        if not isinstance(res, (list, tuple)) or not res:
+            return False
+        first = res[0]
+        close = utils.to_float(first.get("close")) if isinstance(first, dict) else None
+        return close is not None and close > 0
+    if method == "index_snapshot":
+        if not isinstance(res, dict) or res.get("error"):
+            return False
+        point = utils.to_float(res.get("point"))
+        return point is not None and point > 0
+    # 其它方法退回通用判据（非空且不带 error）
     if isinstance(res, dict):
         return bool(res) and not res.get("error")
     if isinstance(res, (list, tuple)):
@@ -221,7 +244,7 @@ class ChainedProvider(IDataProvider):
                 errors.append(f"{p.name}: {type(exc).__name__}: {exc}")
                 self._notify_fallback(p, method, exc, self.providers[idx + 1:])
                 continue
-            if _has_data(res):
+            if _has_data(res, method):
                 p.stats["success"] += 1
                 self.stats["success"] += 1
                 self._mark(method, p.name)
@@ -262,16 +285,17 @@ class ChainedProvider(IDataProvider):
         """
         stats = getattr(self.fetcher, "stats", None)
         parts: List[str] = []
-        if isinstance(stats, dict) and stats.get("requests") is not None:
-            parts.append(f"网络请求 {int(stats.get('requests') or 0)} 次")
+        if isinstance(stats, dict) and stats.get("requests"):  # 0 也 falsy，不打废话行
+            parts.append(f"网络请求 {int(stats['requests'])} 次")
         # 按降级链的配置顺序列，看得出“主源扛了多少、备源接了多少”
         for p in self.providers:
             n = self.source_hit_count.get(p.name, 0)
             if n:
                 parts.append(f"{source_label(p.name)} {n}")
-        if isinstance(stats, dict) and stats.get("errors") is not None:
-            parts.append(f"失败 {int(stats.get('errors') or 0)}")
-        return "｜".join(parts) if parts else "本次未取数"
+        if isinstance(stats, dict) and stats.get("errors"):
+            parts.append(f"失败 {int(stats['errors'])}")
+        # 全零（没请求、没命中、没失败）时返回空串，调用方判空跳过这行装饰
+        return "｜".join(parts) if parts else ""
 
     # -------------------------------------------------- 代理
     def fetch_quote(self, code: str) -> dict:

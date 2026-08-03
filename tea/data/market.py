@@ -10,6 +10,7 @@
 """
 from __future__ import annotations
 
+import os
 import time
 from contextlib import nullcontext
 from typing import Any, ContextManager, List, Optional
@@ -22,6 +23,10 @@ from .fetcher import Fetcher
 from .indicators import compute_indicators, count_limit_ups
 from .providers import IDataProvider, build_provider
 from .providers.eastmoney import parse_quote as _parse_em_quote
+
+#: 板块磁盘缓存的文件 schema 版本。与 SECTOR_CACHE_VER（数据语义版）分开：
+#: 这个管落盘结构（外层 __version__ + data 包裹），不匹配时删缓存重拉。
+SECTOR_CACHE_SCHEMA_VERSION = 1
 
 
 class Market:
@@ -164,8 +169,19 @@ class Market:
 
     def _sector_disk_load(self) -> Optional[List[dict]]:
         path = self.cfg.data_file("sector_cache_file")
-        js = utils.read_json(path)
-        if not js or int(utils.to_float(js.get("ver"), 0) or 0) != self.SECTOR_CACHE_VER:
+        raw = utils.read_json(path)
+        if not raw:
+            return None
+        # schema 不匹配（含旧格式：无 __version__）→ 删缓存触发重拉。现有用户的
+        # 旧缓存会被认为版本不匹配→删除→重拉，是预期的一次性迁移代价。
+        if raw.get("__version__") != SECTOR_CACHE_SCHEMA_VERSION:
+            try:
+                os.remove(path)
+            except OSError:
+                pass
+            return None
+        js = raw.get("data") or {}
+        if int(utils.to_float(js.get("ver"), 0) or 0) != self.SECTOR_CACHE_VER:
             return None
         age_h = (time.time() - float(js.get("ts", 0))) / 3600.0
         if age_h > float(self.cfg.get("market.sector_disk_cache_hours", 24)):
@@ -173,9 +189,10 @@ class Market:
         return js.get("sectors") or None
 
     def _sector_disk_save(self, sectors: List[dict]) -> None:
+        payload = {"ver": self.SECTOR_CACHE_VER, "ts": time.time(),
+                   "date": utils.today_str(), "sectors": sectors}
         utils.write_json(self.cfg.data_file("sector_cache_file"),
-                         {"ver": self.SECTOR_CACHE_VER, "ts": time.time(),
-                          "date": utils.today_str(), "sectors": sectors})
+                         {"__version__": SECTOR_CACHE_SCHEMA_VERSION, "data": payload})
 
     def find_sector(self, name_or_bk: str) -> Optional[dict]:
         """按板块名（模糊）或 bk 代码查排名条目。"""

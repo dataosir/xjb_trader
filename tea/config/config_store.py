@@ -125,8 +125,8 @@ DEFAULTS: Dict[str, Any] = {
         # 防封
         "timeout": 8.0,
         # 同一家源死磕的次数。后面还有四家备源，在第一家身上耗 4 次×3s 只是把
-        # 降级往后拖 12 秒噪音，所以只重试 2 次就换下家。单次请求仍会把 CDN
-        # 节点池整池试完（见 fetcher._request 的 max(retries, len(hosts))）。
+        # 降级往后拖 12 秒噪音，所以只重试 2 次就换下家。节点池仅影响 host 选择顺序
+        # （配合 _preferred_host 记忆），尝试次数由 retries 严格控制。
         "retries": 2,
         "retry_backoff": 1.7,
         "delay_base": 0.35,
