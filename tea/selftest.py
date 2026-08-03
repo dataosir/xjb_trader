@@ -13,15 +13,14 @@ import os
 import tempfile
 from typing import Any, Dict, List, Optional
 
-from . import expectancy as exp_mod
-from . import config_store, gates, identity as ident_mod, portfolio, preflight
-from . import plan as plan_mod
-from . import screener as screener_mod
-from . import sentiment as sent_mod
-from . import utils, veto as veto_mod
-from .config_store import Config
+from .analysis import expectancy as exp_mod, identity as ident_mod, sentiment as sent_mod
+from .config import config_store
+from .config.config_store import Config
+from .core import utils
 from .data import Market, MarketError, indicators
 from .data.fetcher import Fetcher
+from .portfolio import plan as plan_mod, portfolio
+from .screening import gates, preflight, screener as screener_mod, veto as veto_mod
 
 TARGET = "600123"
 TARGET_NAME = "测试光伏"
@@ -1276,8 +1275,8 @@ def check_menu(t: Suite, cfg: Config) -> None:
     """
     import datetime as _dt
 
-    from . import cli
-    from .timing import Timing
+    from .runtime import cli
+    from .core.timing import Timing
 
     t.head("菜单 · 分组与时段建议")
 
@@ -1316,7 +1315,7 @@ def check_menu(t: Suite, cfg: Config) -> None:
 
 def check_end_to_end(t: Suite, cfg: Config, mk: FakeMarket, sent: dict) -> None:
     t.head("主流程 · run_once 端到端（§14 验收 1）")
-    from . import runner
+    from .runtime import runner
     from .phases import IO
 
     gates.reset_state(cfg)
@@ -1480,7 +1479,7 @@ def check_onboarding(t: Suite, home: str) -> None:
     向导只跑一次，跑错了没人会发现：标记没打上就每次启动都问一遍，
     标记打了但值没写进去就是默默沿用默认值。两边都得验。
     """
-    from . import onboarding
+    from .config import onboarding
     from .phases import IO
 
     t.head("首次启动 · 配置向导")

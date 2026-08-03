@@ -3,8 +3,9 @@ from __future__ import annotations
 
 from typing import Dict, List, Optional
 
-from . import portfolio, utils
-from .config_store import Config, load_config
+from tea.config.config_store import Config, load_config
+from tea.core import utils
+from . import portfolio
 
 RESULT_WIN = "win"
 RESULT_LOSS = "loss"

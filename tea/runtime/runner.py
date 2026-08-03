@@ -15,16 +15,16 @@ from __future__ import annotations
 import time
 from typing import Any, Dict, List, Optional
 
-from . import accumulator, followthrough as ft_mod, gates, portfolio
-from . import plan as plan_mod
-from . import report as report_mod
-from . import screener as screener_mod
-from . import seed_report, seed_trace, stats, trades as trades_mod, utils, watch_pool, weekly
-from .config_store import Config, load_config
-from .data import Market
-from .phases import IO, Session, phase1, phase2, phase3, phase4, results
-from .sentiment import format_weather, get_sentiment
-from .timing import Timing
+from tea.analysis import followthrough as ft_mod, stats
+from tea.analysis.sentiment import format_weather, get_sentiment
+from tea.config.config_store import Config, load_config
+from tea.core import utils
+from tea.core.timing import Timing
+from tea.data import Market
+from tea.phases import IO, Session, phase1, phase2, phase3, phase4, results
+from tea.portfolio import accumulator, plan as plan_mod, portfolio, trades as trades_mod, watch_pool
+from tea.reporting import report as report_mod, seed_trace, weekly
+from tea.screening import gates, screener as screener_mod, seed_report
 
 STAGE_SESSION_GATE = "session_gate"
 STAGE_PHASE1 = "phase1"

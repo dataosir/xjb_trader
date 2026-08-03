@@ -8,9 +8,9 @@ from __future__ import annotations
 import json
 from typing import Dict, List, Optional, Tuple
 
-from . import utils
-from .config_store import Config, load_config
-from .data import Market
+from tea.config.config_store import Config, load_config
+from tea.core import utils
+from tea.data import Market
 
 KEY_SEP = "|"
 

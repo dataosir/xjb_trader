@@ -11,10 +11,11 @@ from __future__ import annotations
 
 from typing import Optional
 
-from .. import expectancy as exp_mod
-from .. import followthrough as ft_mod
-from .. import gates, plan as plan_mod, portfolio, utils, watch_pool
-from ..report import DECISION_BUY, DECISION_CANCEL, DECISION_REJECT
+from tea.analysis import expectancy as exp_mod, followthrough as ft_mod
+from tea.core import utils
+from tea.portfolio import plan as plan_mod, portfolio, watch_pool
+from tea.reporting.report import DECISION_BUY, DECISION_CANCEL, DECISION_REJECT
+from tea.screening import gates
 from .session import Session
 
 

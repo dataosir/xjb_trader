@@ -7,8 +7,9 @@ from __future__ import annotations
 
 from typing import Dict, List, Optional
 
-from . import seed_trace, utils
-from .config_store import Config, load_config
+from tea.config.config_store import Config, load_config
+from tea.core import utils
+from tea.reporting import seed_trace
 
 KIND_SEED = "seed_scan"
 KIND_EVAL = "evaluation"

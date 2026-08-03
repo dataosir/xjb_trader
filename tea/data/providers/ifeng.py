@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from typing import List, Optional
 
-from ... import utils
+from tea.core import utils
 from ..errors import MarketError
 from .base import IDataProvider, resolve_symbol
 

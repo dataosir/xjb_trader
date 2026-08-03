@@ -11,7 +11,7 @@ import json
 import re
 from typing import List, Optional
 
-from ... import utils
+from tea.core import utils
 from ..errors import MarketError
 from .base import IDataProvider, index_double_route, resolve_symbol
 

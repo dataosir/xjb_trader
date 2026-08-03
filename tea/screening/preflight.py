@@ -7,10 +7,11 @@ from __future__ import annotations
 
 from typing import List, Optional
 
-from . import identity as ident_mod
-from . import utils, veto as veto_mod
-from .config_store import Config, load_config
-from .data import Market, intraday_position
+from tea.analysis import identity as ident_mod
+from tea.config.config_store import Config, load_config
+from tea.core import utils
+from tea.data import Market, intraday_position
+from . import veto as veto_mod
 
 STAGE_SPROUT = "萌芽"
 STAGE_BREAK = "突破"

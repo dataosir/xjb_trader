@@ -19,16 +19,19 @@ import json
 import sys
 from typing import List, Optional
 
-from . import __version__
-from . import accumulator, config_store, followthrough as ft_mod, gates, portfolio
-from . import onboarding
-from . import plan as plan_mod
-from . import preflight, runner, seed_trace, trades as trades_mod, utils, watch_pool
-from .config_store import Config, load_config
-from .data import Market
-from .phases import IO
-from .sentiment import clear_cache, format_weather
-from .timing import Timing
+from tea import __version__
+from tea.analysis import followthrough as ft_mod
+from tea.analysis.sentiment import clear_cache, format_weather
+from tea.config import config_store, onboarding
+from tea.config.config_store import Config, load_config
+from tea.core import utils
+from tea.core.timing import Timing
+from tea.data import Market
+from tea.phases import IO
+from tea.portfolio import accumulator, plan as plan_mod, portfolio, trades as trades_mod, watch_pool
+from tea.reporting import seed_trace
+from tea.screening import gates, preflight
+from . import runner
 
 PROG = "tea"
 
@@ -277,7 +280,7 @@ def cmd_setup(args, cfg: Config) -> int:
 
 
 def cmd_selftest(args, cfg: Config) -> int:
-    from . import selftest
+    from tea import selftest
     return selftest.main(verbose=not args.quiet, cfg=cfg)
 
 

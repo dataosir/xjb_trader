@@ -16,9 +16,10 @@ from __future__ import annotations
 import os
 from typing import Any, Dict, List, Optional
 
-from . import portfolio, utils
+from tea.core import utils
+from tea.phases import IO
+from tea.portfolio import portfolio
 from .config_store import ALL_DATA_SOURCES, DEFAULTS, Config, load_config
-from .phases import IO
 
 WIZARD_VERSION = 1
 

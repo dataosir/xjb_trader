@@ -14,8 +14,8 @@ import time
 from contextlib import nullcontext
 from typing import Any, ContextManager, List, Optional
 
-from .. import utils
-from ..config_store import Config, load_config
+from tea.config.config_store import Config, load_config
+from tea.core import utils
 from .cache import MemCache
 from .errors import MarketError
 from .fetcher import Fetcher

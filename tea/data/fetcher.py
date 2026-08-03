@@ -16,8 +16,8 @@ import urllib.request
 from contextlib import contextmanager
 from typing import Any, Callable, Iterator, Optional
 
-from .. import utils
-from ..config_store import Config
+from tea.config.config_store import Config
+from tea.core import utils
 from .errors import MarketError
 
 try:  # requests 可用则优先（连接复用），否则回退 urllib

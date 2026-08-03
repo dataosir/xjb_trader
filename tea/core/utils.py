@@ -156,6 +156,52 @@ def read_jsonl(path: str, io: Any = None) -> list:
     return out
 
 
+def cleanup_reports(cfg: Any = None) -> list:
+    """按 paths.keep_reports 保留最新 N 份报告，删掉更旧的。
+
+    只动 reports 目录下的 .md 文件（SEED_* / WEEKLY_* / TRADE_CHECK_* 等），不递归子
+    目录、不动非 .md；SEED_TRACE.md 是持续覆写的主日志，永不删。
+    keep_reports ≤ 0 视为“不清理”。返回已删文件名列表。
+
+    落在 core（Layer 0）而非 reporting，是为了让 screening/reporting 都能直接用；
+    load_config 延迟导入，避免 core → config → core 的环。
+    """
+    if cfg is None:
+        from tea.config.config_store import load_config
+        cfg = load_config()
+    keep = int(to_float(cfg.get("paths.keep_reports", 200), 0) or 0)
+    if keep <= 0:
+        return []
+    d = cfg.reports_dir()
+    protected = {str(cfg.get("paths.seed_trace_md", "SEED_TRACE.md"))}
+    try:
+        names = os.listdir(d)
+    except OSError:
+        return []
+    files = []
+    for name in names:
+        if not name.lower().endswith(".md") or name in protected:
+            continue
+        p = os.path.join(d, name)
+        if not os.path.isfile(p):
+            continue
+        try:
+            files.append((os.path.getmtime(p), name, p))
+        except OSError:
+            continue
+    if len(files) <= keep:
+        return []
+    files.sort(key=lambda x: (x[0], x[1]), reverse=True)
+    removed = []
+    for _, name, p in files[keep:]:
+        try:
+            os.remove(p)
+            removed.append(name)
+        except OSError:
+            continue
+    return removed
+
+
 # ---------------------------------------------------------------- 数值
 
 def to_float(v: Any, default: Optional[float] = None) -> Optional[float]:

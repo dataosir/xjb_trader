@@ -8,10 +8,11 @@ from __future__ import annotations
 import sys
 from typing import Any, Dict, List, Optional
 
-from . import preflight, utils
-from .config_store import Config, load_config
-from .identity import TIER_ZAMAO
-from .data import Market
+from tea.analysis.identity import TIER_ZAMAO
+from tea.config.config_store import Config, load_config
+from tea.core import utils
+from tea.data import Market
+from tea.screening import preflight
 
 TRACK_TREND = "趋势轨"
 TRACK_WATCH = "观察轨"

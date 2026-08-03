@@ -36,7 +36,7 @@ dependencies = []
 fast = ["requests>=2.25"]
 
 [project.scripts]
-tea = "tea.cli:main"
+tea = "tea.runtime.cli:main"
 
 [project.urls]
 Homepage = "https://github.com/dataosir/xjb_trader"
@@ -45,7 +45,19 @@ Issues = "https://github.com/dataosir/xjb_trader/issues"
 Changelog = "https://github.com/dataosir/xjb_trader/blob/main/CHANGELOG.md"
 
 [tool.setuptools]
-packages = ["tea", "tea.data", "tea.phases"]
+packages = [
+    "tea",
+    "tea.analysis",
+    "tea.config",
+    "tea.core",
+    "tea.data",
+    "tea.data.providers",
+    "tea.phases",
+    "tea.portfolio",
+    "tea.reporting",
+    "tea.runtime",
+    "tea.screening",
+]
 
 [tool.ruff]
 line-length = 110

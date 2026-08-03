@@ -8,9 +8,9 @@ from __future__ import annotations
 
 from typing import List, Optional
 
-from . import utils
-from .config_store import Config, load_config
-from .identity import TIER_LEADER
+from tea.analysis.identity import TIER_LEADER
+from tea.config.config_store import Config, load_config
+from tea.core import utils
 
 KIND_HARD = "hard"
 KIND_SOFT = "soft"

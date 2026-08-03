@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from typing import List, Optional
 
-from .. import utils
+from tea.core import utils
 
 
 def ma(klines: List[dict], n: int) -> Optional[float]:

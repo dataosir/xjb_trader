@@ -11,7 +11,7 @@ import copy
 import os
 from typing import Any, Dict, Optional
 
-from . import utils
+from tea.core import utils
 
 CONFIG_ENV = "TEA_CONFIG"
 HOME_ENV = "TEA_HOME"

@@ -7,10 +7,10 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Optional
 
-from .. import utils
-from ..config_store import Config, load_config
-from ..data import Market
-from ..timing import Timing
+from tea.config.config_store import Config, load_config
+from tea.core import utils
+from tea.core.timing import Timing
+from tea.data import Market
 from .prompt import IO
 
 

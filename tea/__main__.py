@@ -1,7 +1,7 @@
 """python -m tea 入口。"""
 import sys
 
-from .cli import main
+from .runtime.cli import main
 
 if __name__ == "__main__":
     sys.exit(main())

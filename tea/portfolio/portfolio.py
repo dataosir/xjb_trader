@@ -9,8 +9,8 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Optional
 
-from . import utils
-from .config_store import Config, load_config
+from tea.config.config_store import Config, load_config
+from tea.core import utils
 
 STAGE_GRAY = "gray"
 STAGE_FULL = "full"

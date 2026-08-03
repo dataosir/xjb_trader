@@ -8,9 +8,9 @@ from __future__ import annotations
 
 from typing import Any, Callable, Dict, List, Optional
 
-from . import trades as trades_mod
-from . import utils
-from .config_store import Config, load_config
+from tea.config.config_store import Config, load_config
+from tea.core import utils
+from tea.portfolio import trades as trades_mod
 
 RESULT_WIN = trades_mod.RESULT_WIN
 RESULT_LOSS = trades_mod.RESULT_LOSS
@@ -147,7 +147,7 @@ def attribution(cfg: Optional[Config] = None) -> Dict[str, Any]:
 
 def overall(cfg: Optional[Config] = None) -> Dict[str, Any]:
     """整体统计（含资金曲线、连续段、归因）。"""
-    from . import portfolio
+    from tea.portfolio import portfolio
     cfg = cfg or load_config()
     ts = trades_mod.effective_trades(cfg)
     ts = sorted(ts, key=lambda t: (t.get("closed_date") or "", t.get("closed_at") or ""))

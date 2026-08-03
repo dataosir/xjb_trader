@@ -7,11 +7,11 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Optional
 
-from . import plan as plan_mod
-from . import portfolio, trades as trades_mod, utils
-from .config_store import Config, load_config
-from .sentiment import CYCLE_CLIMAX, STANCE_EMPTY
-from .timing import Timing
+from tea.analysis.sentiment import CYCLE_CLIMAX, STANCE_EMPTY
+from tea.config.config_store import Config, load_config
+from tea.core import utils
+from tea.core.timing import Timing
+from tea.portfolio import plan as plan_mod, portfolio, trades as trades_mod
 
 
 # ------------------------------------------------------------------ 8.5 单日状态

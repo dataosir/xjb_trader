@@ -13,8 +13,8 @@ from __future__ import annotations
 from contextlib import contextmanager
 from typing import Any, Callable, Dict, Iterator, List, Optional, Tuple
 
-from ... import utils
-from ...config_store import Config
+from tea.config.config_store import Config
+from tea.core import utils
 from ..errors import MarketError
 from ..indicators import ma
 

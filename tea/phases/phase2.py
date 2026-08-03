@@ -5,7 +5,9 @@ R:R 不达标不在这一步终止 —— 让 Phase3/Phase4 把完整账算出�
 """
 from __future__ import annotations
 
-from .. import portfolio, preflight, utils
+from tea.core import utils
+from tea.portfolio import portfolio
+from tea.screening import preflight
 from .results import ABORT, OK
 from .session import Session
 

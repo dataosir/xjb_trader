@@ -6,8 +6,8 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Optional
 
-from . import utils
-from .config_store import Config, load_config
+from tea.config.config_store import Config, load_config
+from tea.core import utils
 
 STEP_SECTOR = "第1步-板块综合排序"
 STEP_WINDOW = "第2步-三档涨幅窗筛选"

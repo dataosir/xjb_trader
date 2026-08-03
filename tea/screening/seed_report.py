@@ -6,8 +6,9 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Optional
 
-from . import preflight, utils
-from .config_store import Config, load_config
+from tea.config.config_store import Config, load_config
+from tea.core import utils
+from . import preflight
 from .screener import VERDICT_EMPTY, VERDICT_PENDING, VERDICT_TRADEABLE
 
 VERDICT_LABEL = {
@@ -143,11 +144,10 @@ def write_report(result: dict, cfg: Optional[Config] = None) -> Optional[str]:
     cfg = cfg or load_config()
     if not cfg.get("report.write_seed_report", True):
         return None
-    from .report import _cleanup_reports
     prefix = cfg.get("report.seed_prefix", "SEED")
     path = cfg.report_file(f"{prefix}_{utils.stamp()}.md")
     out = utils.atomic_write(path, render_md(result, cfg))
-    _cleanup_reports(cfg)
+    utils.cleanup_reports(cfg)
     return out
 
 

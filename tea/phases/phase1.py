@@ -6,10 +6,11 @@ from __future__ import annotations
 
 from typing import Optional
 
-from .. import identity as ident_mod
-from .. import gates, plan as plan_mod, preflight, utils
-from .. import veto as veto_mod
-from ..data import intraday_position
+from tea.analysis import identity as ident_mod
+from tea.core import utils
+from tea.portfolio import plan as plan_mod
+from tea.screening import gates, preflight, veto as veto_mod
+from tea.data import intraday_position
 from .results import ABORT, OK, REJECT
 from .session import Session
 

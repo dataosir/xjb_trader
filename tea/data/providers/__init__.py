@@ -15,7 +15,7 @@ from __future__ import annotations
 
 from typing import Any, List, Optional
 
-from ...config_store import ALL_DATA_SOURCES, Config
+from tea.config.config_store import ALL_DATA_SOURCES, Config
 from .base import ChainedProvider, IDataProvider, index_double_route, resolve_symbol
 from .eastmoney import EastmoneyProvider, parse_quote
 from .ifeng import IFengProvider

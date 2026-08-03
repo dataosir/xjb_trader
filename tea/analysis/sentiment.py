@@ -9,9 +9,9 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Dict, List, Optional
 
-from . import utils
-from .config_store import Config, load_config
-from .data import Market
+from tea.config.config_store import Config, load_config
+from tea.core import utils
+from tea.data import Market
 
 CYCLE_ICE = "冰点"
 CYCLE_REPAIR = "修复"

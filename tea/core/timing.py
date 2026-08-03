@@ -4,8 +4,8 @@ from __future__ import annotations
 import datetime as _dt
 from typing import Optional, Tuple
 
+from tea.config.config_store import Config, load_config
 from . import utils
-from .config_store import Config, load_config
 
 
 def _hm(s: str) -> Tuple[int, int]:

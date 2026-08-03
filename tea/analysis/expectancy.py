@@ -7,8 +7,8 @@ from __future__ import annotations
 
 from typing import List, Optional
 
-from . import trades as trades_mod
-from .config_store import Config, load_config
+from tea.config.config_store import Config, load_config
+from tea.portfolio import trades as trades_mod
 
 
 def score_bucket(score: Optional[float], cfg: Optional[Config] = None) -> Optional[int]:

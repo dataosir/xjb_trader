@@ -12,12 +12,14 @@ import time
 from contextlib import contextmanager
 from typing import Any, Dict, Iterator, List, Optional, Tuple
 
-from . import followthrough, identity as ident_mod, preflight, seed_trace, utils
-from . import veto as veto_mod
-from . import watch_pool
-from .config_store import Config, load_config
-from .data import Market, count_limit_ups
-from .sentiment import get_sentiment
+from tea.analysis import followthrough, identity as ident_mod
+from tea.analysis.sentiment import get_sentiment
+from tea.config.config_store import Config, load_config
+from tea.core import utils
+from tea.data import Market, count_limit_ups
+from tea.portfolio import watch_pool
+from tea.reporting import seed_trace
+from . import preflight, veto as veto_mod
 
 TIER_STRICT = "严格档"
 TIER_RELAXED = "热点降级档"

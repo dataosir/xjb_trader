@@ -5,7 +5,7 @@
 """
 from __future__ import annotations
 
-from .. import preflight
+from tea.screening import preflight
 from .results import OK
 from .session import Session
 

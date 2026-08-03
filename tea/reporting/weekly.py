@@ -9,9 +9,10 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Optional
 
-from . import accumulator, followthrough, stats, trades as trades_mod, utils
-from . import watch_pool
-from .config_store import Config, load_config
+from tea.analysis import followthrough, stats
+from tea.config.config_store import Config, load_config
+from tea.core import utils
+from tea.portfolio import accumulator, trades as trades_mod, watch_pool
 
 
 def collect(days: int = 7, cfg: Optional[Config] = None) -> Dict[str, Any]:
@@ -236,12 +237,11 @@ def render_md(wk: Optional[dict] = None, cfg: Optional[Config] = None) -> str:
 def write_report(days: int = 7, cfg: Optional[Config] = None) -> str:
     """生成并落盘 WEEKLY_<stamp>.md。"""
     cfg = cfg or load_config()
-    from .report import _cleanup_reports
     wk = collect(days, cfg)
     prefix = cfg.get("report.weekly_prefix", "WEEKLY")
     path = cfg.report_file(f"{prefix}_{utils.stamp()}.md")
     out = utils.atomic_write(path, render_md(wk, cfg))
-    _cleanup_reports(cfg)
+    utils.cleanup_reports(cfg)
     return out
 
 
