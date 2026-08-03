@@ -91,6 +91,10 @@ DEFAULTS: Dict[str, Any] = {
         ],
         "proxy_pool": [],
         "proxy_rotate": True,
+        # 东财是国内站，不该走翻墙代理。默认忽略 shell 里的 http_proxy/https_proxy，
+        # 否则代理连不上会 ProxyError 全崩。真需要代理取数（如境外）再置 True，
+        # 或直接配 proxy_pool。
+        "use_env_proxy": False,
         # 缓存
         "quote_cache_sec": 20,
         "kline_cache_sec": 300,

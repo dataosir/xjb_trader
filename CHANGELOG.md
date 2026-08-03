@@ -23,6 +23,8 @@
 - 涨停家数改用接口自报的 `tc`：`pool` 被 `pagesize` 截断时 `len(pool)` 会偏小
 - **指数取数失败时屏上写着「上证在 MA20 下方」**，实际是不知道。拦住新开这个方向对一个纪律引擎是对的（保守），但话得说准：现在显示「未知」并注明原因
 - **「姿态=防守」的理由把三个候选原因一股脑印出来**，于是出现「情绪分 84」旁边写着「情绪分偏低」。现在只列真正触发的那几条并带上具体数值
+- **本机配了翻墙代理时东财请求全崩（`ProxyError`）**：东财是国内站，但 shell 里为 GitHub 等设的 `http_proxy` / `https_proxy` 会被 requests 默认读走，把域名请求硬塞进代理，代理一连不上就 `Unable to connect to proxy` 全线失败——屏上表现为指数 / 板块 / 涨跌比全是「数据缺口」。现在默认 `trust_env=False` 直连，忽略环境里的代理；境外等真需要代理取数的场景置 `market.use_env_proxy: true` 或直接配 `proxy_pool`
+- 取数失败时涨跌比括号里漏印成字面量 `涨 None / 跌 None`，现在渲染为 `涨 — / 跌 —`
 - 行情与 K 线接口从 `http://` 改为 `https://`（`clist` / `ztpool` 本来就是 https）
 - **东财 `fltt=2` 返回值被错误除以 100**：`fltt=2` 返回的已经是最终浮点数（放大 100 倍的整数是 `fltt=1`）。`_parse_quote` 与 `get_index` 还在除 100，导致上证 3832 点显示成 38.32 点；而 MA20 来自 K 线（真实点位），于是「上证在 MA20 下方 → 禁止新开」这条门禁**永久锁死**。个股侧同样受影响（价格 / 涨幅 / 量比 / 换手率全部小 100 倍）
 - 11:30–13:00 的时段名从「盘后」改为「午间休市」
@@ -39,7 +41,7 @@
 
 ### 配置
 
-- 移除 `sector_pages` / `sector_page_size` / `member_page_size` / `breadth_page_size`（它们描述的是接口不存在的能力）；新增 `sector_max_pages: 12` / `member_max_pages: 10` / `breadth_max_probes: 24` / `ztpool_fallback_days: 3`。参数总数仍为 362
+- 移除 `sector_pages` / `sector_page_size` / `member_page_size` / `breadth_page_size`（它们描述的是接口不存在的能力）；新增 `sector_max_pages: 12` / `member_max_pages: 10` / `breadth_max_probes: 24` / `ztpool_fallback_days: 3`；再新增 `use_env_proxy: false`（是否让请求走 shell 环境里的代理，国内站默认关）。参数总数 362 → **363**
 
 ## [1.0.0] - 2026-08-02
 
@@ -86,7 +88,7 @@
 - CLI：23 个子命令 + 20 项数字菜单，交易逻辑全部下沉，`cli.py` 不含策略
 - 一键启动：`run.sh`（macOS / Linux）与 `run.bat`（Windows，可双击），自动挑 3.8+ 解释器、把数据目录锁在仓库根、参数原样透传；CI 在三个平台各启动一次
 - 分层：行情数据层拆为 `tea/data/`（indicators → cache → fetcher → market，依赖单向无回边），四阶段流程拆为 `tea/phases/`（results / prompt / session / phase1~4）；两个子包的 `__init__.py` 只做再导出
-- 配置：362 个可调参数，JSON 深合并，缺项自动回落默认值，新增参数自动生效
+- 配置：363 个可调参数，JSON 深合并，缺项自动回落默认值，新增参 数自动生效
 - 行情：东方财富 push2 系列接口，随机 UA/Referer、请求延时、代理池、指数退避重试、板块成分多级缓存
 - 三路数据并行采集，单路失败降级不影响整体
 - 所有文件写入原子化（先写 `.tmp` 再 `rename`）

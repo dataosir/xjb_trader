@@ -305,7 +305,7 @@ def format_weather(s: dict) -> str:
         f"MA20 {utils.num(idx.get('ma20'))} → "
         f"{('上方' if s.get('ma20_above') else '下方') if s.get('ma20_known') else '未知'}",
         f"涨跌比 {('%.1f%%' % (s['advance_ratio'] * 100)) if s.get('advance_ratio') is not None else '—'}"
-        f"（涨 {(s.get('breadth') or {}).get('rising')} / 跌 {(s.get('breadth') or {}).get('falling')}）  "
+        f"（涨 {utils.num((s.get('breadth') or {}).get('rising'), 0)} / 跌 {utils.num((s.get('breadth') or {}).get('falling'), 0)}）  "
         f"最高连板 {utils.num(s.get('max_boards'), 0)}  涨停 {utils.num(s.get('limit_up_count'), 0)} 家",
         f"热点板块 {s.get('hot_n')} 个  前5板块均涨 {utils.pct(s.get('avg5'))}  "
         f"半仓乘数(情绪) {s.get('base_pos_mult')}",
