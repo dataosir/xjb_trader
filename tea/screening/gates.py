@@ -185,7 +185,8 @@ def check_code_gate(code: str, sent: Optional[dict] = None, cfg: Optional[Config
             r.block("计划绑定", f"今日无有效计划（状态 {plan.get('status')}，"
                                 f"执行日 {plan.get('execute_date')}）→ 禁止评估（核心纪律）")
         elif code not in plan_mod.planned_codes(plan):
-            r.block("计划绑定", f"{code} 不在今日计划内 {plan_mod.planned_codes(plan)} → 禁止评估")
+            r.block("计划绑定",
+                    f"{code} 不在今日计划内（{'、'.join(plan_mod.planned_labels(plan))}）→ 禁止评估")
         r.context["plan"] = plan
 
     if portfolio.has_position(code, cfg):
@@ -263,6 +264,7 @@ def status(sent: Optional[dict] = None, cfg: Optional[Config] = None) -> dict:
         "plan_status": plan.get("status"),
         "plan_valid_today": plan_mod.is_valid_today(plan, cfg),
         "plan_codes": plan_mod.planned_codes(plan),
+        "plan_labels": plan_mod.planned_labels(plan),
         "positions": len(portfolio.positions(cfg)),
         "capital": portfolio.get_capital(cfg),
         "available": portfolio.available_cash(cfg),
@@ -277,6 +279,6 @@ def format_status(s: dict) -> str:
         f"新开 {s['new_opens']}/{s['max_new']}  评估 {s['evaluations']}/{s['max_evaluations']}  "
         f"连亏 {s['consec_losses']}",
         f"计划 {s['plan_status']}（今日有效={'是' if s['plan_valid_today'] else '否'}）"
-        f" 标的 {s['plan_codes'] or '—'}",
+        f" 标的 {'、'.join(s.get('plan_labels') or []) or '—'}",
         f"持仓 {s['positions']} 笔  总资金 {utils.money(s['capital'])}  可用 {utils.money(s['available'])}",
     ])

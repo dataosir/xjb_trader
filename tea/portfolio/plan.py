@@ -107,6 +107,19 @@ def planned_codes(plan: dict, only_active: bool = True) -> List[str]:
     return [i.get("code") for i in items if i.get("code")]
 
 
+def planned_labels(plan: dict, only_active: bool = True) -> List[str]:
+    """给人看的「代码 名称」列表：光一串代码认不出是哪只票，缺名字时只回退到代码。"""
+    items = active_items(plan) if only_active else plan.get("items", [])
+    labels: List[str] = []
+    for i in items:
+        code = i.get("code")
+        if not code:
+            continue
+        name = i.get("name")
+        labels.append(f"{code} {name}" if name else code)
+    return labels
+
+
 def find_item(plan: dict, code: str) -> Optional[dict]:
     code = utils.norm_code(code)
     for i in plan.get("items", []):

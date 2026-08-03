@@ -184,7 +184,7 @@ def seed_plan(cfg: Optional[Config] = None, market: Optional[Market] = None,
         io.say("  宁缺毋滥：今日无可买标的，不写计划")
         cur = plan_mod.load_plan(cfg)
         if plan_mod.active_items(cur):
-            io.say(f"  ! 注意：仍存在未执行的旧计划（{plan_mod.planned_codes(cur)}），"
+            io.say(f"  ! 注意：仍存在未执行的旧计划（{'、'.join(plan_mod.planned_labels(cur))}），"
                    f"如已过期请执行 plan-clear")
 
     # ---------------------------------------------------------- 观察池闭环

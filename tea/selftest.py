@@ -1461,6 +1461,61 @@ def check_seed(t: Suite, cfg: Config, mk: FakeMarket, sent: dict) -> dict:
     return res
 
 
+def check_plan_labels(t: Suite, cfg: Config, mk: FakeMarket, sent: dict) -> None:
+    """给人看的计划提示必须带股票名。
+
+    实测告警只印了 `['002882']`，还要再去查一遍这是哪只票。代码是给机器对齐的，
+    planned_codes 的集合匹配语义不能改，所以另开 planned_labels；同时得盯住缺名字的
+    情形——印成 "002882 None" 比光印代码更难看。
+    """
+    t.head("计划 · 用户可见提示带股票名")
+    from .phases import IO
+    from .runtime import runner
+
+    plan_mod.save_plan({
+        "version": plan_mod.PLAN_VERSION, "planned_date": utils.today_str(),
+        "execute_date": utils.today_str(), "status": plan_mod.STATUS_PENDING,
+        "items": [{"code": "002882", "name": "中元股份", "status": plan_mod.STATUS_PENDING},
+                  {"code": "600312", "status": plan_mod.STATUS_PENDING}],
+        "notes": [],
+    }, cfg)
+    cur = plan_mod.load_plan(cfg)
+    labels = plan_mod.planned_labels(cur)
+    t.eq("有 name → 代码 + 名称", labels[0], "002882 中元股份")
+    t.eq("缺 name → 只回退到代码", labels[1], "600312")
+    t.ok("任何一项都不带 None", all("None" not in s for s in labels), f"labels={labels}")
+    t.eq("planned_codes 语义不变（纯代码，供集合匹配）",
+         plan_mod.planned_codes(cur), ["002882", "600312"])
+
+    # 机器字段与展示字段各走一路：JSON 里的 plan_codes 不能因为排版好看而变形
+    st = gates.status(sent, cfg)
+    t.eq("status.plan_codes 仍是纯代码", st.get("plan_codes"), ["002882", "600312"])
+    t.ok("今日状态行带股票名", "002882 中元股份" in gates.format_status(st),
+         gates.format_status(st).splitlines()[3])
+
+    # 门禁拦截文案：不在计划内时要说清“计划里到底是谁”
+    gates.reset_state(cfg)
+    g = gates.check_code_gate(TARGET, sent, cfg)
+    detail = "；".join(b["detail"] for b in g.blocks if b["rule"] == "计划绑定")
+    t.ok("计划绑定拦截文案含股票名", "002882 中元股份" in detail, detail or "未拦截")
+
+    # 种子扫描无可买时的旧计划提醒（seed_max_output=0 强走“宁缺毋滥”分支）
+    old_max = cfg.get("strategy.seed_max_output")
+    cfg.set("strategy.seed_max_output", 0)
+    io = IO(interactive=False, quiet=True)
+    try:
+        res = runner.seed_plan(cfg=cfg, market=mk, io=io, sent=sent, include_eve=False)
+    finally:
+        cfg.set("strategy.seed_max_output", old_max)
+    t.eq("无可买 → 不写计划", res.get("plan"), None)
+    warn = "\n".join(ln for ln in io.transcript if "仍存在未执行的旧计划" in ln)
+    t.ok("旧计划提醒含股票名", "002882 中元股份" in warn, warn or "未出现提醒")
+    t.ok("旧计划提醒不再是裸代码列表", "['002882']" not in warn, warn)
+
+    plan_mod.clear_plan(cfg)
+    gates.reset_state(cfg)
+
+
 def check_menu(t: Suite, cfg: Config) -> None:
     """菜单：默认只印四条建议，展开视图必须不多不少地盖住 20 项。
 
@@ -1937,6 +1992,7 @@ def main(verbose: bool = True, cfg: Optional[Config] = None) -> int:
         check_position(t, c)
         check_gates(t, c, mk, sent)
         check_seed(t, c, mk, sent)
+        check_plan_labels(t, c, mk, sent)
         check_menu(t, c)
         check_config_migration(t, tmp)
         check_onboarding(t, tmp)
