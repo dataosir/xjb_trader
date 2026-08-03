@@ -43,7 +43,13 @@ class Fetcher:
         self.proxy_rotate = bool(m.get("proxy_rotate", True))
         self.use_env_proxy = bool(m.get("use_env_proxy", False))
         self.offline = bool(m.get("offline", False))
+        self.show_progress = bool(m.get("show_progress", True))
+        # 重试提示的最小间隔（秒）：天气三路并发 / 种子扫描时会瞬间碍出多条，
+        # 按时间节流把爆发收敛成偶尔一声。
+        self.retry_notice_gap = float(m.get("retry_notice_gap_sec", 2.5))
+        self.log_cap = int(m.get("request_log_cap", 200))
         self._last_req = 0.0
+        self._last_retry_notice = 0.0
         self._proxy_idx = 0
         self._dead_hosts: set = set()  # 本次会话里连接刚敲不开的 CDN 节点，下次排到最后试
         self._sess = requests.Session() if requests else None
@@ -52,7 +58,9 @@ class Fetcher:
         # 开 use_env_proxy 或自己配了 proxy_pool，否则一律直连，不理会环境里的代理。
         if self._sess is not None and not self.use_env_proxy:
             self._sess.trust_env = False
-        self.stats = {"requests": 0, "errors": 0, "cache_hits": 0}
+        self.stats = {"requests": 0, "errors": 0, "cache_hits": 0, "total_sec": 0.0}
+        #: 每次请求的耗时与结果（只留最近 log_cap 条），给后续调优留数据。
+        self.log: list = []
 
     # -------------------------------------------------- 防封细节
     def _headers(self) -> dict:
@@ -99,6 +107,22 @@ class Fetcher:
         if wait > 0:
             time.sleep(wait)
 
+    # -------------------------------------------------- 耗时统计
+    def _record(self, url: str, host: Optional[str], elapsed: float, ok: bool) -> None:
+        """记下单次请求的耗时与结果（超过 log_cap 条丢最旧的）。"""
+        self.stats["total_sec"] = round(self.stats["total_sec"] + elapsed, 3)
+        # 存路径而不是末段：报价/K 线/列表三个接口末段都叫 get，分不出谁慢。
+        self.log.append({"path": urllib.parse.urlsplit(url).path or url, "host": host,
+                         "sec": round(elapsed, 3), "ok": ok})
+        if len(self.log) > self.log_cap:
+            del self.log[:-self.log_cap]
+
+    def stats_line(self) -> str:
+        """一行网络开销摘要（给长流程收尾用）。"""
+        s = self.stats
+        return (f"网络请求 {s['requests']} 次（失败 {s['errors']}，"
+                f"缓存命中 {s['cache_hits']}，累计 {s['total_sec']:.1f}s）")
+
     # -------------------------------------------------- 请求
     def get_json(self, url: str, params: dict, host_pool: Optional[str] = None) -> dict:
         if self.offline:
@@ -114,9 +138,11 @@ class Fetcher:
             full = target + ("&" if "?" in target else "?") + urllib.parse.urlencode(params)
             self._throttle()
             self.stats["requests"] += 1
+            t0 = time.time()
             try:
                 raw = self._do_get(full)
                 self._last_req = time.time()
+                self._record(url, host, self._last_req - t0, True)
                 if host:
                     self._dead_hosts.discard(host)  # 这回通了，从黑名单里放出来
                 return json.loads(raw) if raw else {}
@@ -124,8 +150,18 @@ class Fetcher:
                 last_err = exc
                 self.stats["errors"] += 1
                 self._last_req = time.time()
+                self._record(url, host, self._last_req - t0, False)
                 if host:
                     self._dead_hosts.add(host)  # 该节点敲不开，后续请求尽量绕开
+                # 一次超时就是 8 秒卡死，不出声的话屏上就是凭空停一分钟。但天气三路
+                # 并发 + 种子扫描时，逐次「(n/4)」会刷出一屏噪音。降级为一句笼统提示，
+                # 并按 retry_notice_gap 节流——并发/密集重试的爆发收敛成偶尔一声「还在跑」。
+                # 成功后自有 stats_line 总结就绪耗时，这里不必逐条报。
+                if self.show_progress and attempt + 1 < attempts:
+                    now = time.time()
+                    if now - self._last_retry_notice >= self.retry_notice_gap:
+                        self._last_retry_notice = now
+                        print("  ⏳ 网络抖动，正在重试...", flush=True)
                 time.sleep(self.delay_after_error * (self.backoff ** attempt))
         raise MarketError(f"请求失败({attempts}次): {url} -> {last_err}")
 

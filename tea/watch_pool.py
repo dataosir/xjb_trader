@@ -5,6 +5,7 @@
 """
 from __future__ import annotations
 
+import sys
 from typing import Any, Dict, List, Optional
 
 from . import preflight, utils
@@ -17,6 +18,10 @@ TRACK_WATCH = "观察轨"
 TRACK_PENDING = "启动待定轨"
 TRACK_SPROUT = "萌芽观察轨"
 TRACK_EVE = "前夕观察轨"
+
+# 已知轨道全集（与 config 默认 watch.tracks 一致）：入池/算保留天数前均校验，
+# 不在集内的值不静默兜底（旧行为会把拼错的轨道名当回踩轨处理）。
+KNOWN_TRACKS = (TRACK_TREND, TRACK_WATCH, TRACK_PENDING, TRACK_SPROUT, TRACK_EVE)
 
 STATUS_ACTIVE = "active"
 STATUS_READY = "ready"
@@ -31,6 +36,14 @@ def load_pool(cfg: Optional[Config] = None) -> dict:
     data = utils.read_json(pool_path(cfg), default=None) or {"items": [], "removed": []}
     data.setdefault("items", [])
     data.setdefault("removed", [])
+    # 历史数据里可能残留已下线/拼错的轨道名，跳过并告警，不让它们走到
+    # keep_days_for() 里抛异常把整个观察池流程炸掉。
+    bad = [i for i in data["items"] if i.get("track") not in KNOWN_TRACKS]
+    if bad:
+        data["items"] = [i for i in data["items"] if i.get("track") in KNOWN_TRACKS]
+        print(f"[watch_pool] 忽略 {len(bad)} 条未知轨道记录 in {pool_path(cfg)}"
+              f"（" + "、".join(f"{i.get('code')}:{i.get('track')}" for i in bad[:10])
+              + (" ..." if len(bad) > 10 else "") + "）", file=sys.stderr)
     return data
 
 
@@ -40,12 +53,15 @@ def save_pool(pool: dict, cfg: Optional[Config] = None) -> str:
 
 
 def keep_days_for(track: str, cfg: Optional[Config] = None) -> int:
+    """按轨道取保留天数。未知轨道直接 raise，不静默当回踩轨处理。"""
     cfg = cfg or load_config()
     if track == TRACK_TREND:
         return int(cfg.get("watch.trend_keep_days", 2))
     if track == TRACK_PENDING:
         return int(cfg.get("watch.confirm_keep_days", 3))
-    return int(cfg.get("watch.pullback_keep_days", 3))
+    if track in (TRACK_WATCH, TRACK_SPROUT, TRACK_EVE):
+        return int(cfg.get("watch.pullback_keep_days", 3))
+    raise ValueError(f"Unknown track type: {track!r}（已知轨道：{'、'.join(KNOWN_TRACKS)}）")
 
 
 # ------------------------------------------------------------------ 纳入
@@ -54,6 +70,8 @@ def add(ev: dict, track: str = TRACK_WATCH, source: str = "", triggers: Optional
         cfg: Optional[Config] = None, note: str = "") -> dict:
     """纳入观察池（同代码去重更新；超上限剔除最旧的低优先项）。"""
     cfg = cfg or load_config()
+    if track not in KNOWN_TRACKS:
+        raise ValueError(f"Unknown track type: {track!r}（已知轨道：{'、'.join(KNOWN_TRACKS)}）")
     pool = load_pool(cfg)
     snap = preflight.snapshot(ev)
     item = {

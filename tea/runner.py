@@ -12,6 +12,7 @@
 """
 from __future__ import annotations
 
+import time
 from typing import Any, Dict, List, Optional
 
 from . import accumulator, followthrough as ft_mod, gates, portfolio
@@ -36,11 +37,11 @@ STAGE_DONE = "done"
 # ==================================================================== 道
 
 def weather(cfg: Optional[Config] = None, market: Optional[Market] = None,
-            refresh: bool = False) -> dict:
+            refresh: bool = False, io: Optional[IO] = None) -> dict:
     """取市场天气（120s 缓存，refresh=True 强制重算）。"""
     cfg = cfg or load_config()
     mk = market or Market(cfg)
-    return get_sentiment(mk, cfg, force=refresh)
+    return get_sentiment(mk, cfg, force=refresh, io=io)
 
 
 # ==================================================================== 单标的准入
@@ -68,7 +69,7 @@ def run_once(capital: Optional[float] = None, code: Optional[str] = None,
     io.say(f"  总资金 {utils.money(s.capital)}　可用 {utils.money(s.available)}")
 
     # ---------------------------------------------------------- 2~3. 天气 + 会话门禁
-    s.sent = sent if sent is not None else weather(cfg, mk)
+    s.sent = sent if sent is not None else weather(cfg, mk, io=io)
     io.say(format_weather(s.sent))
 
     g = gates.check_session_start(s.sent, cfg, s.tm, force=force, require_window=require_window)
@@ -144,17 +145,22 @@ def seed_plan(cfg: Optional[Config] = None, market: Optional[Market] = None,
     mk = market or Market(cfg)
     sc = screener_mod.Screener(cfg, mk)
     tm = Timing(cfg)
+    t_start = time.time()
 
     io.say("=" * 56)
     io.say(f"XJB_TRADE · 种子扫描　{utils.now().strftime('%Y-%m-%d %H:%M')}　{tm.phase()}")
     io.say("=" * 56)
     if require_window and not tm.is_seed_window():
         io.say(f"  ! 当前不在种子扫描窗口（{cfg.get('timing.seed_scan')} 前后），结果仅供参考")
+    io.say("  ⏳ 开始种子扫描（网络取数较多，预计 1~2 分钟）...")
 
-    sent = sent if sent is not None else weather(cfg, mk)
+    sent = sent if sent is not None else weather(cfg, mk, io=io)
     io.say(format_weather(sent))
 
-    result = sc.seed_scan(sent=sent, include_eve=include_eve)
+    result = sc.seed_scan(sent=sent, include_eve=include_eve, io=io)
+    # 网络摘要只是一行装饰，不能因为注入的是个简易 fetcher 就把扫描结果带死。
+    net = mk.f.stats_line() if hasattr(mk.f, "stats_line") else ""
+    io.say(f"  ✓ 种子扫描完成 ({time.time() - t_start:.1f}s)" + (f"，{net}" if net else ""))
     io.say(seed_report.format_result(result, cfg))
 
     # ---------------------------------------------------------- 写计划
@@ -240,10 +246,12 @@ def plan_check(cfg: Optional[Config] = None, market: Optional[Market] = None,
     cfg = cfg or load_config()
     io = io or IO()
     mk = market or Market(cfg)
-    sent = sent if sent is not None else weather(cfg, mk)
+    sent = sent if sent is not None else weather(cfg, mk, io=io)
     io.say(format_weather(sent))
 
-    res = plan_mod.check_plan(mk, cfg, sent=sent, apply=apply)
+    io.say("  ⏳ 逐只复核计划内标的（参考价 / 共振分 / 身份 / VETO）...")
+    with utils.timed("计划复核", io, threshold=0.5):
+        res = plan_mod.check_plan(mk, cfg, sent=sent, apply=apply)
     io.say(plan_mod.format_check(res))
     plan = res.get("plan") or {}
     accumulator.record_plan("check", plan,
@@ -268,15 +276,19 @@ def close_review(cfg: Optional[Config] = None, market: Optional[Market] = None,
     io.say("=" * 56)
 
     # 1. 跟涨经验回填
-    upd = ft_mod.update_results(mk, cfg)
+    io.say("  ⏳ 回填跟涨样本 T+1 结果...")
+    with utils.timed("跟涨样本回填", io, threshold=0.5):
+        upd = ft_mod.update_results(mk, cfg)
     out["followthrough"] = upd
     io.say(f"===== 跟涨样本回填 =====\n  回填 {upd.get('updated')} 条，"
            f"待回填 {upd.get('pending')} 条，样本累计 {upd.get('total') or 0} 条")
     io.say(ft_mod.format_followthrough(cfg))
 
     # 2. 观察池复核
-    sent = sent if sent is not None else weather(cfg, mk)
-    rev = watch_pool.review(mk, cfg, sent=sent, apply=True)
+    sent = sent if sent is not None else weather(cfg, mk, io=io)
+    io.say("  ⏳ 逐只复核观察池...")
+    with utils.timed("观察池复核", io, threshold=0.5):
+        rev = watch_pool.review(mk, cfg, sent=sent, apply=True)
     out["watch_review"] = rev
     io.say(watch_pool.format_review(rev))
     if prune and cfg.get("watch.auto_prune_on_review", True):
@@ -304,7 +316,7 @@ def daily_status(cfg: Optional[Config] = None, io: Optional[IO] = None,
     cfg = cfg or load_config()
     io = io or IO()
     if with_weather and sent is None:
-        sent = weather(cfg, market)
+        sent = weather(cfg, market, io=io)
     if sent:
         io.say(format_weather(sent))
     st = gates.status(sent, cfg)

@@ -29,9 +29,11 @@ _CACHE: Dict[str, Any] = {"ts": 0.0, "data": None}
 
 # ------------------------------------------------------------------ 采集
 
-def fetch_raw(market: Market) -> dict:
+def fetch_raw(market: Market, io: Any = None) -> dict:
     """并行采集三路原始数据，单路失败不影响整体（降级为 None）。"""
     out: Dict[str, Any] = {"index": {}, "sectors": [], "breadth": {}, "limit_up": {}, "errors": []}
+    labels = {"index": "大盘指数", "sectors": "板块排名", "hard": "涨跌家数/涨停池"}
+    t0 = time.time()
 
     def _index():
         return market.get_index()
@@ -44,12 +46,15 @@ def fetch_raw(market: Market) -> dict:
 
     with ThreadPoolExecutor(max_workers=3) as ex:
         f_idx, f_sec, f_hard = ex.submit(_index), ex.submit(_sectors), ex.submit(_hard)
+        # 在主线程按固定顺序收结果再打印，避开三个线程抢着往屏上写。
         for name, fut in (("index", f_idx), ("sectors", f_sec), ("hard", f_hard)):
             try:
                 res = fut.result()
             except Exception as exc:
                 out["errors"].append(f"{name}: {exc}")
+                utils.tell(io, f"    · {labels[name]} 失败：{exc}")
                 continue
+            utils.tell(io, f"    · {labels[name]} 就绪 ({time.time() - t0:.1f}s)")
             if name == "index":
                 out["index"] = res or {}
             elif name == "sectors":
@@ -246,7 +251,7 @@ def classify(scored: dict, cfg: Config) -> dict:
 # ------------------------------------------------------------------ 门面
 
 def get_sentiment(market: Optional[Market] = None, cfg: Optional[Config] = None,
-                  force: bool = False) -> dict:
+                  force: bool = False, io: Any = None) -> dict:
     """市场天气总入口（带 120s 内存缓存）。"""
     cfg = cfg or load_config()
     ttl = float(cfg.get("sentiment.cache_sec", 120))
@@ -255,8 +260,10 @@ def get_sentiment(market: Optional[Market] = None, cfg: Optional[Config] = None,
         cached["cached"] = True
         return cached
 
+    utils.tell(io, "  ⏳ 正在采集市场天气（指数 / 板块 / 涨停）...")
+    t0 = time.time()
     mk = market or Market(cfg)
-    raw = fetch_raw(mk)
+    raw = fetch_raw(mk, io)
     scored = compute_score(raw, cfg)
     cls = classify(scored, cfg)
     sec = scored["sector_summary"]
@@ -289,6 +296,7 @@ def get_sentiment(market: Optional[Market] = None, cfg: Optional[Config] = None,
         "cached": False,
     }
     _CACHE["ts"], _CACHE["data"] = time.time(), out
+    utils.tell(io, f"  ✓ 市场天气采集完成 ({time.time() - t0:.1f}s)")
     return out
 
 
@@ -325,6 +333,13 @@ def format_weather(s: dict) -> str:
         lines.append(f"热点：{top}")
     for n in s.get("notes", []):
         lines.append(f"· {n}")
-    for e in s.get("errors", []):
-        lines.append(f"! 数据缺口 {e}")
+    # 数据缺口告警只在「本次真去取数且失败」时报：命中 120s 缓存的重复展示不
+    # 再刷告警（否则一次失败后每次进菜单都跳一遍）；同一批错误按内容去重只提一次。
+    if not s.get("cached"):
+        seen = set()
+        for e in s.get("errors", []):
+            if e in seen:
+                continue
+            seen.add(e)
+            lines.append(f"! 数据缺口 {e}")
     return "\n".join(lines)

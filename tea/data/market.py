@@ -275,24 +275,41 @@ class Market:
             self.f.stats["cache_hits"] += 1
             return hit
         secid = self.cfg.get("market.index_secid", "1.000001")
-        js = self.f.get_json(self.cfg.get("market.quote_url"), {
-            "secid": secid, "fields": "f43,f170", "invt": 2, "fltt": 2,
-            "ut": "fa5fd1943c7b386f172d6893dbfba10b",
-        }, host_pool="cdn_hosts_quote")
-        d = js.get("data") or {}
-        # 同 _parse_quote：fltt=2 已是最终值。除以 100 会把上证 3832 点算成 38 点，
-        # 而 MA20 来自 K 线（本来就是真实点位），于是 ma20_above 恒为 False，
-        # 「上证在 MA20 下方」这条门禁会永久锁死新开仓。
-        point = utils.to_float(d.get("f43"))
-        chg = utils.to_float(d.get("f170"))
-        # 点位走 quote 池（push2，有 push2delay 兜底），MA20 走 kline 池（push2his 那族，
-        # 常被单独封）。两条不是一根绳：K 线取不到时别把已到手的点位一起丢——保留点位，
-        # MA20 记未知（ma20_above=False 但 ma20=None，下游据此判「位置未知」不锁新开）。
+        # 点位/涨跌幅优先走 quote 池（push2，有 push2delay 兜底）。
+        point = chg = None
+        quote_err: Optional[Exception] = None
+        try:
+            js = self.f.get_json(self.cfg.get("market.quote_url"), {
+                "secid": secid, "fields": "f43,f170", "invt": 2, "fltt": 2,
+                "ut": "fa5fd1943c7b386f172d6893dbfba10b",
+            }, host_pool="cdn_hosts_quote")
+            d = js.get("data") or {}
+            # 同 _parse_quote：fltt=2 已是最终值。除以 100 会把上证 3832 点算成 38 点，
+            # 而 MA20 来自 K 线（本来就是真实点位），于是 ma20_above 恒为 False，
+            # 「上证在 MA20 下方」这条门禁会永久锁死新开仓。
+            point = utils.to_float(d.get("f43"))
+            chg = utils.to_float(d.get("f170"))
+        except MarketError as exc:
+            quote_err = exc
+        # MA20 走 kline 池（push2his 那族，常被单独封）。两条不是一根绳，且 K 线能兼
+        # 做点位/涨跌幅的备用源：quote 整条挂了时，用最后一根收盘当点位、与前收比出
+        # 涨跌幅——两路独立取源，「当日上证价」绝大多数情况都能显示出来。
+        ma20 = None
+        kl: List[dict] = []
         try:
             kl = self.get_klines("", limit=int(self.cfg.get("market.index_kline_limit", 25)), secid=secid)
             ma20 = ma(kl, 20)
         except MarketError:
-            ma20 = None
+            kl = []
+        if point is None or chg is None:
+            closes = [r.get("close") for r in kl if r.get("close") is not None]
+            if point is None and closes:
+                point = closes[-1]
+            if chg is None and len(closes) >= 2 and closes[-2]:
+                chg = round((closes[-1] / closes[-2] - 1) * 100, 2)
+        # 两路都拿不到点位才算真失败：抛错让上层记「数据缺口」并显示「上证 —」。
+        if point is None:
+            raise quote_err or MarketError("指数点位取数失败")
         out = {
             "point": point,
             "chg_pct": chg,

@@ -4,6 +4,7 @@ ctx 由 runner.run_once 组装，字段见 `EXPECTED_KEYS`。
 """
 from __future__ import annotations
 
+import os
 from typing import Any, Dict, List, Optional
 
 from . import preflight, utils
@@ -267,6 +268,47 @@ def render_md(ctx: dict, cfg: Optional[Config] = None) -> str:
     return "\n".join(lines)
 
 
+def _cleanup_reports(cfg: Optional[Config] = None) -> List[str]:
+    """按 paths.keep_reports 保留最新 N 份报告，删掉更旧的。
+
+    只动 reports 目录下的 .md 文件（SEED_* / WEEKLY_* / TRADE_CHECK_* 等），不递归子
+    目录、不动非 .md；SEED_TRACE.md 是持续覆写的主日志，永不删。
+    keep_reports ≤ 0 视为“不清理”。返回已删文件名列表。
+    """
+    cfg = cfg or load_config()
+    keep = int(utils.to_float(cfg.get("paths.keep_reports", 200), 0) or 0)
+    if keep <= 0:
+        return []
+    d = cfg.reports_dir()
+    protected = {str(cfg.get("paths.seed_trace_md", "SEED_TRACE.md"))}
+    try:
+        names = os.listdir(d)
+    except OSError:
+        return []
+    files = []
+    for name in names:
+        if not name.lower().endswith(".md") or name in protected:
+            continue
+        p = os.path.join(d, name)
+        if not os.path.isfile(p):
+            continue
+        try:
+            files.append((os.path.getmtime(p), name, p))
+        except OSError:
+            continue
+    if len(files) <= keep:
+        return []
+    files.sort(key=lambda x: (x[0], x[1]), reverse=True)
+    removed = []
+    for _, name, p in files[keep:]:
+        try:
+            os.remove(p)
+            removed.append(name)
+        except OSError:
+            continue
+    return removed
+
+
 def write_report(ctx: dict, cfg: Optional[Config] = None) -> Optional[str]:
     """落盘 TRADE_CHECK_<code>_<stamp>.md。"""
     cfg = cfg or load_config()
@@ -274,7 +316,9 @@ def write_report(ctx: dict, cfg: Optional[Config] = None) -> Optional[str]:
         return None
     prefix = cfg.get("report.trade_check_prefix", "TRADE_CHECK")
     name = f"{prefix}_{ctx.get('code') or 'NA'}_{ctx.get('decision') or 'NA'}_{utils.stamp()}.md"
-    return utils.atomic_write(cfg.report_file(name), render_md(ctx, cfg))
+    path = utils.atomic_write(cfg.report_file(name), render_md(ctx, cfg))
+    _cleanup_reports(cfg)
+    return path
 
 
 # ------------------------------------------------------------------ 控制台

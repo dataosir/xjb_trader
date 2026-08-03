@@ -143,9 +143,12 @@ def write_report(result: dict, cfg: Optional[Config] = None) -> Optional[str]:
     cfg = cfg or load_config()
     if not cfg.get("report.write_seed_report", True):
         return None
+    from .report import _cleanup_reports
     prefix = cfg.get("report.seed_prefix", "SEED")
     path = cfg.report_file(f"{prefix}_{utils.stamp()}.md")
-    return utils.atomic_write(path, render_md(result, cfg))
+    out = utils.atomic_write(path, render_md(result, cfg))
+    _cleanup_reports(cfg)
+    return out
 
 
 # ------------------------------------------------------------------ 控制台

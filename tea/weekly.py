@@ -236,10 +236,13 @@ def render_md(wk: Optional[dict] = None, cfg: Optional[Config] = None) -> str:
 def write_report(days: int = 7, cfg: Optional[Config] = None) -> str:
     """生成并落盘 WEEKLY_<stamp>.md。"""
     cfg = cfg or load_config()
+    from .report import _cleanup_reports
     wk = collect(days, cfg)
     prefix = cfg.get("report.weekly_prefix", "WEEKLY")
     path = cfg.report_file(f"{prefix}_{utils.stamp()}.md")
-    return utils.atomic_write(path, render_md(wk, cfg))
+    out = utils.atomic_write(path, render_md(wk, cfg))
+    _cleanup_reports(cfg)
+    return out
 
 
 # ------------------------------------------------------------------ 控制台

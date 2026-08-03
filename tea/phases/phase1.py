@@ -47,15 +47,21 @@ def run(s: Session, code: Optional[str] = None, ask_levels: bool = True) -> str:
     s.log(f"Phase1 代码门禁通过，已计入单日评估（{s.code}）")
 
     # -------------------------------------------------- 行情
+    io.say(f"  ⏳ 获取 {s.code} 行情...")
     try:
-        s.quote = s.mk.get_quote(s.code)
+        with utils.timed("行情获取", io, threshold=0.5):
+            s.quote = s.mk.get_quote(s.code)
     except Exception as exc:
         io.say(f"  行情拉取失败：{exc}")
         s.block(f"行情拉取失败：{exc}")
         return ABORT
     s.name = s.quote.get("name")
-    s.ind = s.mk.get_indicators(s.code, s.quote.get("price"))
-    s.sector = s.mk.sector_context(s.quote)
+    io.say("  ⏳ 计算技术指标（日 K / MA / ATR）...")
+    with utils.timed("技术指标", io, threshold=0.5):
+        s.ind = s.mk.get_indicators(s.code, s.quote.get("price"))
+    io.say("  ⏳ 解析板块上下文...")
+    with utils.timed("板块上下文", io, threshold=0.5):
+        s.sector = s.mk.sector_context(s.quote)
     s.identity = ident_mod.judge(s.quote, s.sector, s.ind, cfg)
     s.intraday = intraday_position(s.quote.get("price"), s.quote.get("high"), s.quote.get("low"))
     s.stage = preflight.classify_stage(s.quote, s.ind, s.identity, s.intraday, cfg)
