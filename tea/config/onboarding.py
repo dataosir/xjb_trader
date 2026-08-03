@@ -326,7 +326,8 @@ def _welcome(io: IO, cfg: Config, first_run: bool) -> None:
     if first_run:
         io.say("欢迎使用 XJB_TRADE (TEA)　—　首次启动配置")
         io.say("  这套系统的默认值按一套固定的资金与风险偏好调的，先花 1 分钟")
-        io.say("  改成你自己的。只问 9 项，其余几百个参数留默认，随时可改。")
+        io.say("  改成你自己的：资金、一组选股与风控阈值、板块权限、数据源；")
+        io.say("  其余几百个参数留默认，随时可改。")
     else:
         io.say("重新运行配置向导")
         io.say("  当前值会作为默认值出现，回车即保留。")

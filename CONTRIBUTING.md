@@ -36,12 +36,33 @@ python -m compileall -q tea
 
 ## 新增模块放哪里
 
-默认平铺在 `tea/` 下。现有两个子包各有明确职责，往里加东西前先对照：
+`tea/` 下是九个分层子包，依赖方向严格单向向下：
 
-- `tea/data/`：行情数据层，依赖方向**单向向下**（`indicators` → `cache` → `fetcher` → `market`）。`indicators` 里只能放纯函数（不联网、不读配置），`fetcher` 只管取回 JSON 不懂行情语义，领域字段的翻译全部在 `market`。制造回边的改动不要提。
-- `tea/phases/`：四阶段交互流程。阶段返回值用 `results.OK / REJECT / ABORT`，不要在阶段里重新定义或硬编码字面量；阶段代码一律通过 `prompt.IO` 要输入，不直接调 `input()` / `print()`，否则 runner 的无人值守模式和自测会卡住。
+```
+runtime → phases → reporting / screening / portfolio → analysis → data → core / config
+```
+
+每个子包的 `__init__.py` 首行都标了它所在的层（如 `"""Layer 2 · 选股：…"""`），往里加东西前先对照层号：下层不许 import 上层，横向的同层包（`screening` ↔ `portfolio`）也别互相缠。
+
+最常见的几类改动该落在哪：
+
+- **新增数据源** → `tea/data/providers/`：继承 `base.IDataProvider`，只覆盖这家真支持的能力（不支持的静默跳过），再挂进 `ChainedProvider` 的降级链。
+- **新增筛选门禁 / 一票否决规则** → `tea/screening/gates.py` / `tea/screening/veto.py`；共振评分与止损止盈在 `preflight.py`，种子四步流在 `screener.py`。
+- **新增分析指标**（情绪、身份、期望值、跟涨）→ `tea/analysis/`：只做判断与打分，不碰落盘状态。
+- **纯计算的行情指标**（MA / ATR / 分时位置）→ `tea/data/indicators.py`：必须是纯函数，不联网、不读配置。
+- **跨日状态**（资金持仓、次日计划、观察池、流水、当日累积）→ `tea/portfolio/`。
+- **新报告 / 新导出** → `tea/reporting/`：只做呈现，不放任何交易判断。
+- **新命令 / 新菜单项** → `tea/runtime/cli.py` 只做参数解析与展示，逻辑下沉到 `runner.py` 或对应子包。
+- **通用工具 / 时段判断 / 路径解析** → `tea/core/`（仅标准库）；**新参数默认值与向导问项** → `tea/config/`。
+
+两条包内约定容易踩：
+
+- `tea/data/` 内部依赖同样单向向下（`indicators` → `cache` → `fetcher` → `market`）。`fetcher` 只管取回 JSON、不懂行情语义，领域字段的翻译全部在 `market`。制造回边的改动不要提。
+- `tea/phases/` 的阶段之间不互相调用，只读写 `session.Session`；返回值一律用 `results.OK / REJECT / ABORT`，不要在阶段里重新定义或硬编码字面量；要输入必须通过 `prompt.IO`，不直接调 `input()` / `print()`，否则 runner 的无人值守模式和自测会卡住。
 
 新建**子包**时别忘了把包名加进 `pyproject.toml` 的 `[tool.setuptools] packages` 列表——那是一份显式清单，漏了不报错，只是构出的 wheel 里默默少了整个包。
+
+动完收尾三条：`python -m tea selftest` 全绿、`ruff check .` 无告警、`git status` 干净（`data/`、`reports/`、`__pycache__/` 下的运行产物不要跟着提交）。
 
 ## 加新参数的顺序
 

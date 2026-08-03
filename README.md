@@ -3,7 +3,7 @@
 [![CI](https://github.com/dataosir/xjb_trader/actions/workflows/ci.yml/badge.svg)](https://github.com/dataosir/xjb_trader/actions/workflows/ci.yml)
 [![Python](https://img.shields.io/badge/python-3.8%2B-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![自测](https://img.shields.io/badge/selftest-335%2F335-brightgreen.svg)](#十离线自测)
+[![自测](https://img.shields.io/badge/selftest-352%2F352-brightgreen.svg)](#十离线自测)
 
 > 计划你的交易，交易你的计划。宁可空仓，不强行凑票。
 
@@ -99,7 +99,7 @@ python3 -m tea selftest     # 离线自测，不联网，验证公式与规格�
 
 ### 初始配置
 
-**第一次进菜单会自动弹配置向导**，把因人而异的八项问一遍（总资金、单笔最大仓位、选股涨幅上下限、市值上下限、最低 R:R、共振分门槛、板块交易权限），其余参数留默认。每项都可直接回车取默认，也可选「1. 全部使用推荐默认值」一键开跑。完成后写 `meta.initialized`，不再重弹；想重新配置走菜单 `21` 或：
+**第一次进菜单会自动弹配置向导**，把因人而异的那几项问一遍（总资金，一组选股与风控阈值：单笔最大仓位、选股涨幅上下限、市值上下限、最低 R:R、共振分门槛，再加板块交易权限与数据源降级链），其余参数留默认。每项都可直接回车取默认，也可选「1. 全部使用推荐默认值」一键开跑。完成后写 `meta.initialized`，不再重弹；想重新配置走菜单 `21` 或：
 
 ```bash
 tea setup             # 重跑配置向导（当前值作为默认值）
@@ -419,51 +419,69 @@ python3 -m tea config set market.data_sources '["eastmoney"]'
 
 ```
 tea/
-├── cli.py            数字菜单 + 24 个子命令（不含任何交易逻辑）
-├── runner.py         主流程编排（Phase1→4 串联）
-├── config_store.py   410 参数 + 默认值 + 点号路径读写
-├── onboarding.py     首次启动配置向导（只读写配置，不含交易逻辑）
+├── __init__.py         包版本号 __version__，不放实现
+├── __main__.py         python -m tea 入口
+├── selftest.py         离线自测（每条规格独立复算再比对，不联网）
 │
-├── data/             行情数据层（依赖单向向下，无回边）
-│   ├── indicators.py   MA / ATR / 分时位置 / 涨停家数——纯函数，不联网
-│   ├── cache.py        进程内 TTL 缓存
-│   ├── fetcher.py      HTTP + 防封（只管取回 JSON/文本，不懂行情语义）
-│   ├── providers/      五家数据源的字段映射 + 降级链
-│   │   ├── base.py       IDataProvider（部分实现约定）+ ChainedProvider
+├── core/               Layer 0：无依赖公共工具
+│   ├── paths.py          $TEA_HOME > ~/.tea/ > CWD 三级路径解析
+│   ├── timing.py         交易窗口 / 阶段判定
+│   └── utils.py          原子写 / JSON / 交易日 / 数值格式化 / 进度计时
+│
+├── config/             Layer 0：配置层
+│   ├── config_store.py   410 参数 + 默认值 + 点号路径读写
+│   └── onboarding.py     首次启动向导（只读写配置，不含交易逻辑）
+│
+├── data/               Layer 1：行情数据层（依赖单向向下，无回边）
+│   ├── errors.py         MarketError（单独成模块，fetcher 与 market 都能引用）
+│   ├── indicators.py     MA / ATR / 分时位置 / 涨停家数——纯函数，不联网
+│   ├── cache.py          进程内 TTL 缓存
+│   ├── fetcher.py        HTTP + 防封（retries 硬上限 + host 池记忆）
+│   ├── providers/        五家数据源的字段映射 + 降级链
+│   │   ├── base.py         IDataProvider（部分实现约定）+ ChainedProvider
 │   │   └── eastmoney/tencent/sina/netease/ifeng.py
-│   └── market.py       行情门面（对外只有领域字段，看不见源的差异）
+│   └── market.py         行情门面（对外只有领域字段，看不见源的差异）
 │
-├── phases/           四阶段交互流程
-│   ├── results.py      四阶段共用的返回值哨兵 OK / REJECT / ABORT
-│   ├── prompt.py       交互抽象 IO（真人输入 / 预设答案 / 静默）
-│   ├── session.py      跨阶段状态容器 Session
-│   └── phase1~4.py     标的锁定 → 数学 → 评分 → 准入
+├── analysis/           Layer 1：数学与统计（纯计算）
+│   ├── sentiment.py      道：情绪分 / 周期 / 姿态 / 冰点降仓
+│   ├── identity.py       术：身份判定（龙头 / 跟风 / 杂毛）
+│   ├── expectancy.py     法：期望值
+│   ├── followthrough.py  T+1 跟涨经验
+│   └── stats.py          统计归因
 │
-├── sentiment.py      道：情绪分 / 周期 / 姿态 / 冰点降仓
-├── timing.py         交易窗口与阶段判定
-├── identity.py       术：身份判定（龙头 / 跟风 / 杂毛）
-├── preflight.py      术：9 分共振 + ATR 止损止盈 + R:R + 阶段
-├── veto.py           术：一票否决
-├── gates.py          法：三道门禁 + 单日状态
-├── plan.py           法：计划读写与复核（核心纪律）
-├── portfolio.py      法：仓位计算 + 持仓资金
-├── expectancy.py     法：期望值
-├── screener.py       扫描：种子四步流
-├── watch_pool.py     观察池闭环
-├── followthrough.py  T+1 跟涨经验
-├── trades.py         交易流水
-├── seed_trace.py     落选追溯
-├── seed_report.py    种子报告
-├── report.py         准入报告
-├── accumulator.py    当日累积（为什么没交易）
-├── stats.py          统计归因
-├── weekly.py         周复盘
-├── selftest.py       离线自测（245 项断言）
-└── utils.py          原子写 / JSON / 数值格式化
+├── screening/          Layer 2：筛选与门禁
+│   ├── preflight.py      术：9 分共振 + ATR 止损止盈 + R:R + 阶段
+│   ├── veto.py           术：一票否决
+│   ├── gates.py          法：三道门禁 + 单日状态
+│   ├── screener.py       扫描：种子四步流 + 跨板块去重
+│   └── seed_report.py    种子报告（候选明细透明化）
+│
+├── portfolio/          Layer 2：持仓与观察闭环
+│   ├── plan.py           法：计划读写与复核（核心纪律）
+│   ├── portfolio.py      法：仓位计算 + 持仓资金
+│   ├── trades.py         交易流水
+│   ├── accumulator.py    当日累积（为什么没交易）
+│   └── watch_pool.py     观察池闭环
+│
+├── reporting/          Layer 3：报告
+│   ├── report.py         准入报告
+│   ├── seed_trace.py     落选追溯
+│   └── weekly.py         周复盘
+│
+├── phases/             Layer 4：四阶段交互流程
+│   ├── results.py        四阶段共用的返回值哨兵 OK / REJECT / ABORT
+│   ├── prompt.py         交互抽象 IO（真人输入 / 预设答案 / 静默）
+│   ├── session.py        跨阶段状态容器 Session
+│   └── phase1~4.py       标的锁定 → 数学 → 评分 → 准入
+│
+└── runtime/            Layer 5：入口
+    ├── cli.py            数字菜单 + 24 个子命令（不含任何交易逻辑）
+    └── runner.py         主流程编排（Phase1→4 串联）
 ```
 
-两个子包的 `__init__.py` 只做再导出、不放实现。外部统一从包顶层引入（`from .data import Market`），
-内部再调文件划分时调用方不受影响。
+八个子包的 `__init__.py` 只做再导出、不放实现，模块 docstring 里写明本层职责与依赖方向。
+分层自 Layer 0 排到 Layer 5，只允许高层依赖低层，禁止反向依赖与跨层回边。外部统一从子包顶层引入
+（`from tea.data import Market`、`from tea.phases import IO`），内部再调文件划分时调用方不受影响。
 
 仓库根目录的工程文件：
 
@@ -490,7 +508,7 @@ python3 -m tea selftest
 
 覆盖范围：情绪分逐项复算 + 冰点降仓、身份 6 维 + 分数夹紧 + 杂毛强制降级、ATR(14) + 止损止盈 + 含滑点 R:R + 反推止盈、9 分共振六维逐项 + 扣分项、VETO 全部阈值边界（含 20cm ×2 放大与权限）、仓位与期望值公式、三道门禁 7 条规则、种子四步流、行情解析量级（fltt=2 不再缩放，含尺度无关的涨幅自洽断言）、clist 翻页（精确涨跌家数 + 板块成分不被前 100 名截断）、涨停池按交易日回退、**五源降级链（四家报价源单位对齐 / 凤凰开高收低异序 / 部分能力静默跳过 / 错误汇总只列真失败）**、菜单分组与时段建议、首次启动向导（落盘 / 输入校验 / 标记幂等）、`run_once` 端到端（BUY → 灰度仓 → 补确认仓 → 平仓 → 门禁拦截当日第二次评估）。
 
-当前：**335/335 通过**。
+当前：**352/352 通过**。
 
 自测在临时 `TEA_HOME` 沙箱中运行，不会碰你的真实数据与报告。
 
