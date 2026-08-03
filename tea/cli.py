@@ -9,6 +9,7 @@
   tea plan-check           09:35 计划复核
   tea review               盘后复核（跟涨回填 + 观察池）
   tea status / weather / pos / trades / stats / weekly
+  tea setup                配置向导（首次启动自动进入）
   tea selftest             离线自测（公式对齐验证，不联网）
 """
 from __future__ import annotations
@@ -20,6 +21,7 @@ from typing import List, Optional
 
 from . import __version__
 from . import accumulator, config_store, followthrough as ft_mod, gates, portfolio
+from . import onboarding
 from . import plan as plan_mod
 from . import preflight, runner, seed_trace, trades as trades_mod, utils, watch_pool
 from .config_store import Config, load_config
@@ -109,7 +111,7 @@ def cmd_weather(args, cfg: Config) -> int:
     io = _io()
     if args.refresh:
         clear_cache()
-    s = runner.weather(cfg, refresh=args.refresh)
+    s = runner.weather(cfg, refresh=args.refresh, io=io)
     io.say(format_weather(s))
     io.say(f"  {Timing(cfg).describe()}")
     return 0 if s.get("allow_new") else 1
@@ -118,9 +120,11 @@ def cmd_weather(args, cfg: Config) -> int:
 def cmd_eval(args, cfg: Config) -> int:
     """只算不买：单标的评估（不计入门禁、不写报告）。"""
     io = _io()
-    ev = preflight.evaluate(args.code, _market(cfg), cfg,
-                                   sl_pct=args.sl, tp_pct=args.tp,
-                                   has_news=args.news)
+    io.say(f"  ⏳ 正在评估 {utils.norm_code(args.code)}（行情 / 指标 / 板块）...")
+    with utils.timed("评估完成", io, threshold=0.5):
+        ev = preflight.evaluate(args.code, _market(cfg), cfg,
+                                sl_pct=args.sl, tp_pct=args.tp,
+                                has_news=args.news)
     io.say(preflight.format_evaluation(ev))
     return 0 if ev.get("verdict") == preflight.VERDICT_PASS else 1
 
@@ -131,7 +135,9 @@ def cmd_watch(args, cfg: Config) -> int:
         runner.close_review(cfg=cfg, io=io, prune=not args.no_prune)
         return 0
     if args.add:
-        ev = preflight.evaluate(args.add, _market(cfg), cfg)
+        io.say(f"  ⏳ 正在评估 {utils.norm_code(args.add)}...")
+        with utils.timed("评估完成", io, threshold=0.5):
+            ev = preflight.evaluate(args.add, _market(cfg), cfg)
         it = watch_pool.add(ev, track=args.track, source="manual",
                             triggers=ft_mod.trigger_conditions(ev, cfg), cfg=cfg)
         io.say(f"已纳入{it.get('track')}：{it.get('code')} {it.get('name')}"
@@ -210,7 +216,9 @@ def cmd_trace(args, cfg: Config) -> int:
 def cmd_followthrough(args, cfg: Config) -> int:
     io = _io()
     if args.update:
-        upd = ft_mod.update_results(_market(cfg), cfg)
+        io.say("  ⏳ 回填跟涨样本 T+1 结果...")
+        with utils.timed("跟涨样本回填", io, threshold=0.5):
+            upd = ft_mod.update_results(_market(cfg), cfg)
         io.say(f"回填 {upd.get('updated')} 条，待回填 {upd.get('pending')} 条")
     io.say(ft_mod.format_followthrough(cfg))
     return 0
@@ -261,6 +269,13 @@ def cmd_config(args, cfg: Config) -> int:
     return 0
 
 
+def cmd_setup(args, cfg: Config) -> int:
+    """配置向导：首次启动自动进入，之后可随时手动重跑。"""
+    res = onboarding.run_wizard(cfg=cfg, io=_io(), use_defaults=args.defaults,
+                                first_run=not cfg.get("meta.initialized", False))
+    return 0 if res.get("saved") else 1
+
+
 def cmd_selftest(args, cfg: Config) -> int:
     from . import selftest
     return selftest.main(verbose=not args.quiet, cfg=cfg)
@@ -276,6 +291,12 @@ def cmd_version(args, cfg: Config) -> int:
 
 
 # ==================================================================== 数字菜单
+
+
+def _normalize_choice(raw: str) -> str:
+    """全角数字→半角，兼容中文输入法。"""
+    return utils.normalize_digits(raw)
+
 
 MENU = [
     ("1", "市场天气（道）", ["weather"]),
@@ -298,9 +319,10 @@ MENU = [
     ("18", "跟涨经验", ["followthrough"]),
     ("19", "配置一览", ["config", "list"]),
     ("20", "离线自测", ["selftest"]),
+    ("21", "配置向导（重新配置）", ["setup"]),
 ]
 
-# 展开视图按场景分组：20 条平铺时无从下手，分成 6 组后每组只有 2–4 条。
+# 展开视图按场景分组：全部平铺时无从下手，分成 6 组后每组只有 2–4 条。
 # 编号沿用 MENU，不重排——文档、README、肌肉记忆都指着这些数字。
 MENU_GROUPS = [
     ("道法 · 先看天气", ["1", "2"]),
@@ -308,7 +330,7 @@ MENU_GROUPS = [
     ("计划 · 次日", ["5", "6", "7"]),
     ("持仓 · 买之后", ["10", "11", "12"]),
     ("复盘 · 收盘后", ["9", "8", "16", "17", "18", "13", "14", "15"]),
-    ("工具", ["19", "20"]),
+    ("工具", ["19", "21", "20"]),
 ]
 
 
@@ -359,18 +381,19 @@ def print_menu(io: IO, cfg: Config, full: bool = False) -> None:
         io.say(f"  此刻（{tm.phase()}）建议：")
         for k in suggest_keys(tm):
             io.say(f"  {k:>2}. {labels[k]}")
-        io.say("   m. 展开全部 20 项")
-    io.say("   q. 退出　│　1-20 任意编号都可直接输入")
+        io.say(f"   m. 展开全部 {len(MENU)} 项（或直接输入 1-{len(MENU)}）")
+    io.say(f"   q. 退出 │ 1-{len(MENU)} 任意编号 │ 回车刷新菜单")
 
 
 def menu_loop(cfg: Config) -> int:
     io = _io()
+    onboarding.maybe_run(cfg, io)      # 首次启动先把必要配置问一遍
     table = {k: argv for k, _, argv in MENU}
     full = False
     while True:
         print_menu(io, cfg, full)
         try:
-            choice = input("\n请选择> ").strip()
+            choice = _normalize_choice(input("\n请选择> ").strip())
         except (EOFError, KeyboardInterrupt):
             io.say("")
             return 0
@@ -384,6 +407,9 @@ def menu_loop(cfg: Config) -> int:
             continue
         if not choice:
             continue          # 直接回车是想再看一眼菜单，不是选错了
+        # 前导零标准化："01"→"1"，"010"→"10"
+        if choice.isdigit() and len(choice) > 1 and choice[0] == '0':
+            choice = str(int(choice))
         argv = table.get(choice)
         if not argv:
             io.say("  无此选项")
@@ -393,15 +419,21 @@ def menu_loop(cfg: Config) -> int:
                 code = input("股票代码> ").strip()
                 if code:
                     main(["eval", code])
+                else:
+                    io.say("  已取消：未输入股票代码")
             elif argv[0] == "__confirm__":
                 code = input("股票代码> ").strip()
                 if code:
                     main(["add-confirm", code])
+                else:
+                    io.say("  已取消：未输入股票代码")
             elif argv[0] == "__close__":
                 code = input("股票代码> ").strip()
                 price = input("平仓价> ").strip()
                 if code and price:
                     main(["close", code, price])
+                else:
+                    io.say("  已取消：平仓需同时输入股票代码与平仓价")
             else:
                 main(argv)
         except KeyboardInterrupt:
@@ -463,7 +495,8 @@ def build_parser() -> argparse.ArgumentParser:
     wp = sub.add_parser("watch", help="观察池：查看 / 复核 / 纳入 / 剔除")
     wp.add_argument("--review", action="store_true", help="执行盘后复核")
     wp.add_argument("--add", metavar="CODE", help="手动纳入观察池")
-    wp.add_argument("--track", default=watch_pool.TRACK_WATCH, help="轨道名（默认观察轨）")
+    wp.add_argument("--track", default=watch_pool.TRACK_WATCH, choices=list(watch_pool.KNOWN_TRACKS),
+                    help="轨道名（默认观察轨）")
     wp.add_argument("--rm", metavar="CODE", help="剔除")
     wp.add_argument("--no-prune", action="store_true")
     wp.set_defaults(func=cmd_watch)
@@ -527,6 +560,10 @@ def build_parser() -> argparse.ArgumentParser:
     sf = sub.add_parser("selftest", help="离线自测（公式对齐验证，不联网）")
     sf.add_argument("--quiet", action="store_true")
     sf.set_defaults(func=cmd_selftest)
+
+    sw = sub.add_parser("setup", help="配置向导（首次启动自动进入，之后可随时重跑）")
+    sw.add_argument("--defaults", action="store_true", help="不提问，直接采用推荐默认值")
+    sw.set_defaults(func=cmd_setup)
 
     mn = sub.add_parser("menu", help="进入数字菜单")
     mn.set_defaults(func=None)

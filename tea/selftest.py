@@ -439,6 +439,7 @@ class _FlakyTransport:
     def __init__(self, cfg: Config, dead: set):
         self.f = Fetcher(cfg)
         self.f.delay_base = self.f.delay_spread = self.f.delay_after_error = 0.0  # 自测不等
+        self.f.show_progress = False  # 自测故意造重试，不往报告里添提示行
         self.dead = dead
         self.hits: list = []
 
@@ -914,6 +915,89 @@ def check_end_to_end(t: Suite, cfg: Config, mk: FakeMarket, sent: dict) -> None:
     t.eq("持仓已清空", len(portfolio.positions(cfg)), 0)
 
 
+def check_onboarding(t: Suite, home: str) -> None:
+    """首次启动向导：能落盘、能校验、且第二次不再默默弹出。
+
+    向导只跑一次，跑错了没人会发现：标记没打上就每次启动都问一遍，
+    标记打了但值没写进去就是默默沿用默认值。两边都得验。
+    """
+    from . import onboarding
+    from .phases import IO
+
+    t.head("首次启动 · 配置向导")
+
+    # 独立的配置文件 + 独立数据目录，不碰其余检查的沙盒状态
+    cfg_path = os.path.join(home, "wizard_config.json")
+    cfg = Config({"paths": {"data_dir": "wizard_data"}}, path=cfg_path)
+    t.ok("配置文件不存在时判为首次运行", onboarding.is_first_run(cfg))
+    cfg.save()
+    t.ok("无 initialized 标记仍判为首次运行", onboarding.is_first_run(cfg))
+
+    t.eq("全角数字归一", utils.normalize_digits("５．８"), "5.8")
+
+    # 逐项自定义：全角输入 / 非法值 / 回车取默认三种情形混在一起
+    io = IO(answers={
+        "wizard_mode": "2",
+        "capital": "200000",
+        "max_position_pct": "0.4",
+        "strict_min_chg": "２．５",      # 全角
+        "strict_max_chg": "6.5",
+        "cap_min": "40",
+        "cap_max": "400",
+        "min_odds": "2.5",
+        "pass_threshold": "7",
+        "perm_main": True, "perm_gem": True, "perm_star": False, "perm_bse": False,
+        "wizard_confirm": "y",
+    }, interactive=False, quiet=True)
+    res = onboarding.run_wizard(cfg=cfg, io=io, first_run=True)
+    t.eq("向导完成并落盘", (res.get("mode"), res.get("saved")), ("custom", True))
+
+    saved = utils.read_json(cfg_path, default={}) or {}
+    t.eq("单笔最大仓位已写入", saved.get("strategy", {}).get("max_position_pct"), 0.4)
+    t.eq("涨幅下限（全角输入）已写入", saved.get("seed", {}).get("strict_min_chg"), 2.5)
+    t.eq("涨幅上限已写入", saved.get("seed", {}).get("strict_max_chg"), 6.5)
+    t.eq("市值区间已写入",
+         (saved.get("seed", {}).get("cap_min"), saved.get("seed", {}).get("cap_max")),
+         (40.0, 400.0))
+    t.eq("R:R 门槛已写入", saved.get("strategy", {}).get("min_odds"), 2.5)
+    t.eq("共振分门槛取整写入", saved.get("strategy", {}).get("pass_threshold"), 7)
+    t.eq("未开通的板块已关闭",
+         (saved.get("permissions", {}).get("star"), saved.get("permissions", {}).get("bse")),
+         (False, False))
+    t.eq("总资金已记入资金状态", portfolio.get_capital(cfg), 200000.0)
+
+    # 标记与幂等：同一份配置重新读起来也不能再弹向导
+    t.ok("已打 initialized 标记", saved.get("meta", {}).get("initialized") is True)
+    t.ok("标记了向导版本",
+         saved.get("meta", {}).get("wizard_version") == onboarding.WIZARD_VERSION)
+    reread = Config(utils.read_json(cfg_path, default={}) or {}, path=cfg_path)
+    t.ok("第二次启动不再判为首次", not onboarding.is_first_run(reread))
+    t.ok("第二次启动不再跑向导",
+         onboarding.maybe_run(reread, IO(interactive=False, quiet=True)) is False)
+
+    # 一键默认通道：写入值必须与 DEFAULTS 一致（向后兼容）
+    cfg2 = Config({"paths": {"data_dir": "wizard_data2"}},
+                  path=os.path.join(home, "wizard_config2.json"))
+    res2 = onboarding.run_wizard(cfg=cfg2, io=IO(interactive=False, quiet=True),
+                                 use_defaults=True)
+    d = config_store.DEFAULTS
+    t.ok("一键默认已落盘", res2.get("saved") is True)
+    t.eq("默认通道不改变涨幅区间",
+         (cfg2.get("seed.strict_min_chg"), cfg2.get("seed.strict_max_chg")),
+         (d["seed"]["strict_min_chg"], d["seed"]["strict_max_chg"]))
+    t.eq("默认通道不改变仓位上限",
+         cfg2.get("strategy.max_position_pct"), d["strategy"]["max_position_pct"])
+    t.ok("默认通道也打标记", not onboarding.is_first_run(cfg2))
+
+    # 跳过：不改任何值，但不再默默重弹
+    cfg3 = Config({"paths": {"data_dir": "wizard_data3"}},
+                  path=os.path.join(home, "wizard_config3.json"))
+    res3 = onboarding.run_wizard(cfg=cfg3, io=IO(answers={"wizard_mode": "s"},
+                                                interactive=False, quiet=True))
+    t.eq("跳过不写入参数", (res3.get("mode"), res3.get("saved")), ("skip", False))
+    t.ok("跳过仍打标记（不再纠缠）", not onboarding.is_first_run(cfg3))
+
+
 # ==================================================================== 入口
 
 def main(verbose: bool = True, cfg: Optional[Config] = None) -> int:
@@ -952,6 +1036,7 @@ def main(verbose: bool = True, cfg: Optional[Config] = None) -> int:
         check_gates(t, c, mk, sent)
         check_seed(t, c, mk, sent)
         check_menu(t, c)
+        check_onboarding(t, tmp)
         check_end_to_end(t, c, mk, sent)
         return t.report()
     finally:
