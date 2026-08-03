@@ -506,6 +506,20 @@ class Config:
     def __init__(self, data: Optional[dict] = None, path: Optional[str] = None):
         self.path = path or config_path()
         self.data = _deep_merge(DEFAULTS, data or {})
+        self._merge_cdn_pools()
+
+    def _merge_cdn_pools(self) -> None:
+        """把 DEFAULTS 里的 CDN 节点并进用户配置（默认在前，用户额外节点接后）。
+
+        save() 落盘的是全量配置，老配置会把当时的节点列表钉死，新增的官方镜像
+        节点就进不来。节点池是纯兜底选项，只多不少，因此始终 union 保证池子的改进
+        能覆盖到已有配置的用户。用户自定义的额外节点不会丢。
+        """
+        mk = self.data.setdefault("market", {})
+        for pool in ("cdn_hosts_quote", "cdn_hosts_kline"):
+            base = list((DEFAULTS.get("market") or {}).get(pool) or [])
+            cur = list(mk.get(pool) or [])
+            mk[pool] = base + [h for h in cur if h not in base]
 
     # -------------------------------------------------- 读写
     def get(self, dotted: str, default: Any = None) -> Any:

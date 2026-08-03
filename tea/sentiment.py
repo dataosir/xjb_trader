@@ -167,8 +167,10 @@ def classify(scored: dict, cfg: Config) -> dict:
     ichg = idx.get("chg_pct")
     notes: List[str] = []
 
-    # 退潮：MA20 下 + 上证跌 + 热点仍多 → 高位分歧，额外 -5
-    ebb = (not ma20_above) and (ichg is not None and ichg < 0) and hot_n >= int(c("ebb_hot_n", 6))
+    # 退潮：MA20 下 + 上证跌 + 热点仍多 → 高位分歧，额外 -5。
+    # 「MA20 下」必须是确知在下方：kline 取不到时 ma20_above 也是 False，但那是「不知道」，
+    # 不能据此编出「退潮」。位置未知时姿态照样落防守（见下 defend_why），但不谎报周期。
+    ebb = (ma20_known and not ma20_above) and (ichg is not None and ichg < 0) and hot_n >= int(c("ebb_hot_n", 6))
     if ebb:
         score += float(c("ebb_extra_delta", -5.0))
         notes.append("退潮特征：MA20 下 + 指数下跌 + 热点未减，情绪分 -5")

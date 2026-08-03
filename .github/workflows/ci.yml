@@ -45,7 +45,7 @@ jobs:
       - name: 语法编译检查
         run: python -m compileall -q tea
 
-      - name: 离线自测（158 项公式断言）
+      - name: 离线自测（163 项公式断言）
         run: python -m tea selftest
 
       # 输出不是直连控制台时，Windows 用 ANSI 代码页，打印中文会 UnicodeEncodeError。

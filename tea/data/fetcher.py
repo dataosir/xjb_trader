@@ -104,8 +104,11 @@ class Fetcher:
         if self.offline:
             raise MarketError("离线模式已开启，禁止发起网络请求")
         hosts = self._host_order(host_pool)
+        # 至少把池子里每个节点都试一遍：老配置可能把 retries 钉在 3，而 kline 池有 4
+        # 个节点，只轮 3 次就可能永远轮不到唯一还活着的那个。取 max 保证单次请求覆盖全池。
+        attempts = max(self.retries, len(hosts))
         last_err: Optional[Exception] = None
-        for attempt in range(self.retries):
+        for attempt in range(attempts):
             host = hosts[attempt % len(hosts)]  # 逐次换不同节点，而不是反复随机
             target = self._swap_host(url, host) if host else url
             full = target + ("&" if "?" in target else "?") + urllib.parse.urlencode(params)
@@ -124,7 +127,7 @@ class Fetcher:
                 if host:
                     self._dead_hosts.add(host)  # 该节点敲不开，后续请求尽量绕开
                 time.sleep(self.delay_after_error * (self.backoff ** attempt))
-        raise MarketError(f"请求失败({self.retries}次): {url} -> {last_err}")
+        raise MarketError(f"请求失败({attempts}次): {url} -> {last_err}")
 
     def _do_get(self, full_url: str) -> str:
         proxy = self._next_proxy()

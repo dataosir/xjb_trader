@@ -537,6 +537,21 @@ def check_sentiment(t: Suite, cfg: Config, mk: FakeMarket) -> dict:
     t.eq("冰点降仓乘数", ice["base_pos_mult"], 0.25)
     t.eq("冰点周期", ice["cycle"], sent_mod.CYCLE_ICE)
     t.ok("冰点禁止新开", not ice.get("allow_new"), f"姿态 {ice['stance']}")
+
+    # kline 单独挂：点位（quote）到手但 MA20（kline）取不到时，指数不该整块丢，
+    # 且「不知道 MA20」不能被当成「在 MA20 下方」编出退潮（周期该照分走主升/发酵）。
+    gap_raw = {"index": {"point": 3800.0, "chg_pct": -0.6, "ma20": None, "ma20_above": False},
+               "sectors": [{"bk": f"BK{i}", "name": f"热{i}", "chg": 5.0, "rank": i,
+                            "up_n": 30, "down_n": 2} for i in range(1, 8)],
+               "breadth": {"advance_ratio": 0.74, "rising": 3800, "falling": 1300},
+               "limit_up": {"max_boards": 6, "limit_up_count": 75}}
+    gap_scored = sent_mod.compute_score(gap_raw, cfg)
+    gap = sent_mod.classify(gap_scored, cfg)
+    t.ok("kline 缺失时保留指数点位", (gap_scored.get("index") or {}).get("point") == 3800.0)
+    t.ok("MA20 未知标为不知", gap["ma20_known"] is False)
+    t.ok("MA20 未知不谎报退潮", gap["cycle"] != sent_mod.CYCLE_EBB, f"cycle={gap['cycle']}")
+    t.ok("MA20 未知落防守", gap["stance"] == sent_mod.STANCE_DEFEND, f"stance={gap['stance']}")
+    t.ok("MA20 未知仍允许新开", bool(gap.get("allow_new")))
     return sent
 
 

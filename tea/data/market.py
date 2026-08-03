@@ -285,8 +285,14 @@ class Market:
         # 「上证在 MA20 下方」这条门禁会永久锁死新开仓。
         point = utils.to_float(d.get("f43"))
         chg = utils.to_float(d.get("f170"))
-        kl = self.get_klines("", limit=int(self.cfg.get("market.index_kline_limit", 25)), secid=secid)
-        ma20 = ma(kl, 20)
+        # 点位走 quote 池（push2，有 push2delay 兜底），MA20 走 kline 池（push2his 那族，
+        # 常被单独封）。两条不是一根绳：K 线取不到时别把已到手的点位一起丢——保留点位，
+        # MA20 记未知（ma20_above=False 但 ma20=None，下游据此判「位置未知」不锁新开）。
+        try:
+            kl = self.get_klines("", limit=int(self.cfg.get("market.index_kline_limit", 25)), secid=secid)
+            ma20 = ma(kl, 20)
+        except MarketError:
+            ma20 = None
         out = {
             "point": point,
             "chg_pct": chg,
