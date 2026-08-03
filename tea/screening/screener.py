@@ -31,6 +31,15 @@ VERDICT_TRADEABLE = "HAS_TRADEABLE"
 VERDICT_PENDING = "PENDING"
 VERDICT_EMPTY = "EMPTY"
 
+# 候选明细裁决（报告里逐只可追溯，含被 continue 丢弃的硬否决/数据缺）
+CAND_BUYABLE = "可买"
+CAND_WATCH = "观察轨"
+CAND_NEAR = "近失"
+CAND_HARD = "硬否决"
+CAND_SOFT = "软否决"
+CAND_ERROR = "数据缺"
+CAND_SKIPPED = "未预审"
+
 
 # ------------------------------------------------------------------ 档位参数
 
@@ -133,6 +142,58 @@ def veto_detail(items: List[dict]) -> str:
     return "；".join(out)
 
 
+# ------------------------------------------------------------------ 候选明细
+
+def candidate_row(cand: dict, ev: Optional[dict] = None,
+                  verdict: str = "", reason: str = "") -> dict:
+    """候选明细一行：初筛信息 + 预审裁决 + 淘汰原因。
+
+    硬否决/数据缺的候选在 veto_filter 里被 continue 丢弃，不进任何输出桶；
+    这份明细是它们唯一的出口，否则用户只能看到「4 个桶全空」。
+    """
+    ev = ev or {}
+    idn = ev.get("identity") or cand.get("identity") or {}
+    q = ev.get("quote") or {}
+    chg = q.get("chg_pct")
+    return {
+        "code": cand.get("code"), "name": cand.get("name"),
+        "sector_name": cand.get("sector_name"), "tier_label": cand.get("tier"),
+        "chg": chg if chg is not None else cand.get("chg"),
+        "intraday": ev.get("intraday"),
+        "score": ev.get("total_score"), "threshold": ev.get("pass_threshold"),
+        "identity_tier": idn.get("tier"), "identity_score": idn.get("score"),
+        "verdict": verdict, "reason": reason,
+    }
+
+
+def finalize_candidates(details: List[dict], evaluations: List[dict],
+                        dropped_codes: Optional[set] = None) -> List[dict]:
+    """把 VETO 通过者的最终裁决（可买/观察轨/近失）回填到候选明细。"""
+    dropped = dropped_codes or set()
+    pending = {d["code"]: d for d in details if not d.get("verdict")}
+    for ev in evaluations:
+        d = pending.get(ev.get("code"))
+        if d is None:
+            continue
+        d["intraday"] = ev.get("intraday")
+        d["score"], d["threshold"] = ev.get("total_score"), ev.get("pass_threshold")
+        if ev.get("verdict") == preflight.VERDICT_PASS:
+            d["verdict"] = CAND_BUYABLE
+            d["reason"] = (f"共振 {ev.get('total_score')}/{ev.get('pass_threshold')} 达标"
+                           + ("（超单日输出上限，未写计划）" if ev.get("code") in dropped else ""))
+        elif ev.get("track") == watch_pool.TRACK_PENDING:
+            d["verdict"] = CAND_WATCH
+            d["reason"] = f"共振 {ev.get('total_score')}/{ev.get('pass_threshold')} 差 {ev.get('gap')} 分 → 待启动"
+        else:
+            d["verdict"] = CAND_NEAR
+            d["reason"] = "；".join(ev.get("reasons") or []) or "共振分不足"
+    for d in details:
+        if not d.get("verdict"):
+            d["verdict"] = CAND_NEAR
+            d["reason"] = d.get("reason") or "预审完成但未进入任何输出档"
+    return details
+
+
 # ------------------------------------------------------------------ 影子池
 
 try:  # Unix 才有 fcntl；Windows 下降级为无锁（保持原行为）
@@ -216,7 +277,7 @@ class Screener:
                 members = self.mk.get_sector_members(s["bk"])
             except Exception as exc:
                 if tracer:
-                    tracer.add_sector(s["name"], "成分股拉取失败", str(exc), bk=s["bk"])
+                    tracer.add_sector(s["name"], "板块成分股列表拉取失败", str(exc), bk=s["bk"])
                 utils.tell(io, f"    · [{i}/{total_n_sectors}] {s['name']} 拉取失败")
                 continue
             if not members:
@@ -321,6 +382,10 @@ class Screener:
         front_k = int(cfg.get("seed.front_row_topk", 3))
         front_to = float(cfg.get("seed.front_row_min_turnover", 1.5))
         hot_chg = float(cfg.s("seed_hot_sector_chg", 6.0))
+        # 跨板块去重：一只票常同时属于多个 TOP 板块，不去重会被重复预审
+        # （拉两次行情、日志里出现两次）——以首次入选的板块为准。
+        seen: Dict[str, str] = {}
+        dup_n = 0
 
         for sec in sectors:
             members = sec.get("members") or []
@@ -334,6 +399,11 @@ class Screener:
                 trace = (lambda reason, detail="": tracer.add(
                     seed_trace.STEP_WINDOW, code, name, reason, detail, tier=tier,
                     sector=sec.get("name"), chg=chg) if tracer else None)
+
+                if code in seen:
+                    dup_n += 1
+                    trace("跨板块重复", f"已在「{seen[code]}」入选，不重复预审")
+                    continue
 
                 if utils.is_st(name):
                     trace("ST 过滤", name)
@@ -394,9 +464,11 @@ class Screener:
                     "sector_chg": sec.get("chg"), "identity": idn, "pick": ps,
                     "tier": tier, "hot_sector": hot,
                 })
+                seen[code] = sec.get("name") or "?"
         out.sort(key=lambda x: (-x["identity"]["score"], -x["pick"]["score"]))
         if tracer:
-            tracer.note(f"{tier}：初筛通过 {len(out)} 只")
+            tracer.note(f"{tier}：初筛通过 {len(out)} 只"
+                        + (f"（跨板块去重 {dup_n} 只）" if dup_n else ""))
         return out
 
     def screen_with_downgrade(self, sectors: List[dict], max_sector_chg: float,
@@ -426,11 +498,15 @@ class Screener:
     # ============================================================== 第 3 步
     def veto_filter(self, candidates: List[dict], sent: Optional[dict],
                     tracer: Optional[seed_trace.Tracer] = None, io: Any = None) -> dict:
-        """逐只拉行情做 VETO：软否决→观察轨，硬否决→REJECT。"""
+        """逐只拉行情做 VETO：软否决→观察轨，硬否决→REJECT。
+
+        不论裁决如何，每只候选都进 candidates 明细（供报告透明展示）。
+        """
         cfg = self.cfg
         cap = int(cfg.get("seed.candidate_fetch_cap", 30))
         passed: List[dict] = []
         soft: List[dict] = []
+        details: List[dict] = []
         batch = candidates[:cap]
         # 逐只预审要拉行情 + 日 K，一只两次请求，候选多时这段同样以分钟计。
         utils.tell(io, f"  ⏳ 逐只预审 {len(batch)} 只候选（行情 + VETO）...")
@@ -441,6 +517,8 @@ class Screener:
                     cand["code"], self.mk, cfg, sent=sent, sector=cand["sector"],
                     seed_leader_relax=True)
             except Exception as exc:
+                details.append(candidate_row(cand, verdict=CAND_ERROR,
+                                             reason=f"行情/指标异常：{exc}"))
                 if tracer:
                     tracer.add(seed_trace.STEP_VETO, cand["code"], cand["name"], "行情异常", str(exc))
                 continue
@@ -448,6 +526,7 @@ class Screener:
             ev["pick"] = cand["pick"]
             vt = ev.get("veto") or {}
             if vt.get("rejected"):
+                details.append(candidate_row(cand, ev, CAND_HARD, veto_detail(vt["hard"])))
                 if tracer:
                     tracer.add(seed_trace.STEP_VETO, cand["code"], cand["name"], "硬否决",
                                f"{veto_detail(vt['hard'])} → 直接 REJECT（不进观察轨）",
@@ -458,6 +537,8 @@ class Screener:
                 ev["track"] = watch_pool.TRACK_WATCH
                 ev["triggers"] = followthrough.trigger_conditions(ev, cfg)
                 soft.append(ev)
+                details.append(candidate_row(cand, ev, CAND_SOFT,
+                                             veto_detail(vt["soft"]) + " → 观察轨等回踩"))
                 if tracer:
                     tracer.add(seed_trace.STEP_VETO, cand["code"], cand["name"], "软否决→观察轨",
                                f"{veto_detail(vt['soft'])}；无硬否决 → 划入观察轨等回踩后重新预审"
@@ -466,7 +547,11 @@ class Screener:
                                veto_items=[i["name"] for i in vt["soft"]])
                 continue
             passed.append(ev)
-        return {"passed": passed, "soft": soft}
+            details.append(candidate_row(cand, ev))  # 裁决等第 4 步回填
+        for cand in candidates[cap:]:  # 超出拉取上限的候选也要能看到
+            details.append(candidate_row(cand, verdict=CAND_SKIPPED,
+                                         reason=f"超出单次预审上限 {cap} 只"))
+        return {"passed": passed, "soft": soft, "candidates": details}
 
     # ============================================================== 第 4 步
     def preflight_outputs(self, evaluations: List[dict], tracer: Optional[seed_trace.Tracer] = None) -> dict:
@@ -554,7 +639,7 @@ class Screener:
             "sector_pool": [{k: v for k, v in s.items() if k != "members"} for s in step1["qualified"][:10]],
             "max_sector_chg": step1["max_sector_chg"],
             "tier": None, "buyable": [], "watch": [], "near_miss": [], "eve": [],
-            "notes": [], "verdict": VERDICT_EMPTY,
+            "candidates": [], "notes": [], "verdict": VERDICT_EMPTY,
         }
         if not sectors:
             result["notes"].append("无板块通过硬门槛（排名≤8 且涨停≥2家 / 涨停1家+综合分≥60 / 无涨停+综合分≥70且排名≤12）")
@@ -571,10 +656,13 @@ class Screener:
         utils.tell(io, "  ⏳ 汇总三档输出...")
         out = self.preflight_outputs(vf["passed"], tracer)
         watch_items = vf["soft"] + out["watch"]
+        finalize_candidates(vf["candidates"], vf["passed"],
+                            {e.get("code") for e in out["dropped_buyable"]})
 
         result["buyable"] = out["buyable"]
         result["watch"] = watch_items[:int(cfg.get("seed.max_watch_output", 3)) + len(vf["soft"])]
         result["near_miss"] = out["near_miss"]
+        result["candidates"] = vf["candidates"]
         result["candidates_n"] = len(cands)
         result["veto_passed_n"] = len(vf["passed"])
         result["soft_n"] = len(vf["soft"])

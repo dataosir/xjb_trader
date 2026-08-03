@@ -21,7 +21,7 @@ from .core import paths, utils
 from .data import Market, MarketError, indicators
 from .data.fetcher import Fetcher
 from .portfolio import plan as plan_mod, portfolio
-from .screening import gates, preflight, screener as screener_mod, veto as veto_mod
+from .screening import gates, preflight, screener as screener_mod, seed_report, veto as veto_mod
 
 TARGET = "600123"
 TARGET_NAME = "测试光伏"
@@ -1430,6 +1430,34 @@ def check_seed(t: Suite, cfg: Config, mk: FakeMarket, sent: dict) -> dict:
          f"近失={[e['code'] for e in res['near_miss']]}")
     t.ok("可买档不超过上限", len(res["buyable"]) <= int(cfg.s("seed_max_output", 2)))
     t.ok("落选追溯已落盘", bool(res.get("trace")), f"trace={res.get('trace')}")
+
+    # 候选明细：硬否决被 continue 丢弃后不进任何桶，只能靠这份明细看到淘汰原因
+    t.eq("候选明细条数 = 初筛候选数", len(res.get("candidates") or []), res.get("candidates_n"))
+    cand_codes = [c["code"] for c in (res.get("candidates") or [])]
+    t.ok("跨板块去重：候选无重复代码", len(set(cand_codes)) == len(cand_codes),
+         f"codes={cand_codes}")
+
+    sec_ctx = {**{k: v for k, v in step1["top"][0].items() if k != "members"}, "found": True}
+    mkcand = lambda code, name, chg: {
+        "code": code, "name": name, "chg": chg, "sector": sec_ctx,
+        "sector_name": sec_ctx.get("name"), "tier": screener_mod.TIER_STRICT,
+        "pick": {"score": 70.0, "parts": {}}}
+    vf = sc.veto_filter([mkcand("600111", "涨停一号", 9.95),
+                         mkcand("600222", "涨停二号", 9.90),
+                         mkcand(TARGET, TARGET_NAME, 5.20)], sent)
+    det = screener_mod.finalize_candidates(vf["candidates"], vf["passed"])
+    t.eq("3 只候选全进明细（含硬否决）", len(det), 3)
+    t.ok("每条明细都带裁决与原因",
+         all(d.get("verdict") and d.get("reason") for d in det),
+         "；".join(f"{d['code']}[{d.get('verdict')}]" for d in det))
+    hard = [d for d in det if d["verdict"] == screener_mod.CAND_HARD]
+    t.eq("2 只涨停票 → 硬否决入明细", len(hard), 2)
+    t.ok("硬否决原因带具体触发点", all("阈值" in (d.get("reason") or "") for d in hard),
+         "；".join(d.get("reason") or "" for d in hard))
+    md = seed_report.render_md({**res, "candidates": det, "candidates_n": 3}, cfg)
+    t.ok("SEED 报告含候选明细表且覆盖全部候选",
+         "候选明细" in md and all(d["code"] in md for d in det),
+         f"codes={[d['code'] for d in det]}")
     return res
 
 

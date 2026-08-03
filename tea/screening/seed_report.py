@@ -49,6 +49,32 @@ _EV_HEADER = [
     "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |",
 ]
 
+_CAND_HEADER = [
+    "| 代码 | 名称 | 板块 | 涨幅 | 分时位 | 共振 | 身份 | 结果 | 原因 |",
+    "| --- | --- | --- | --- | --- | --- | --- | --- | --- |",
+]
+
+
+def _intr(v: Optional[float]) -> str:
+    return "—" if v is None else f"{v:.0%}"
+
+
+def _reso(c: dict) -> str:
+    return "—" if c.get("score") is None else f"{c.get('score')}/{c.get('threshold')}"
+
+
+def _ident(c: dict, nd: int = 1) -> str:
+    if c.get("identity_tier") is None and c.get("identity_score") is None:
+        return "—"
+    return f"{c.get('identity_tier') or '—'} {utils.num(c.get('identity_score'), nd)}"
+
+
+def _cand_row(c: dict) -> str:
+    return (f"| {c.get('code')} | {c.get('name')} | {c.get('sector_name') or '—'} "
+            f"| {utils.pct(c.get('chg'))} | {_intr(c.get('intraday'))} | {_reso(c)} "
+            f"| {_ident(c)} "
+            f"| **{c.get('verdict') or '—'}** | {c.get('reason') or '—'} |")
+
 
 # ------------------------------------------------------------------ Markdown
 
@@ -124,6 +150,15 @@ def render_md(result: dict, cfg: Optional[Config] = None) -> str:
     else:
         lines += ["无前夕观察标的。", ""]
 
+    # ---- 候选明细（初筛后逐只的最终裁决，硬否决/数据缺也在这里）
+    cands = result.get("candidates") or []
+    cn = result.get("candidates_n", len(cands))
+    lines += [f"## 候选明细（初筛 {cn} 只 → 淘汰/保留原因）", ""]
+    if cands:
+        lines += _CAND_HEADER + [_cand_row(c) for c in cands] + [""]
+    else:
+        lines += ["无候选（初筛未通过任何标的）。", ""]
+
     # ---- 备注 / 落选
     if result.get("notes"):
         lines += ["## 扫描备注", ""] + [f"- {n}" for n in result["notes"]] + [""]
@@ -198,6 +233,20 @@ def format_result(result: dict, cfg: Optional[Config] = None) -> str:
                 lines.append("        触发：" + "；".join(e["triggers"]))
             if key == "near_miss" and e.get("reasons"):
                 lines.append("        原因：" + "；".join(e["reasons"][:3]))
+
+    # 候选明细：硬否决/数据缺不进上面四个桶，只能在这里看到为何被淘汰
+    cands = result.get("candidates") or []
+    cn = result.get("candidates_n", len(cands))
+    lines.append(f"  ---- 候选明细（初筛 {cn} 只 → 淘汰/保留原因）----")
+    if not cands:
+        lines.append("    —")
+    for c in cands:
+        lines.append(f"    {c.get('code')} {(c.get('name') or ''):<8}"
+                     f" {utils.pct(c.get('chg')):>8}  分时 {_intr(c.get('intraday')):>4}"
+                     f"  共振 {_reso(c):<5}  {_ident(c, 0):<8}"
+                     f"  [{c.get('verdict') or '—'}]")
+        if c.get("reason"):
+            lines.append(f"        原因：{c['reason']}")
 
     for n in (result.get("notes") or []):
         lines.append(f"  · {n}")
