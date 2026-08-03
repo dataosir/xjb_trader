@@ -296,7 +296,9 @@ def get_sentiment(market: Optional[Market] = None, cfg: Optional[Config] = None,
         "cached": False,
     }
     _CACHE["ts"], _CACHE["data"] = time.time(), out
-    utils.tell(io, f"  ✓ 市场天气采集完成 ({time.time() - t0:.1f}s)")
+    # 收尾报一声谁供的数：上面可能刚刷过几行「改用腾讯」，这里给个总账。
+    net = mk.stats_line() if hasattr(mk, "stats_line") else ""
+    utils.tell(io, f"  ✓ 市场天气采集完成 ({time.time() - t0:.1f}s)" + (f"，{net}" if net else ""))
     return out
 
 

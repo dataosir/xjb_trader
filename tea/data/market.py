@@ -1,19 +1,27 @@
-"""行情门面：把抓取层的原始 JSON 翻译成引擎使用的领域字段。
+"""行情门面：把抓取层的原始响应翻译成引擎使用的领域字段。
 
 报价 / 日 K / 指标 / 板块排名 / 板块成分 / 大盘 / 涨跌家数 / 涨停池 / 个股板块上下文。
 缓存策略：行情 20s、K 线 300s、板块 600s（内存），板块排名另有 24h 磁盘缓存。
+
+报价 / 日 K / 大盘快照三项走 `providers` 里的降级链（东财→腾讯→新浪→网易→凤凰，
+具体启用哪几家看 `market.data_sources`）；板块排名 / 板块成分 / 涨跌家数 / 涨停池
+仍直连东财——那四项别家没有对等接口，包成 provider 也无从降级。
+缓存在门面这一层，与数据由谁供无关：各源返回的 schema 完全一致。
 """
 from __future__ import annotations
 
 import time
-from typing import List, Optional
+from contextlib import nullcontext
+from typing import Any, ContextManager, List, Optional
 
 from .. import utils
 from ..config_store import Config, load_config
 from .cache import MemCache
 from .errors import MarketError
 from .fetcher import Fetcher
-from .indicators import compute_indicators, count_limit_ups, ma
+from .indicators import compute_indicators, count_limit_ups
+from .providers import IDataProvider, build_provider
+from .providers.eastmoney import parse_quote as _parse_em_quote
 
 
 class Market:
@@ -28,12 +36,31 @@ class Market:
     #: 直接读回来把修复盖住，所以用版本号作废。
     SECTOR_CACHE_VER = 2
 
-    def __init__(self, cfg: Optional[Config] = None, fetcher: Optional[Fetcher] = None):
+    def __init__(self, cfg: Optional[Config] = None, fetcher: Optional[Fetcher] = None,
+                 provider: Optional[IDataProvider] = None):
         self.cfg = cfg or load_config()
         self.f = fetcher or Fetcher(self.cfg)
         self.cache = MemCache()
+        self.provider = provider or build_provider(self.cfg, self.f)
 
     # -------------------------------------------------- clist 翻页
+    def _retry_scope(self, key: str, default: int) -> "ContextManager[Any]":
+        """借用抓取器的重试次数说法（假抓取器没这能力时退化成空操作）。"""
+        scope = getattr(self.f, "with_retries", None)
+        if scope is None:
+            return nullcontext()
+        return scope(int(self.cfg.get(f"market.{key}", default) or default))
+
+    def stats_line(self) -> str:
+        """一行网络摘要：能报源命中就报，否则回落抓取器的统计行。
+
+        “东财 45｜腾讯 18”比“失败 12 次”更能回答用户的真问题：降级链到底有没接上。
+        """
+        line = getattr(self.provider, "provider_stats_line", None)
+        if callable(line):
+            return line()
+        return self.f.stats_line() if hasattr(self.f, "stats_line") else ""
+
     def _clist_page(self, base: dict, pn: int) -> tuple:
         """取 clist 的第 pn 页，返回（行列表, 接口自报的匹配总数）。"""
         js = self.f.get_json(self.cfg.get("market.clist_url"),
@@ -69,53 +96,12 @@ class Market:
         if hit:
             self.f.stats["cache_hits"] += 1
             return hit
-        mkt = utils.market_of(code)
-        data = self.f.get_json(self.cfg.get("market.quote_url"), {
-            "secid": f"{mkt}.{code}",
-            "fields": self.cfg.get("market.quote_fields"),
-            "invt": 2, "fltt": 2, "ut": "fa5fd1943c7b386f172d6893dbfba10b",
-        }, host_pool="cdn_hosts_quote").get("data") or {}
-        if not data:
-            raise MarketError(f"行情为空: {code}")
-        q = self._parse_quote(code, mkt, data)
-        return self.cache.put(key, q)
+        return self.cache.put(key, self.provider.fetch_quote(code))
 
     @staticmethod
     def _parse_quote(code: str, mkt: int, d: dict) -> dict:
-        # 请求带的是 fltt=2，东财在这个参数下返回的已经是最终浮点数（f43=1350.6、
-        # f170=-0.82），不是放大 100 倍的整数——那是 fltt=1 的形式。所以这里一律
-        # 不再缩放，否则价格会小 100 倍，涨幅会小 100 倍。
-        g = lambda k: utils.to_float(d.get(k))
-        price = g("f43")
-        chg_pct = g("f170")
-        chg_amt = g("f169")
-        pre_close = None
-        if price is not None and chg_amt is not None:
-            pre_close = round(price - chg_amt, 4)
-        name = d.get("f58") or ""
-        return {
-            "code": code,
-            "mkt": mkt,
-            "name": name,
-            "price": price,
-            "high": g("f44"),
-            "low": g("f45"),
-            "open": g("f46"),
-            "volume": g("f47"),
-            "amount_yi": (g("f48") / 1e8) if g("f48") is not None else None,
-            "vol_ratio": g("f50"),
-            "turnover": g("f168"),
-            "chg_pct": chg_pct,
-            "chg_amt": chg_amt,
-            "pre_close": pre_close,
-            "cap_yi": (g("f116") / 1e8) if g("f116") is not None else None,
-            "float_cap_yi": (g("f117") / 1e8) if g("f117") is not None else None,
-            "industry": d.get("f127") or d.get("f100") or "",
-            "board": utils.board_of(code),
-            "limit_up_pct": utils.limit_up_pct(code, name),
-            "is_st": utils.is_st(name),
-            "ts": utils.now().strftime("%Y-%m-%d %H:%M:%S"),
-        }
+        """东财报价解析（实现已搬到 providers.eastmoney，这里留作对外入口）。"""
+        return _parse_em_quote(code, mkt, d)
 
     # -------------------------------------------------- 3.2 日 K
     def get_klines(self, code: str, limit: Optional[int] = None, secid: Optional[str] = None) -> List[dict]:
@@ -128,32 +114,8 @@ class Market:
         if hit:
             self.f.stats["cache_hits"] += 1
             return hit
-        js = self.f.get_json(self.cfg.get("market.kline_url"), {
-            "secid": sid,
-            "klt": self.cfg.get("market.kline_klt", 101),
-            "fqt": self.cfg.get("market.kline_fqt", 1),
-            "lmt": lmt,
-            "end": "20500101",
-            "fields1": self.cfg.get("market.kline_fields1"),
-            "fields2": self.cfg.get("market.kline_fields2"),
-            "ut": "fa5fd1943c7b386f172d6893dbfba10b",
-        }, host_pool="cdn_hosts_kline")
-        rows = ((js.get("data") or {}).get("klines") or [])
-        out = []
-        for line in rows:
-            p = str(line).split(",")
-            if len(p) < 5:
-                continue
-            out.append({
-                "date": p[0],
-                "open": utils.to_float(p[1]),
-                "close": utils.to_float(p[2]),
-                "high": utils.to_float(p[3]),
-                "low": utils.to_float(p[4]),
-                "volume": utils.to_float(p[5]) if len(p) > 5 else None,
-                "amount": utils.to_float(p[6]) if len(p) > 6 else None,
-            })
-        return self.cache.put(key, out)
+        # secid 一路传下去：指数只有它分得清市场（上证 1.000001 vs 深市 0.000001）。
+        return self.cache.put(key, self.provider.fetch_klines(code, limit=lmt, secid=sid))
 
     # -------------------------------------------------- 指标
     def get_indicators(self, code: str, price: Optional[float] = None) -> dict:
@@ -242,11 +204,12 @@ class Market:
             return hit
         # 翻完整个板块。只取首页 100 只时，大板块（「机械设备」613 只）拿到的是涨幅
         # 前 100 名，而种子扫描要找的正是 3.0~5.5% 的温和票——它们全在前 100 名之外。
-        diff = self._clist_all({
-            "po": 1, "np": 1, "fltt": 2, "invt": 2,
-            "fs": f"b:{bk}", "fields": self.cfg.get("market.member_fields"),
-            "fid": "f3", "ut": "b2884a393a59ad64002292a3e90d46a5",
-        }, int(self.cfg.get("market.member_max_pages", 10)))
+        with self._retry_scope("member_retries", 2):
+            diff = self._clist_all({
+                "po": 1, "np": 1, "fltt": 2, "invt": 2,
+                "fs": f"b:{bk}", "fields": self.cfg.get("market.member_fields"),
+                "fid": "f3", "ut": "b2884a393a59ad64002292a3e90d46a5",
+            }, int(self.cfg.get("market.member_max_pages", 10)))
         out = []
         for d in diff:
             code = utils.norm_code(str(d.get("f12") or ""))
@@ -275,48 +238,10 @@ class Market:
             self.f.stats["cache_hits"] += 1
             return hit
         secid = self.cfg.get("market.index_secid", "1.000001")
-        # 点位/涨跌幅优先走 quote 池（push2，有 push2delay 兜底）。
-        point = chg = None
-        quote_err: Optional[Exception] = None
-        try:
-            js = self.f.get_json(self.cfg.get("market.quote_url"), {
-                "secid": secid, "fields": "f43,f170", "invt": 2, "fltt": 2,
-                "ut": "fa5fd1943c7b386f172d6893dbfba10b",
-            }, host_pool="cdn_hosts_quote")
-            d = js.get("data") or {}
-            # 同 _parse_quote：fltt=2 已是最终值。除以 100 会把上证 3832 点算成 38 点，
-            # 而 MA20 来自 K 线（本来就是真实点位），于是 ma20_above 恒为 False，
-            # 「上证在 MA20 下方」这条门禁会永久锁死新开仓。
-            point = utils.to_float(d.get("f43"))
-            chg = utils.to_float(d.get("f170"))
-        except MarketError as exc:
-            quote_err = exc
-        # MA20 走 kline 池（push2his 那族，常被单独封）。两条不是一根绳，且 K 线能兼
-        # 做点位/涨跌幅的备用源：quote 整条挂了时，用最后一根收盘当点位、与前收比出
-        # 涨跌幅——两路独立取源，「当日上证价」绝大多数情况都能显示出来。
-        ma20 = None
-        kl: List[dict] = []
-        try:
-            kl = self.get_klines("", limit=int(self.cfg.get("market.index_kline_limit", 25)), secid=secid)
-            ma20 = ma(kl, 20)
-        except MarketError:
-            kl = []
-        if point is None or chg is None:
-            closes = [r.get("close") for r in kl if r.get("close") is not None]
-            if point is None and closes:
-                point = closes[-1]
-            if chg is None and len(closes) >= 2 and closes[-2]:
-                chg = round((closes[-1] / closes[-2] - 1) * 100, 2)
-        # 两路都拿不到点位才算真失败：抛错让上层记「数据缺口」并显示「上证 —」。
-        if point is None:
-            raise quote_err or MarketError("指数点位取数失败")
-        out = {
-            "point": point,
-            "chg_pct": chg,
-            "ma20": ma20,
-            "ma20_above": (point is not None and ma20 is not None and point > ma20),
-        }
-        return self.cache.put(key, out)
+        # 每家源内部都是两路取源：点位/涨跌幅走报价，MA20 走 K 线，报价整条挂了就
+        # 用最后一根收盘反推点位（见 providers.base.index_double_route）。两路都拿不到
+        # 点位才抛错，让上层记「数据缺口」并显示「上证 —」。
+        return self.cache.put(key, self.provider.fetch_index_snapshot(secid))
 
     # -------------------------------------------------- 3.6 涨跌家数
     def get_breadth(self) -> dict:

@@ -7,6 +7,8 @@
 """
 from __future__ import annotations
 
+import contextlib
+import io as io_mod
 import os
 import tempfile
 from typing import Any, Dict, List, Optional
@@ -18,7 +20,7 @@ from . import screener as screener_mod
 from . import sentiment as sent_mod
 from . import utils, veto as veto_mod
 from .config_store import Config
-from .data import Market, indicators
+from .data import Market, MarketError, indicators
 from .data.fetcher import Fetcher
 
 TARGET = "600123"
@@ -494,6 +496,458 @@ def check_host_failover(t: Suite, cfg: Config) -> None:
         t.ok("全坏时抛错", True)
     t.eq("全坏也把每个节点都试到", len(set(tr_all.hits)), len(pool))
 
+    # ---- 板块成分股：东财独家、无家可降，而种子扫描要扫 30 个板块×多页。
+    # 东财整体不可用时每一环都死磕到顶，总耗时就从几十秒满到几分钟。
+    fetcher = Fetcher(cfg)
+    fetcher.delay_base = fetcher.delay_spread = fetcher.delay_after_error = 0.0
+    fetcher.show_progress = False
+    fetcher.retries = 8                       # 老配置可能把全局重试钉得很高
+    tries: List[str] = []
+
+    def always_down(full_url, **kw):
+        tries.append(full_url)
+        raise OSError("Remote end closed connection without response")
+
+    fetcher._do_get = always_down  # type: ignore[assignment]
+    mkt = Market(cfg, fetcher=fetcher)
+    floor = max(int(cfg.get("market.member_retries", 2)), len(pool))  # 节点池仍要试完
+    try:
+        mkt.get_sector_members("BK0001")
+        t.ok("成分股全失败时报错", False)
+    except MarketError:
+        t.ok("成分股全失败时报错", True)
+    t.eq("成分股重试单独削到 member_retries", len(tries), floor)
+    tries.clear()
+    try:
+        mkt.get_sector_ranking(force=True)
+    except MarketError:
+        pass
+    t.eq("作用域用完即还原（其余取数点仍按全局重试）", len(tries), 8)
+
+
+# ============================================== 多数据源：五家的固定响应
+
+# 五家源用贵州茅台 600519 同一天的行情做样本：价 1350.60、量 29614 手、
+# 额 4.0158 亿、昨收 1362.00。各家原始单位各不相同（腾讯万元、新浪股+元、
+# 网易元），换算对了才会在这个共同口径上对齐——所以除了逐字段断言，
+# 还横向比一次四家报价的一致性。
+_MT_PRICE, _MT_PRE = 1350.60, 1362.00
+_MT_VOL_HANDS, _MT_AMOUNT_YI, _MT_CHG_PCT = 29614.0, 4.0158, -0.837
+
+_EM_QUOTE_RAW = {
+    "f43": 1350.60, "f44": 1358.00, "f45": 1345.00, "f46": 1355.00,
+    "f47": 29614, "f48": 401580000.0, "f50": 0.91, "f58": "贵州茅台",
+    "f100": "酿酒行业", "f116": 1696500000000.0, "f117": 1696000000000.0,
+    "f168": 0.24, "f169": -11.40, "f170": -0.837,
+}
+
+
+def _tencent_quote_text(symbol: str) -> str:
+    """qt.gtimg.cn 的 `~` 分隔行（GBK 纯文本，只能按下标取）。"""
+    idx = symbol.endswith("000001") and symbol.startswith("sh")
+    f = ["0"] * 55
+    f[0] = "1"
+    f[1], f[2] = ("上证指数", "000001") if idx else ("贵州茅台", "600519")
+    if idx:
+        f[3], f[4], f[32] = "3832.26", "3804.86", "0.72"
+        return f'v_{symbol}="' + "~".join(f) + '";'
+    f[3], f[4], f[5], f[6] = "1350.60", "1362.00", "1355.00", "29614"
+    f[31], f[32], f[33], f[34] = "-11.40", "-0.84", "1358.00", "1345.00"
+    f[37], f[38] = "40158", "0.24"          # 成交额万元 / 换手率
+    f[44], f[45] = "16960.0", "16965.0"     # 流通市值 / 总市值（亿）
+    f[46] = "9.87"                          # 市净率：拿错下标时它会冒充流通市值
+    f[49] = "0.91"                          # 量比
+    return f'v_{symbol}="' + "~".join(f) + '";'
+
+
+def _sina_quote_text(symbol: str) -> str:
+    """hq.sinajs.cn 的逗号分隔行：量是**股**、额是**元**，且不给涨跌幅。"""
+    return (f'var hq_str_{symbol}="贵州茅台,1355.000,1362.000,1350.600,'
+            f'1358.000,1345.000,1350.500,1350.600,2961400,401580000.000,'
+            f'2026-08-03,15:00:00,00";')
+
+
+#: 新浪 K 线回的是 JS 对象字面量（键不带引号），直接 json.loads 会报错。
+_SINA_KLINE_JS = ('[{day:"2026-07-30",open:"1330.000",high:"1348.000",'
+                  'low:"1325.000",close:"1340.000",volume:"2750000"},'
+                  '{day:"2026-07-31",open:"1355.000",high:"1358.000",'
+                  'low:"1345.000",close:"1350.600",volume:"2961400"}]')
+
+
+def _netease_quote_text(nc: str) -> str:
+    """JSONP 外壳 + 小数形式的 percent + 名为 turnover 实为成交额的字段。"""
+    return ('_ntes_quote_callback({"%s":{"code":"%s","percent":-0.00837,'
+            '"high":1358.0,"low":1345.0,"open":1355.0,"price":1350.6,'
+            '"yestclose":1362.0,"updown":-11.4,"volume":2961400,'
+            '"turnover":401580000,"name":"贵州茅台"}});' % (nc, nc))
+
+
+#: 凤凰 record 行：[日期, 开, **高**, **收**, 低, 量]——全链路唯一的异类。
+#: 按东财/腾讯的开/收/高/低 去读，收盘会变成 1358、最高会变成 1350.6，
+#: 得出「最高 < 收盘」这种不可能的 K 线，而数值都在合理区间里、肉眼看不出来。
+_IFENG_RECORD = [
+    ["2026-07-30", "1330.00", "1348.00", "1340.00", "1325.00", "27500", "8.00", "0.60"],
+    ["2026-07-31", "1355.00", "1358.00", "1350.60", "1345.00", "29614", "-11.40", "-0.84"],
+]
+
+
+class _MockSources:
+    """五家源的固定响应（不联网）。fail 里的键 = 「这家这个接口挂了」。
+
+    降级链的真正风险不在单家能不能解析，而在「前面几家挂了之后链还能不能走到底」，
+    所以这个假抓取器按接口粒度注入故障，而不是整家一起开关。
+    同时记下每次请求的编码与 Referer——新浪缺 Referer 会 403、腾讯不按 GBK 解会乱码，
+    这两项在真网络下才暴露，离线只能验「有没有传对」。
+    """
+
+    def __init__(self, fail=()):
+        self.fail = set(fail)
+        self.stats = {"requests": 0, "errors": 0, "cache_hits": 0}
+        self.seen: List[tuple] = []      # (接口键, encoding, Referer)
+
+    @staticmethod
+    def _key(url: str) -> str:
+        u = str(url)
+        if "push2his" in u:
+            return "em_kline"
+        if "push2.eastmoney" in u or "push2delay" in u:
+            return "em_quote"
+        if "qt.gtimg" in u:
+            return "tencent_quote"
+        if "ifzq.gtimg" in u:
+            return "tencent_kline"
+        if "hq.sinajs" in u:
+            return "sina_quote"
+        if "money.finance.sina" in u:
+            return "sina_kline"
+        if "126.net" in u:
+            return "netease_quote"
+        if "finance.ifeng" in u:
+            return "ifeng_kline"
+        return "unknown"
+
+    def _serve(self, url, encoding=None, extra_headers=None) -> str:
+        key = self._key(url)
+        self.stats["requests"] += 1
+        self.seen.append((key, encoding, (extra_headers or {}).get("Referer")))
+        if key in self.fail:
+            self.stats["errors"] += 1
+            raise MarketError(f"{key} 不可用（自测注入）")
+        return key
+
+    def get_text(self, url, params=None, host_pool=None, encoding=None,
+                 extra_headers=None):
+        key = self._serve(url, encoding, extra_headers)
+        if key == "tencent_quote":
+            return _tencent_quote_text(str(url).split("q=")[-1])
+        if key == "sina_quote":
+            return _sina_quote_text(str(url).split("list=")[-1])
+        if key == "sina_kline":
+            return _SINA_KLINE_JS
+        if key == "netease_quote":
+            return _netease_quote_text(str(url).rsplit("/", 1)[-1])
+        raise MarketError(f"未定义的文本接口: {url}")
+
+    def get_json(self, url, params, host_pool=None):
+        key = self._serve(url)
+        if key == "em_quote":
+            if str(params.get("fields")) == "f43,f170":     # 指数点位专用字段
+                return {"data": {"f43": 3832.26, "f170": 0.72}}
+            return {"data": dict(_EM_QUOTE_RAW)}
+        if key == "em_kline":
+            if "000001" in str(params.get("secid")):
+                return {"data": {"klines": [f"2026-07-{i + 1:02d},3790,3800,3810,3780,1,2"
+                                            for i in range(20)]}}
+            return {"data": {"klines": [
+                "2026-07-30,1320.00,1340.00,1348.00,1325.00,27500,368000000",
+                "2026-07-31,1355.00,1350.60,1358.00,1345.00,29614,401580000"]}}
+        if key == "tencent_kline":
+            symbol = str(url).split("param=")[-1].split(",")[0]
+            if "000001" in symbol:
+                rows = [[f"2026-07-{i + 1:02d}", "3790", "3800", "3810", "3780", "1"]
+                        for i in range(20)]
+            else:
+                rows = [["2026-07-30", "1320.00", "1340.00", "1348.00", "1325.00", "27500"],
+                        ["2026-07-31", "1355.00", "1350.60", "1358.00", "1345.00", "29614"]]
+            return {"data": {symbol: {"qfqday": rows}}}
+        if key == "ifeng_kline":
+            return {"record": [list(r) for r in _IFENG_RECORD]}
+        raise MarketError(f"未定义的 JSON 接口: {url}")
+
+
+class _FlakyChainTransport:
+    """真抓取器 + 按域名注入故障：alive 里的域名回真数据，其余一律抛连接异常。
+
+    _MockSources 是把整个抓取器换掉的，验不到抓取层自己的提示；这里保留真 Fetcher，
+    只把最底层的 _do_get 换掉，于是重试 / 退避 / 提示节流全是真的。
+    """
+
+    def __init__(self, cfg: Config, alive: tuple = ()):
+        self.alive = alive
+        self.f = Fetcher(cfg)
+        self.f.delay_base = self.f.delay_spread = self.f.delay_after_error = 0.0
+        self.f.retry_notice_gap = 0.0   # 关掉时间节流：逐次刷屏若还在，必然现形
+        self.f.show_progress = True     # 真抓取器默认就是开的
+        self.tries: List[str] = []
+        self.f._do_get = self._get  # type: ignore[assignment]
+
+    def _get(self, full_url, encoding=None, extra_headers=None):
+        self.tries.append(full_url)
+        if not any(k in full_url for k in self.alive):
+            raise OSError("Remote end closed connection without response")
+        return _tencent_quote_text(str(full_url).split("q=")[-1])
+
+
+def check_providers(t: Suite, cfg: Config) -> None:
+    """五源降级链：字段映射、单位换算、部分能力跳过与降级顺序。
+
+    多接几家源的风险不是「取不到数」而是「取到错数」：各家单位不同（腾讯额记万元、
+    新浪量记股、网易涨幅记小数）、凤凰 K 线还把高低与收盘排成开/高/收/低。
+    这类错位不报错、数值也都在合理区间里，只会把市值/ATR/乖离静静算糊。
+    所以四家报价源用同一天的茅台行情喂进去，要求换算后落到同一口径。
+    """
+    from .data.providers import build_provider, index_double_route
+    from .data.providers.netease import netease_code
+
+    t.head("数据层 · 五源降级链")
+    ALL = ["eastmoney", "tencent", "sina", "netease", "ifeng"]
+
+    # ---- 默认就该全开：只包东财一家的降级链等于没有降级
+    t.eq("默认源列表全开五家",
+         list(config_store.DEFAULTS["market"]["data_sources"]), ALL)
+    solo = build_provider(cfg, _MockSources())
+    t.eq("默认配置组出五家链", [p.name for p in solo.providers], ALL)
+    t.eq("同一源重试次数已削到 2", config_store.DEFAULTS["market"]["retries"], 2)
+
+    # ---- 四家报价源各自解析同一支票，换算后必须对齐
+    quotes = {}
+    for src in ("eastmoney", "tencent", "sina", "netease"):
+        quotes[src] = build_provider(cfg, _MockSources(), [src]).fetch_quote("600519")
+
+    q = quotes["tencent"]
+    t.eq("腾讯报价 · 名称与现价", (q["name"], q["price"]), ("贵州茅台", _MT_PRICE))
+    t.eq("腾讯报价 · 成交额万→亿", q["amount_yi"], _MT_AMOUNT_YI, tol=1e-6)
+    t.eq("腾讯报价 · 总市值/流通市值不取反",
+         (q["cap_yi"], q["float_cap_yi"]), (16965.0, 16960.0))
+    t.eq("腾讯报价 · 量比/换手率", (q["vol_ratio"], q["turnover"]), (0.91, 0.24))
+    t.ok("腾讯报价 · 市净率没冒充流通市值", q["float_cap_yi"] > 100,
+         f"float_cap_yi={q['float_cap_yi']}")
+
+    q = quotes["sina"]
+    t.eq("新浪报价 · 成交量股→手", q["volume"], _MT_VOL_HANDS, tol=1e-6)
+    t.eq("新浪报价 · 成交额元→亿", q["amount_yi"], _MT_AMOUNT_YI, tol=1e-6)
+    t.eq("新浪报价 · 涨幅按昨收算出", q["chg_pct"], _MT_CHG_PCT, tol=1e-3)
+    t.ok("新浪缺的字段宁缺勿造",
+         q["vol_ratio"] is None and q["turnover"] is None and q["cap_yi"] is None)
+
+    t.eq("网易代码前缀 · 沪 0 / 深 1",
+         (netease_code("sh", "600519"), netease_code("sz", "000001")),
+         ("0600519", "1000001"))
+    q = quotes["netease"]
+    t.eq("网易报价 · 成交量股→手", q["volume"], _MT_VOL_HANDS, tol=1e-6)
+    t.eq("网易报价 · turnover 是额不是换手率",
+         (q["amount_yi"], q["turnover"]), (_MT_AMOUNT_YI, None))
+    t.eq("网易报价 · percent 小数×100", q["chg_pct"], _MT_CHG_PCT, tol=1e-6)
+
+    t.ok("四家报价现价一致",
+         all(abs(v["price"] - _MT_PRICE) < 1e-6 for v in quotes.values()),
+         str({k: v["price"] for k, v in quotes.items()}))
+    t.ok("四家报价成交量同单位（手）",
+         all(abs(v["volume"] - _MT_VOL_HANDS) < 1e-6 for v in quotes.values()),
+         str({k: v["volume"] for k, v in quotes.items()}))
+    t.ok("四家报价成交额同单位（亿）",
+         all(abs(v["amount_yi"] - _MT_AMOUNT_YI) < 1e-6 for v in quotes.values()),
+         str({k: v["amount_yi"] for k, v in quotes.items()}))
+
+    # ---- K 线：凤凰的开/高/收/低 异序是最容易错且最隐蔽的一处
+    kl = build_provider(cfg, _MockSources(), ["ifeng"]).fetch_klines("600519", limit=30)
+    last = kl[-1]
+    t.eq("凤凰 K 线 · 开/高/收/低 映射正确",
+         (last["open"], last["high"], last["close"], last["low"]),
+         (1355.00, 1358.00, 1350.60, 1345.00))
+    t.ok("凤凰 K 线 · 最高 ≥ 收盘 ≥ 最低（错位时必破）",
+         last["high"] >= last["close"] >= last["low"], str(last))
+    t.eq("凤凰 K 线 · 日期升序、新的在后", last["date"], "2026-07-31")
+
+    kl = build_provider(cfg, _MockSources(), ["sina"]).fetch_klines("600519", limit=30)
+    t.eq("新浪 K 线 · JS 裸键字面量能解", len(kl), 2)
+    t.eq("新浪 K 线 · 收盘与成交量（股→手）",
+         (kl[-1]["close"], kl[-1]["volume"]), (1350.60, _MT_VOL_HANDS))
+    kl_tx = build_provider(cfg, _MockSources(), ["tencent"]).fetch_klines("600519", limit=30)
+    t.eq("腾讯 K 线 · 与东财同序（开/收/高/低）",
+         (kl_tx[-1]["open"], kl_tx[-1]["close"], kl_tx[-1]["high"], kl_tx[-1]["low"]),
+         (1355.00, 1350.60, 1358.00, 1345.00))
+
+    # ---- 编码与 Referer：传错了在真网络下是乱码与 403，离线只能验有没传
+    mock = _MockSources()
+    build_provider(cfg, mock, ["tencent"]).fetch_quote("600519")
+    t.eq("腾讯请求声明 GBK", [e for k, e, _ in mock.seen if k == "tencent_quote"], ["gbk"])
+    mock = _MockSources()
+    build_provider(cfg, mock, ["sina"]).fetch_quote("600519")
+    _, enc, ref = mock.seen[0]
+    t.eq("新浪请求声明 GB2312", enc, "gb2312")
+    t.eq("新浪请求带 Referer（缺了 403）", ref, "https://finance.sina.com.cn")
+
+    # ---- 降级：东财+腾讯挂了，报价要能走到新浪
+    mock = _MockSources(fail=("em_quote", "em_kline", "tencent_quote"))
+    chain = build_provider(cfg, mock, ALL)
+    got = chain.fetch_quote("600519")
+    t.eq("报价降级到第三级（新浪）", chain.last_source.get("quote"), "sina")
+    t.eq("降级后报价仍是正确的那支票", (got["code"], got["price"]), ("600519", _MT_PRICE))
+    t.eq("供数源已标记进拓取器统计", mock.stats.get("source_used"), "sina")
+
+    # ---- 降级到第四级：网易只有报价，凤凰没报价应被静默跳过
+    mock = _MockSources(fail=("em_quote", "tencent_quote", "sina_quote"))
+    chain = build_provider(cfg, mock, ALL)
+    got = chain.fetch_quote("600519")
+    t.eq("报价降级到第四级（网易）", chain.last_source.get("quote"), "netease")
+    t.eq("网易供的数也是正确的那支票", got["code"], "600519")
+    ifeng = [p for p in chain.providers if p.name == "ifeng"][0]
+    t.eq("凤凰无报价能力→不计失败", (ifeng.stats["skipped"], ifeng.stats["failed"]), (0, 0))
+
+    # ---- K 线降级：三家挂了轮到凤凰，而网易（无 K 线）静默跳过
+    mock = _MockSources(fail=("em_kline", "tencent_kline", "sina_kline"))
+    chain = build_provider(cfg, mock, ALL)
+    kl = chain.fetch_klines("600519", limit=30)
+    t.eq("K 线降级到第四级（凤凰）", chain.last_source.get("klines"), "ifeng")
+    t.eq("凤凰供的 K 线收盘没错位", kl[-1]["close"], 1350.60, tol=1e-6)
+    nete = [p for p in chain.providers if p.name == "netease"][0]
+    t.eq("网易无 K 线能力→计入跳过、不计失败",
+         (nete.stats["skipped"], nete.stats["failed"]), (1, 0))
+    t.eq("三家真失败才计失败", chain.stats["failed"], 3)
+
+    # ---- 全部挂掉：错误汇总只列真失败的源，不拿「没这个能力」凑数
+    mock = _MockSources(fail=("em_quote", "tencent_quote", "sina_quote", "netease_quote"))
+    chain = build_provider(cfg, mock, ALL)
+    try:
+        chain.fetch_quote("600519")
+        msg = ""
+        t.ok("全部挂掉时报错", False)
+    except MarketError as exc:
+        msg = str(exc)
+        t.ok("全部挂掉时报错", True)
+    t.ok("错误汇总列齐四家真失败",
+         all(s in msg for s in ("eastmoney", "tencent", "sina", "netease")), msg)
+    t.ok("不把「凤凰没报价」当成失败", "ifeng" not in msg, msg)
+
+    # ---- 指数两路取源：报价挂了还能拿 K 线兑出点位
+    def _boom():
+        raise MarketError("指数报价挂了")
+
+    snap = index_double_route(_boom, lambda: [{"close": 3800.0}] * 19 + [{"close": 3832.26}])
+    t.eq("指数两路 · 报价挂了用收盘兑点位", snap["point"], 3832.26, tol=1e-6)
+    t.ok("指数两路 · MA20 与点位同量级",
+         abs(snap["point"] - snap["ma20"]) / snap["ma20"] < 0.5, str(snap))
+    try:
+        index_double_route(_boom, _boom)
+        t.ok("指数两路 · 两路都挂才算真失败", False)
+    except MarketError:
+        t.ok("指数两路 · 两路都挂才算真失败", True)
+
+    mock = _MockSources(fail=("em_quote",))
+    chain = build_provider(cfg, mock, ALL)
+    snap = chain.fetch_index_snapshot()
+    t.eq("指数 · 内部兑得出数就不降级", chain.last_source.get("index_snapshot"), "eastmoney")
+    t.eq("指数 · K 线兑出的点位", snap["point"], 3800.0, tol=1e-6)
+
+    mock = _MockSources(fail=("em_quote", "em_kline"))
+    chain = build_provider(cfg, mock, ALL)
+    snap = chain.fetch_index_snapshot()
+    t.eq("指数 · 东财两路全挂才降级到腾讯",
+         chain.last_source.get("index_snapshot"), "tencent")
+    t.eq("指数 · 腾讯点位不被缩放", snap["point"], 3832.26, tol=1e-6)
+    t.eq("指数 · 腾讯 MA20", snap["ma20"], 3800.0, tol=1e-6)
+    t.ok("指数 · 3832 > MA20 3800 → 在上方", snap["ma20_above"] is True)
+    nete = [p for p in chain.providers if p.name == "netease"][0]
+    t.eq("指数 · 无指数能力的源不计失败", nete.stats["failed"], 0)
+
+    # ---- 每家每方法的超时：备源读自己的配置，不沿主源的 8s
+    chain = build_provider(cfg, _MockSources(), ALL)
+    by_name = {p.name: p for p in chain.providers}
+    t.eq("腾讯报价超时读配置", by_name["tencent"].timeout_for("quote"), 4.0)
+    t.eq("凤凰 K 线超时读配置", by_name["ifeng"].timeout_for("klines"), 5.0)
+    t.eq("index_snapshot 映到 index 配置项",
+         by_name["eastmoney"].timeout_for("index_snapshot"), 8.0)
+    t.ok("没配置的方法回落全局超时",
+         by_name["ifeng"].timeout_for("quote") == float(cfg.get("market.timeout")),
+         f"got={by_name['ifeng'].timeout_for('quote')}")
+    t.ok("降级摘要能说出谁供的数", "数据源" in chain.source_line(),
+         chain.source_line())
+
+    # ---- 命中统计：降级链到底有没接上，收尾要能一行说清
+    mock = _MockSources(fail=("em_quote",))
+    chain = build_provider(cfg, mock, ALL)
+    chain.fetch_quote("600519")
+    chain.fetch_klines("600519")
+    t.eq("源命中计数分源统计", dict(chain.source_hit_count),
+         {"tencent": 1, "eastmoney": 1})
+    line = chain.provider_stats_line()
+    t.ok("命中摘要报得出主备源各自供了多少",
+         "东财 1" in line and "腾讯 1" in line, line)
+
+    # ---- 切源提示：用户看到「改用腾讯」比看到「网络抖动」有信心
+    mock = _MockSources(fail=("em_quote",))
+    mock.show_progress = True                       # 真抓取器默认就是开的
+    chain = build_provider(cfg, mock, ALL)
+    buf = io_mod.StringIO()
+    with contextlib.redirect_stdout(buf):
+        chain.fetch_quote("600519")
+    notice = buf.getvalue()
+    t.ok("切源时报「谁挂了、改用谁」",
+         "东财" in notice and "改用 腾讯" in notice, notice.strip() or "（无输出）")
+    t.ok("切源提示不再叫「网络抖动」", "网络抖动" not in notice, notice)
+
+    # 没能力的下家不能拿来充数：网易没 K 线，报「改用网易」是骗人
+    mock = _MockSources(fail=("em_kline", "tencent_kline"))
+    mock.show_progress = True
+    chain = build_provider(cfg, mock, ALL)
+    buf = io_mod.StringIO()
+    with contextlib.redirect_stdout(buf):
+        chain.fetch_klines("600519")
+    notice = buf.getvalue()
+    t.ok("下家只数真有这个能力的源",
+         "网易" not in notice and "改用 新浪" in notice, notice)
+
+    # ---- 抓取层的「网络抖动」只在重试全部用尽时兜底一句：逐次重试都报是无信息
+    # 重复（上层紧接着就说清了「谁挂了、改用谁」）。用户抄回来的日志里连刷 5 条
+    # 「网络抖动，正在重试」就是这么来的，所以节流关掉也不得超过一条。
+    tr = _FlakyChainTransport(cfg, alive=("qt.gtimg",))    # 东财全挂，腾讯接手
+    chain = build_provider(cfg, tr.f, ALL)
+    buf = io_mod.StringIO()
+    with contextlib.redirect_stdout(buf):
+        q = chain.fetch_quote("600519")
+    notice = buf.getvalue()
+    t.eq("抖动提示不逐次刷屏（整轮最多一条）", notice.count("网络抖动"), 1)
+    t.ok("兜底提示带上域名与尝试次数",
+         "eastmoney.com" in notice and "即将切换" in notice, notice.strip() or "（无输出）")
+    t.ok("抖完仍由腾讯供上数",
+         q["price"] == _MT_PRICE and chain.last_source.get("quote") == "tencent",
+         str(chain.last_source))
+    t.ok("兜底前确实经历了多次重试", len(tr.tries) > 1, f"tries={len(tr.tries)}")
+
+    # 全部源都彻底挂掉时反过来不能全哑：它是单源 / 无可降级场景里唯一的用户反馈
+    tr_dead = _FlakyChainTransport(cfg)
+    chain = build_provider(cfg, tr_dead.f, ALL)
+    buf = io_mod.StringIO()
+    with contextlib.redirect_stdout(buf):
+        try:
+            chain.fetch_quote("600519")
+            t.ok("全源全挂时报错", False)
+        except MarketError:
+            t.ok("全源全挂时报错", True)
+    notice = buf.getvalue()
+    t.ok("全源全挂仍至少兜底报一声", notice.count("网络抖动") >= 1,
+         notice.strip() or "（无输出）")
+
+    # ---- Market 门面确实走降级链（而不是自己直连东财）
+    mock = _MockSources(fail=("em_quote", "em_kline"))
+    mkt = Market(cfg, fetcher=mock, provider=build_provider(cfg, mock, ALL))
+    mq = mkt.get_quote("600519")
+    t.eq("Market.get_quote 走降级链", (mq["code"], mq["price"]), ("600519", _MT_PRICE))
+    t.eq("Market.get_klines 走降级链", mkt.get_klines("600519")[-1]["close"],
+         1350.60, tol=1e-6)
+    t.eq("两项都由腾讯接手", mkt.provider.last_source.get("quote"), "tencent")
+
 
 def check_sentiment(t: Suite, cfg: Config, mk: FakeMarket) -> dict:
     t.head("道 · 情绪评分（§4.2 表逐项复算）")
@@ -915,6 +1369,111 @@ def check_end_to_end(t: Suite, cfg: Config, mk: FakeMarket, sent: dict) -> None:
     t.eq("持仓已清空", len(portfolio.positions(cfg)), 0)
 
 
+def check_config_migration(t: Suite, home: str) -> None:
+    """单源→多源的一次性配置迁移。
+
+    只改 DEFAULTS 治不了已经落盘的配置：用户手里的 tea_config.json 把当时的
+    单源名单钉死了，于是「5 源降级已实现」与「用户仍满屏网络抖动」同时成立。
+    三件事要分开验：旧配置确实升上去了、用户自己选的组合不被覆盖、重复调用不重复升级。
+
+    对应任务里的：test_legacy_config_multisource_migration_upgrades_to_five /
+    test_migration_respects_user_choice / test_migration_is_idempotent。
+    """
+    t.head("配置 · 单源→多源迁移")
+    ALL = list(config_store.ALL_DATA_SOURCES)
+
+    # ---- 旧配置（单源 + retries=4）升到全五源
+    legacy = {"market": {"data_sources": ["eastmoney"], "retries": 4}}
+    out, changed = config_store._migrate_v1_to_multisource(legacy)
+    t.ok("旧配置报告发生了升级", changed is True)
+    t.eq("旧配置升到全五源", out["market"]["data_sources"], ALL)
+    t.eq("旧默认重试 4 次同时削到 2", out["market"]["retries"], 2)
+    t.ok("升级后打上迁移标记", out["meta"]["multisource_migrated"] is True)
+
+    # 连 data_sources 那一项都没有的更老配置（用户盘上就是这种）也要升
+    out2, changed2 = config_store._migrate_v1_to_multisource({"market": {"retries": 4}})
+    t.ok("缺 data_sources 的老配置也升级",
+         changed2 and out2["market"]["data_sources"] == ALL,
+         str(out2["market"].get("data_sources")))
+
+    # ---- 用户显式选的组合不能被覆盖（包括自己调过的重试次数）
+    picked = {"market": {"data_sources": ["eastmoney", "tencent"], "retries": 6}}
+    out3, changed3 = config_store._migrate_v1_to_multisource(picked)
+    t.ok("显式配的源组合不报变更", changed3 is False)
+    t.eq("显式配的源组合原样保留",
+         out3["market"]["data_sources"], ["eastmoney", "tencent"])
+    t.eq("用户调过的重试次数不动", out3["market"]["retries"], 6)
+    t.ok("尊重用户选择后也不再看第二眼",
+         out3["meta"]["multisource_migrated"] is True)
+
+    # ---- 幂等：重复调用不重复升级，用户之后改回单源也不被反复掩回去
+    again, changed4 = config_store._migrate_v1_to_multisource(out)
+    t.ok("重复调用不再报变更", changed4 is False)
+    t.eq("重复调用不改动任何值", again["market"]["data_sources"], ALL)
+    reverted = {"meta": {"multisource_migrated": True},
+                "market": {"data_sources": ["eastmoney"]}}
+    out5, changed5 = config_store._migrate_v1_to_multisource(reverted)
+    t.ok("已迁移过就不再强推五源",
+         changed5 is False and out5["market"]["data_sources"] == ["eastmoney"],
+         str(out5["market"]["data_sources"]))
+
+    # ---- 走一道 load_config：提示只出一次，且真的回写了磁盘
+    legacy_path = os.path.join(home, "legacy_config.json")
+    utils.write_json(legacy_path, {"meta": {"initialized": True},
+                                   "market": {"data_sources": ["eastmoney"], "retries": 4}})
+    buf = io_mod.StringIO()
+    with contextlib.redirect_stdout(buf):
+        cfg1 = config_store.load_config(path=legacy_path)
+    first = buf.getvalue()
+    t.eq("load_config 升级到五源", cfg1.get("market.data_sources"), ALL)
+    t.ok("升级时明确告知用户", "5 源降级" in first, first.strip() or "（无输出）")
+    # 提示本身是多行文案：把它当序列直接 print 会把括号引号摆到用户眼前（tuple repr）
+    t.ok("提示是自然语言而不是 tuple repr",
+         "(" not in first and "')" not in first
+         and "✓ 已自动启用" in first and "data_sources" in first,
+         first.strip() or "（无输出）")
+    t.eq("提示分两行打", len(first.strip().split("\n")), 2)
+    # 内网只放通东财的用户被推上五源反而更慢，得告诉他怎么关掉其他四家
+    t.ok("提示给出退回单源的具体写法",
+         'market.data_sources 改回 ["eastmoney"]' in first, first.strip())
+    saved = utils.read_json(legacy_path, default={}) or {}
+    t.eq("升级已回写磁盘", saved.get("market", {}).get("data_sources"), ALL)
+    t.eq("磁盘上的重试次数也跟着降", saved.get("market", {}).get("retries"), 2)
+    buf2 = io_mod.StringIO()
+    with contextlib.redirect_stdout(buf2):
+        config_store.load_config(path=legacy_path)
+    t.ok("提示只出一次（第二次启动不再吐）", buf2.getvalue().strip() == "",
+         buf2.getvalue().strip())
+
+    # 没有配置文件时不该凭空写出一份（首次启动向导还没跑）
+    fresh_path = os.path.join(home, "fresh_config.json")
+    buf3 = io_mod.StringIO()
+    with contextlib.redirect_stdout(buf3):
+        fresh = config_store.load_config(path=fresh_path)
+    t.ok("无配置文件时不迁移也不落盘",
+         not os.path.exists(fresh_path) and buf3.getvalue().strip() == "",
+         buf3.getvalue().strip())
+    t.eq("新用户直接拿到五源默认", fresh.get("market.data_sources"), ALL)
+
+    # ---- 文档：内网用户要能自己查到要放通哪些域名（否则只能猜）
+    readme = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                          "README.md")
+    if os.path.exists(readme):
+        with open(readme, encoding="utf-8") as fh:
+            doc = fh.read()
+        hosts = ("push2.eastmoney.com", "qt.gtimg.cn", "web.ifzq.gtimg.cn",
+                 "hq.sinajs.cn", "money.finance.sina.com.cn",
+                 "api.money.126.net", "api.finance.ifeng.com")
+        t.ok("README 列齐五家要放通的域名",
+             "### 网络要求" in doc and all(h in doc for h in hosts),
+             str([h for h in hosts if h not in doc]))
+        t.ok("README 点明新浪的 Referer 硬要求与内网退单源建议",
+             "Referer" in doc and 'market.data_sources \'["eastmoney"]\'' in doc)
+    else:
+        t.ok("README 网络要求小节", True, "源码树外运行，无 README 可验")
+        t.ok("README Referer 与退单源建议", True, "源码树外运行，无 README 可验")
+
+
 def check_onboarding(t: Suite, home: str) -> None:
     """首次启动向导：能落盘、能校验、且第二次不再默默弹出。
 
@@ -947,6 +1506,7 @@ def check_onboarding(t: Suite, home: str) -> None:
         "min_odds": "2.5",
         "pass_threshold": "7",
         "perm_main": True, "perm_gem": True, "perm_star": False, "perm_bse": False,
+        "data_sources": "1",           # 全开五源降级链
         "wizard_confirm": "y",
     }, interactive=False, quiet=True)
     res = onboarding.run_wizard(cfg=cfg, io=io, first_run=True)
@@ -965,6 +1525,8 @@ def check_onboarding(t: Suite, home: str) -> None:
          (saved.get("permissions", {}).get("star"), saved.get("permissions", {}).get("bse")),
          (False, False))
     t.eq("总资金已记入资金状态", portfolio.get_capital(cfg), 200000.0)
+    t.eq("数据源降级链已写入", saved.get("market", {}).get("data_sources"),
+         ["eastmoney", "tencent", "sina", "netease", "ifeng"])
 
     # 标记与幂等：同一份配置重新读起来也不能再弹向导
     t.ok("已打 initialized 标记", saved.get("meta", {}).get("initialized") is True)
@@ -988,6 +1550,12 @@ def check_onboarding(t: Suite, home: str) -> None:
     t.eq("默认通道不改变仓位上限",
          cfg2.get("strategy.max_position_pct"), d["strategy"]["max_position_pct"])
     t.ok("默认通道也打标记", not onboarding.is_first_run(cfg2))
+    t.eq("默认通道跟随 DEFAULTS 的源名单", cfg2.get("market.data_sources"),
+         d["market"]["data_sources"])
+    t.eq("向导回车不会把用户送回单源",
+         onboarding.SOURCE_PRESETS[0]["value"], d["market"]["data_sources"])
+    t.eq("向导默认选项指向全开", onboarding.SOURCE_DEFAULT_CHOICE,
+         onboarding.SOURCE_PRESETS[0]["choice"])
 
     # 跳过：不改任何值，但不再默默重弹
     cfg3 = Config({"paths": {"data_dir": "wizard_data3"}},
@@ -1027,6 +1595,7 @@ def main(verbose: bool = True, cfg: Optional[Config] = None) -> int:
         check_clist_paging(t, c)
         check_ztpool_fallback(t, c)
         check_host_failover(t, c)
+        check_providers(t, c)
         sent = check_sentiment(t, c, mk)
         idn = check_identity(t, c, mk)
         lv = check_levels(t, c, mk)
@@ -1036,6 +1605,7 @@ def main(verbose: bool = True, cfg: Optional[Config] = None) -> int:
         check_gates(t, c, mk, sent)
         check_seed(t, c, mk, sent)
         check_menu(t, c)
+        check_config_migration(t, tmp)
         check_onboarding(t, tmp)
         check_end_to_end(t, c, mk, sent)
         return t.report()

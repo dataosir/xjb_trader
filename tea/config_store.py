@@ -17,6 +17,18 @@ CONFIG_ENV = "TEA_CONFIG"
 HOME_ENV = "TEA_HOME"
 CONFIG_NAME = "tea_config.json"
 
+#: 全部数据源（顺序即优先级），DEFAULTS 与旧配置迁移共用一份
+ALL_DATA_SOURCES = ["eastmoney", "tencent", "sina", "netease", "ifeng"]
+#: 单源时代的重试次数：链上只有东财时靠死磕硬撑，迁移到多源后没必要
+LEGACY_RETRIES = 4
+#: 迁移提示（两行，用 \n 内嵌）。内网只放通东财域名的用户被自动推上五源反而更慢
+#: （每次都要等东财超时再白试四家），所以第二行直接把退回单源的写法给出来。
+MIGRATION_NOTICE = (
+    "✓ 已自动启用 5 源降级（东财/腾讯/新浪/网易/凤凰），"
+    "可在 tea_config.json 里调整 market.data_sources\n"
+    "  如你的网络只允许访问东财域名，可将 market.data_sources 改回 [\"eastmoney\"]"
+)
+
 DEFAULTS: Dict[str, Any] = {
     "version": 1,
     # ---------------------------------------------------------- 元信息
@@ -27,6 +39,8 @@ DEFAULTS: Dict[str, Any] = {
         "initialized_at": None,
         "wizard_version": 0,
         "wizard_skipped": False,
+        # 单源→多源的一次性迁移标记，见 _migrate_v1_to_multisource
+        "multisource_migrated": False,
     },
     # ---------------------------------------------------------- 路径
     "paths": {
@@ -68,15 +82,50 @@ DEFAULTS: Dict[str, Any] = {
         "sector_max_pages": 12,
         "member_max_pages": 10,
         "member_fields": "f3,f8,f12,f14,f20",
+        # 板块成分股就东财一家有，无家可降；而种子扫描要扫 30 个板块×多页。
+        # 东财挂的时候每一环都死磕到顶，总耗时从几十秒满到几分钟，
+        # 所以这一项的重试单独压得更低（反正拿不到就跳过这个板块）。
+        "member_retries": 2,
         "breadth_fs": "m:0+t:6,m:0+t:80,m:1+t:2,m:1+t:23",
         "breadth_flat_eps": 0.05,
         "breadth_max_probes": 24,
         "ztpool_page_size": 300,
         "ztpool_fallback_days": 3,
+        # ------------------------------------------------ 多数据源降级链
+        # 顺序即优先级：前一家取不到才轮到后一家。默认全开五家——只留东财时
+        # 降级链名存实亡，东财一抖整场扫描就是满屏「网络抖动」。
+        # 网易只有报价、凤凰只有 K 线，链上会按方法自动跳过没有能力的那家。
+        # 想退回单源就把这里改成 ["eastmoney"]（迁移只做一次，不会再被改回来）。
+        "data_sources": list(ALL_DATA_SOURCES),
+        # 每家每方法单独的超时（秒）。备源存在的意义是「快速接手」，
+        # 沿用主源的 8s 会让一次三源降级拖到 24s+，所以备源一律给得更短。
+        "provider_timeouts": {
+            "eastmoney": {"quote": 6.0, "klines": 8.0, "index": 8.0},
+            "tencent": {"quote": 4.0, "klines": 6.0, "index": 6.0},
+            "sina": {"quote": 4.0, "klines": 6.0, "index": 6.0},
+            "netease": {"quote": 3.0},
+            "ifeng": {"klines": 5.0},
+        },
+        # 腾讯：报价用 `q=` 拼代码（sh600519），K 线走 appstock。
+        "tencent_quote_url": "https://qt.gtimg.cn/q=",
+        "tencent_kline_url": "https://web.ifzq.gtimg.cn/appstock/app/fqkline/get",
+        # 新浪：报价同样是 `list=` 拼代码。缺 Referer 会直接 403，不是 IP 被封。
+        "sina_quote_url": "https://hq.sinajs.cn/list=",
+        "sina_kline_url": "https://money.finance.sina.com.cn/quotes_service/api/json_v2.php/CN_MarketData.getKLineData",
+        "sina_referer": "https://finance.sina.com.cn",
+        "sina_kline_scale": 240,   # 分钟；240 = 日线
+        "sina_kline_max": 260,     # datalen 上限，取够一年日线
+        # 网易：代码前缀沪 0 / 深 1（不是 sh/sz，也和东财 secid 相反）。
+        "netease_quote_url": "http://api.money.126.net/data/feed/",
+        # 凤凰：type=last 给最近一年多日线，接口不支持按条数裁剪。
+        "ifeng_kline_url": "https://api.finance.ifeng.com/akdaily/",
+        "ifeng_kline_type": "last",
         # 防封
         "timeout": 8.0,
-        # 至少要能盖住最大的 CDN 节点池（kline 4 个），否则单次请求轮不到好节点
-        "retries": 4,
+        # 同一家源死磕的次数。后面还有四家备源，在第一家身上耗 4 次×3s 只是把
+        # 降级往后拖 12 秒噪音，所以只重试 2 次就换下家。单次请求仍会把 CDN
+        # 节点池整池试完（见 fetcher._request 的 max(retries, len(hosts))）。
+        "retries": 2,
         "retry_backoff": 1.7,
         "delay_base": 0.35,
         "delay_spread": 0.25,
@@ -108,8 +157,9 @@ DEFAULTS: Dict[str, Any] = {
         "use_env_proxy": False,
         # 重试时在屏上出一声（一次超时 8s，不提示就像程序死了）
         "show_progress": True,
-        # 重试提示的最小间隔（秒）：并发/密集重试时按此节流，避免刷屏
-        "retry_notice_gap_sec": 2.5,
+        # 重试提示的最小间隔（秒）：并发/密集重试时按此节流，避免刷屏。
+        # 降级链自己会报「改用腾讯」，这行笼统提示可以更沉默些。
+        "retry_notice_gap_sec": 5.0,
         # 请求耗时日志只留最近 N 条（内存内，不落盘）
         "request_log_cap": 200,
         # 缓存
@@ -515,6 +565,32 @@ DEFAULTS: Dict[str, Any] = {
 }
 
 
+def _migrate_v1_to_multisource(cfg_data: dict) -> "tuple[dict, bool]":
+    """一次性迁移：单源时代的配置升级到全 5 源降级链。
+
+    只改 DEFAULTS 治不了已经落盘的 tea_config.json：save() 写的是全量配置，
+    当时的 `data_sources: ["eastmoney"]`（或根本没这一项）会把用户永久钉在单源上，
+    降级链就只包了东财一家、名存实亡。
+
+    迁移幂等：`meta.multisource_migrated` 一旦置位就不再看第二眼，所以之后用户
+    自己改回 ["eastmoney"] 也不会被反复升级。返回（配置, 是否真的改了东西）。
+    """
+    meta = cfg_data.setdefault("meta", {})
+    if meta.get("multisource_migrated"):
+        return cfg_data, False
+    market = cfg_data.setdefault("market", {})
+    meta["multisource_migrated"] = True
+    sources = market.get("data_sources")
+    if sources is not None and list(sources) != ["eastmoney"]:
+        return cfg_data, False       # 用户显式配了其他组合，尊重
+    market["data_sources"] = list(ALL_DATA_SOURCES)
+    # 同一源死磕 4 次的意义随降级链消失：换下家比在原地等快。只改“还是旧
+    # 默认值”的情形，用户自己调过的重试次数不动。
+    if market.get("retries") in (None, LEGACY_RETRIES):
+        market["retries"] = DEFAULTS["market"]["retries"]
+    return cfg_data, True
+
+
 def _deep_merge(base: dict, override: dict) -> dict:
     out = copy.deepcopy(base)
     for k, v in (override or {}).items():
@@ -620,13 +696,24 @@ _CACHED: Optional[Config] = None
 
 
 def load_config(path: Optional[str] = None, reload: bool = False) -> Config:
-    """加载配置（进程内缓存）。"""
+    """加载配置（进程内缓存）。旧配置顶多被迁移一次并回写。"""
     global _CACHED
     if _CACHED is not None and not reload and path is None:
         return _CACHED
     p = path or config_path()
     raw = utils.read_json(p, default={}) or {}
+    # 没有配置文件就无从迁移：新用户直接拿 DEFAULTS（已经是 5 源），
+    # 也不应该在首次启动向导之前就悄悄写出一份配置。
+    if raw and os.path.exists(p):
+        raw, changed = _migrate_v1_to_multisource(raw)
+    else:
+        changed = False
     cfg = Config(raw, path=p)
+    if changed:
+        cfg.save()
+        # 逐行打：直接 print 一个序列会把括号与引号也摆到用户眼前。
+        for line in MIGRATION_NOTICE.split("\n"):
+            print(line, flush=True)
     if path is None:
         _CACHED = cfg
     return cfg

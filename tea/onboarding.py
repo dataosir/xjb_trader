@@ -17,7 +17,7 @@ import os
 from typing import Any, Dict, List, Optional
 
 from . import portfolio, utils
-from .config_store import DEFAULTS, Config, load_config
+from .config_store import ALL_DATA_SOURCES, DEFAULTS, Config, load_config
 from .phases import IO
 
 WIZARD_VERSION = 1
@@ -94,6 +94,18 @@ BOARD_ITEMS: List[Dict[str, str]] = [
     {"key": "star", "title": "科创板（688，需 50 万+2 年）"},
     {"key": "bse", "title": "北交所（8/4 开头，需开通）"},
 ]
+
+# 数据源降级链：顺序即优先级。开的源越多越抗单点故障，代价是主源真挂了的那次
+# 请求要多等几秒；一家都不通的概率则大幅下降。默认（选项 1）全开。
+SOURCE_PRESETS: List[Dict[str, Any]] = [
+    {"choice": "1", "title": "全部启用（东财→腾讯→新浪→网易/凤凰，最抗故障，默认）",
+     "value": list(ALL_DATA_SOURCES)},
+    {"choice": "2", "title": "东财+腾讯+新浪（三家都有报价和 K 线，够用）",
+     "value": ["eastmoney", "tencent", "sina"]},
+    {"choice": "3", "title": "仅东财（字段最全但单点，东财一抖整轮就失败）",
+     "value": ["eastmoney"]},
+]
+SOURCE_DEFAULT_CHOICE = "1"
 
 
 # ==================================================================== 首次判定
@@ -178,6 +190,32 @@ def _ask_number(io: IO, item: Dict[str, Any], current: Any,
     return current
 
 
+def _ask_sources(io: IO, cfg: Config) -> Optional[List[str]]:
+    """问降级链。返回 None 表示用户中止；非法输入回落当前值。"""
+    cur = list(cfg.get("market.data_sources") or _defaults_value("market.data_sources") or [])
+    io.say("")
+    io.say("  · 行情数据源降级链　[market.data_sources]")
+    io.say("    主源被限流/改接口时自动换下一家取数，不至于整轮评估直接失败。")
+    io.say(f"    当前：{' → '.join(cur) or '—'}")
+    for s in SOURCE_PRESETS:
+        io.say(f"      {s['choice']}) {s['title']}")
+    for _ in range(MAX_RETRY):
+        raw = io.ask("    输入新值", "data_sources", SOURCE_DEFAULT_CHOICE)
+        if raw is None:
+            return None
+        choice = utils.normalize_digits(str(raw).strip())
+        if not choice:
+            return cur
+        for s in SOURCE_PRESETS:
+            if choice == s["choice"]:
+                return list(s["value"])
+        io.say("    ✗ 请输入 1 / 2 / 3")
+        if not io.interactive:
+            return cur
+    io.say(f"    多次无效，采用当前值 {' → '.join(cur)}")
+    return cur
+
+
 def _ask_capital(io: IO, current: float) -> Optional[float]:
     io.say("")
     io.say("  · 总资金（元）　[capital_state.json]")
@@ -224,6 +262,10 @@ def _collect(io: IO, cfg: Config) -> Optional[Dict[str, Any]]:
         cur = bool(cfg.get(f"permissions.{b['key']}", False))
         out[f"perm_{b['key']}"] = io.ask_yes(f"    交易{b['title']}",
                                             f"perm_{b['key']}", cur)
+    srcs = _ask_sources(io, cfg)
+    if srcs is None:
+        return None
+    out["data_sources"] = srcs
     return out
 
 
@@ -233,6 +275,7 @@ def _defaults_snapshot(cfg: Config) -> Dict[str, Any]:
         out[item["key"]] = _defaults_value(item["dotted"])
     for b in BOARD_ITEMS:
         out[f"perm_{b['key']}"] = bool(_defaults_value(f"permissions.{b['key']}"))
+    out["data_sources"] = list(_defaults_value("market.data_sources") or [])
     return out
 
 
@@ -247,6 +290,8 @@ def format_summary(values: Dict[str, Any]) -> str:
                       f"{'✓' if values.get('perm_' + b['key']) else '✗'}"
                       for b in BOARD_ITEMS)
     lines.append(f"  板块权限：{perms}　[permissions.*]")
+    srcs = values.get("data_sources") or []
+    lines.append(f"  数据源降级链：{' → '.join(srcs) or '—'}　[market.data_sources]")
     return "\n".join(lines)
 
 
@@ -268,6 +313,9 @@ def apply_values(values: Dict[str, Any], cfg: Config) -> str:
         k = f"perm_{b['key']}"
         if k in values:
             cfg.set(f"permissions.{b['key']}", bool(values[k]))
+    srcs = values.get("data_sources")
+    if srcs:
+        cfg.set("market.data_sources", list(srcs))
     return mark_initialized(cfg)
 
 
@@ -277,7 +325,7 @@ def _welcome(io: IO, cfg: Config, first_run: bool) -> None:
     if first_run:
         io.say("欢迎使用 XJB_TRADE (TEA)　—　首次启动配置")
         io.say("  这套系统的默认值按一套固定的资金与风险偏好调的，先花 1 分钟")
-        io.say("  改成你自己的。只问 8 项，其余几百个参数留默认，随时可改。")
+        io.say("  改成你自己的。只问 9 项，其余几百个参数留默认，随时可改。")
     else:
         io.say("重新运行配置向导")
         io.say("  当前值会作为默认值出现，回车即保留。")

@@ -159,7 +159,9 @@ def seed_plan(cfg: Optional[Config] = None, market: Optional[Market] = None,
 
     result = sc.seed_scan(sent=sent, include_eve=include_eve, io=io)
     # 网络摘要只是一行装饰，不能因为注入的是个简易 fetcher 就把扫描结果带死。
-    net = mk.f.stats_line() if hasattr(mk.f, "stats_line") else ""
+    # 优先报源命中（东财 45｜腾讯 18）：降级链有没接上比累计耗时更值得看。
+    net = mk.stats_line() if hasattr(mk, "stats_line") else (
+        mk.f.stats_line() if hasattr(getattr(mk, "f", None), "stats_line") else "")
     io.say(f"  ✓ 种子扫描完成 ({time.time() - t_start:.1f}s)" + (f"，{net}" if net else ""))
     io.say(seed_report.format_result(result, cfg))
 
