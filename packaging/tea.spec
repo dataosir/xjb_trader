@@ -5,13 +5,14 @@
 平台判断、依赖检查、产物收尾都在那边。
 
 平台差异（PyInstaller 不能交叉编译，只能在目标平台上各跑一次）：
-- macOS  ：onedir + BUNDLE → dist/TEA.app
-- Windows：onefile        → dist/TEA.exe
+- macOS  ：onedir + BUNDLE → dist/{版本}/TEA.app
+- Windows：onefile        → dist/{版本}/TEA.exe
 
 TEA 是交互式 CLI，两个平台都必须留控制台（console=True）：--windowed
 会让 .app 双击后没有任何输入输出，等于打了个哑巴。
 """
 import os
+import re
 import sys
 
 # ------------------------------------------------------------------ 项目根
@@ -28,6 +29,22 @@ ONEFILE = os.environ.get("TEA_ONEFILE") == "1"
 CONSOLE = os.environ.get("TEA_NO_CONSOLE") != "1"
 BUNDLE_CONFIG = os.environ.get("TEA_BUNDLE_CONFIG") == "1"
 IS_MAC = sys.platform == "darwin"
+
+
+def _version():
+    """版本号优先用 build.py 递过来的，直调 pyinstaller 时回落读 tea/__init__.py。"""
+    env = os.environ.get("TEA_VERSION")
+    if env:
+        return env
+    try:
+        with open(os.path.join(ROOT, "tea", "__init__.py"), encoding="utf-8") as f:
+            m = re.search(r'^__version__\s*=\s*"([^"]+)"', f.read(), re.M)
+        return m.group(1) if m else "0.0.0"
+    except OSError:
+        return "0.0.0"
+
+
+VERSION = _version()
 
 # ------------------------------------------------------------------ 隐式导入
 # 全部子模块逐个列出。tea 内部大量走「运行时按名取源」（data.providers 按
@@ -202,8 +219,8 @@ else:
                 "CFBundleName": APP_NAME,
                 "CFBundleDisplayName": APP_NAME,
                 "CFBundleExecutable": APP_NAME,
-                "CFBundleShortVersionString": "1.0.0",
-                "CFBundleVersion": "1.0.0",
+                "CFBundleShortVersionString": VERSION,
+                "CFBundleVersion": VERSION,
                 # False：TEA 要在终端里跟用户一问一答，不能当后台代理跑
                 "LSBackgroundOnly": False,
                 "LSMinimumSystemVersion": "10.13",

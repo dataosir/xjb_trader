@@ -547,14 +547,20 @@ python3 packaging/build.py
 
 | 在哪台机器上跑 | 产物 | 形态 |
 |---|---|---|
-| macOS | `dist/TEA.app` | onedir + .app bundle |
-| Windows | `dist/TEA.exe` | onefile 单文件 |
+| macOS | `dist/{版本}/TEA.app` | onedir + .app bundle |
+| Windows | `dist/{版本}/TEA.exe` | onefile 单文件 |
 
 > PyInstaller **不能交叉编译**：要 Windows 的 `.exe` 就得在 Windows 上跑一次，Mac 上只能出 `.app`。在其他系统上执行会直接报错并提示改用源码运行。
 
 首次打包会自动 `pip install pyinstaller`（dev-only 依赖，运行时用不到；也可以先 `pip install '.[build]'`）。
 
-每次打包都会**先删掉 `dist/` 与 `build/` 再重新生成**，不会撑着上一轮的残留；想留旧产物就先自己把 `dist/` 拷走。
+### 版本号与产物归档
+
+每次打包自动把 `pyproject.toml` 的 **patch 位 +1**（1.0.0 → 1.0.1），并同步写回 `tea/__init__.py` 的 `__version__`（所以产物里 `tea --version` 报的就是这一轮的版本），然后把产物吐到 `dist/{新版本}/` 下。
+
+`dist/` **只保留最新两个版本**（当前 + 上一个），更早的版本目录在**打包成功后**自动删除 —— 打包中途失败时旧版原封不动，不会把你手上唯一可用的包删掉。目录名不是合法 semver 的（比如自己拷的 `1.0.0-backup/`）不在清理范围内。
+
+`build/` 照旧**每次删掉重建**，不会攒上一轮的残留。
 
 常用开关：
 
