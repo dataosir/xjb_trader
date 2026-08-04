@@ -8,6 +8,9 @@
 - macOS   → dist/TEA.app
 - Windows → dist/TEA.exe
 
+每次运行都会先删掉 dist/ 与 build/ 再重新生成，不用担心上一轮残留；
+想留旧产物就先自己把 dist/ 拷走。
+
 打完的程序把运行时数据写在 ~/.tea/（自动创建），不再往 .app / .exe 内部写 ——
 那里是只读的。想换位置就设 TEA_HOME 环境变量。
 """
@@ -122,11 +125,15 @@ def check_config(bundle: bool) -> None:
 
 # ---------------------------------------------------------------- 打包
 def clean() -> None:
+    """每次打包都从干净的 dist/ 与 build/ 开始，避免上一轮残留混进产物。"""
+    removed = False
     for d in (DIST, BUILD):
         if d.exists():
-            step(f"清理 {d.relative_to(ROOT)}/")
+            step(f"删除旧的 {d.relative_to(ROOT)}/")
             shutil.rmtree(d, ignore_errors=True)
-    ok("dist/ 与 build/ 已清空")
+            removed = True
+    ok("已删除旧产物，dist/ 与 build/ 将重新生成" if removed
+       else "没有旧产物，dist/ 与 build/ 直接新建")
 
 
 def run_pyinstaller(args: argparse.Namespace) -> None:
@@ -201,11 +208,10 @@ def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         prog="build.py",
         description="TEA 一键跨平台打包：macOS 产出 .app，Windows 产出 .exe。",
-        epilog="产物在 dist/ 下；运行时数据写 ~/.tea/，可用 TEA_HOME 覆盖。",
+        epilog="每次打包都会先删掉 dist/ 与 build/ 再重新生成；"
+               "产物在 dist/ 下，运行时数据写 ~/.tea/，可用 TEA_HOME 覆盖。",
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    p.add_argument("--clean", action="store_true",
-                   help="打包前先删掉 dist/ 和 build/")
     p.add_argument("--onefile", action="store_true",
                    help="单文件模式（默认 macOS 用 onedir 出 .app，Windows 用 onefile 出 .exe）")
     p.add_argument("--no-console", action="store_true",
@@ -245,10 +251,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     check_config(args.bundle_config)
 
     say("\n[2/4] 准备目录")
-    if args.clean:
-        clean()
-    else:
-        ok("保留已有 dist/ 与 build/（加 --clean 可先清空）")
+    clean()
 
     mode = "onefile" if onefile else "onedir"
     console = "保留控制台" if not args.no_console else "隐藏控制台"

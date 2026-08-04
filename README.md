@@ -554,11 +554,12 @@ python3 packaging/build.py
 
 首次打包会自动 `pip install pyinstaller`（dev-only 依赖，运行时用不到；也可以先 `pip install '.[build]'`）。
 
+每次打包都会**先删掉 `dist/` 与 `build/` 再重新生成**，不会撑着上一轮的残留；想留旧产物就先自己把 `dist/` 拷走。
+
 常用开关：
 
 | 参数 | 作用 |
 |---|---|
-| `--clean` | 打包前先清掉 `dist/` 和 `build/` |
 | `--onefile` | 强制单文件（macOS 上会得到命令行可执行文件而非 `.app`） |
 | `--no-console` | 隐藏控制台，**仅 Windows**；TEA 是交互式 CLI，默认保留 |
 | `--bundle-config` | 把 `tea_config.json` 作为默认模板打进包（默认不打，见下） |
