@@ -43,15 +43,64 @@ CAND_SKIPPED = "未预审"
 
 # ------------------------------------------------------------------ 档位参数
 
-def tier_params(tier: str, cfg: Config) -> dict:
+def dynamic_min_chg(max_sector_chg: Optional[float], base_min: float = 3.0,
+                    floor: float = 2.0, strong_chg: float = 5.0,
+                    weak_chg: float = 4.0) -> float:
+    """涨幅窗口下限按当日最强板块涨幅自适应。
+
+    固定 3% 下限在弱市里会系统性空仓：最强板块只涨 3% 的一天，几乎没有个股
+    站得上 3%，于是三档全空、天天「宁缺毋滥」。按最强板块分档下调：
+    ≥5%（标准/强市）保持基准；4%~5% 下调 0.5；<4%（弱市）落到地板。
+    地板不能再破——止损空间压不下去，R:R 就撑不到 ≥3。
+
+    max_sector_chg 为 None（板块涨幅未知）时不下调，按基准值走。
+    """
+    if max_sector_chg is None or max_sector_chg >= strong_chg:
+        return base_min
+    mid = max(floor + 0.5, base_min - 0.5)
+    return min(base_min, mid if max_sector_chg >= weak_chg else floor)
+
+
+def dyn_min_chg(cfg: Config, max_sector_chg: Optional[float],
+                base_key: str = "strict_min_chg", base_default: float = 3.0) -> float:
+    """按配置算动态下限（分档阈值与地板可调）；关闭动态化时退回配置基准值。"""
+    base = float(cfg.get(f"seed.{base_key}", base_default))
+    if max_sector_chg is None or not cfg.get("seed.dyn_min_chg_enabled", True):
+        return base
+    return dynamic_min_chg(max_sector_chg, base,
+                           float(cfg.get("seed.dyn_min_chg_floor", 2.0)),
+                           float(cfg.get("seed.dyn_strong_sector_chg", 5.0)),
+                           float(cfg.get("seed.dyn_weak_sector_chg", 4.0)))
+
+
+def dyn_window(cfg: Config, max_sector_chg: Optional[float]) -> dict:
+    """动态窗口快照：供扫描输出/报告展示当前实际生效的下限。"""
+    base = float(cfg.get("seed.strict_min_chg", 3.0))
+    lo = dyn_min_chg(cfg, max_sector_chg)
+    return {"min_chg": lo, "base_min": base, "max_sector_chg": max_sector_chg,
+            "lowered": lo < base}
+
+
+def dyn_window_text(win: dict) -> str:
+    """动态窗口一行文案：下限 2.5%（最强板块 +4.3%，标准 3.0% → 下调至 2.5%）。"""
+    chg = win.get("max_sector_chg")
+    ref = f"最强板块 {chg:+.2f}%" if chg is not None else "最强板块 —"
+    tail = (f"标准 {win['base_min']:.1f}% → 下调至 {win['min_chg']:.1f}%"
+            if win.get("lowered") else f"标准 {win['base_min']:.1f}% 保持")
+    return f"下限 {win['min_chg']:.1f}%（{ref}，{tail}）"
+
+
+def tier_params(tier: str, cfg: Config, max_sector_chg: Optional[float] = None) -> dict:
     c = lambda k, d=None: cfg.get(f"seed.{k}", d)
+    strict_min = dyn_min_chg(cfg, max_sector_chg)
     if tier == TIER_STRICT:
-        return {"name": tier, "min_chg": float(c("strict_min_chg", 3.0)), "max_chg": float(c("strict_max_chg", 5.5)),
+        return {"name": tier, "min_chg": strict_min, "max_chg": float(c("strict_max_chg", 5.5)),
                 "min_identity": float(c("strict_min_identity", 70)), "min_pick": float(c("strict_min_pick", 60)),
                 "rank_pct": float(c("strict_rank_pct", 0.35)), "min_turnover": float(c("strict_min_turnover", 2.0)),
                 "cap_max": float(c("cap_max", 300.0)), "note": "温和突破，首选"}
     if tier == TIER_RELAXED:
-        return {"name": tier, "min_chg": float(c("relaxed_min_chg", 3.0)), "max_chg": float(c("relaxed_max_chg", 7.5)),
+        return {"name": tier, "min_chg": dyn_min_chg(cfg, max_sector_chg, "relaxed_min_chg"),
+                "max_chg": float(c("relaxed_max_chg", 7.5)),
                 "min_identity": float(c("relaxed_min_identity", 65)), "min_pick": float(c("relaxed_min_pick", 62)),
                 "rank_pct": float(c("relaxed_rank_pct", 0.40)), "min_turnover": float(c("relaxed_min_turnover", 3.0)),
                 "cap_max": float(c("relaxed_cap_max", 300.0)), "note": "相对跟涨，仍拒杂毛"}
@@ -64,11 +113,15 @@ def tier_params(tier: str, cfg: Config) -> dict:
                 "rank_pct": float(c("momentum_rank_pct", 0.48)), "min_turnover": float(c("strict_min_turnover", 2.0)),
                 "cap_max": float(c("cap_max", 300.0)), "note": "前排 momentum"}
     if tier == TIER_SPROUT:
-        return {"name": tier, "min_chg": float(c("strict_min_chg", 3.0)), "max_chg": float(c("strict_max_chg", 5.5)),
+        return {"name": tier, "min_chg": strict_min, "max_chg": float(c("strict_max_chg", 5.5)),
                 "min_identity": float(c("relaxed_min_identity", 65)), "min_pick": float(c("strict_min_pick", 60)) - 5,
                 "rank_pct": float(c("relaxed_rank_pct", 0.40)), "min_turnover": float(c("strict_min_turnover", 2.0)),
                 "cap_max": float(c("cap_max", 300.0)), "note": "萌芽窗口（严格窗内非涨停前排）"}
-    return {"name": TIER_EVE, "min_chg": float(c("eve_min_chg", 1.0)), "max_chg": float(c("eve_max_chg", 3.0)),
+    # 前夕观察上限跟着动态下限收：下限降到 2.5% 时 1%~3% 的前夕窗会被严格窗盖住一截，
+    # 同一只票两边都进，「等它涨入严格窗」的触发条件当场自相矛盾。
+    eve_min = float(c("eve_min_chg", 1.0))
+    eve_max = max(eve_min, min(float(c("eve_max_chg", 3.0)), strict_min))
+    return {"name": TIER_EVE, "min_chg": eve_min, "max_chg": eve_max,
             "min_identity": 0.0, "min_pick": 0.0, "rank_pct": float(c("relaxed_rank_pct", 0.40)),
             "min_turnover": float(c("front_row_min_turnover", 1.5)), "cap_max": float(c("cap_max", 300.0)),
             "note": "前夕观察（仅观察，永不写计划）"}
@@ -87,8 +140,13 @@ def _bracket_score(value: Optional[float], brackets: List[dict], none_score: flo
     return float(brackets[-1].get("score", 0.0)) if brackets else 0.0
 
 
-def pick_score(member: dict, sector: dict, cfg: Config) -> dict:
-    """系统分（0~100）：板块位置 35 + 板块内位置 25 + 涨幅贴合 20 + 换手 10 + 市值 10。"""
+def pick_score(member: dict, sector: dict, cfg: Config,
+               min_chg: Optional[float] = None) -> dict:
+    """系统分（0~100）：板块位置 35 + 板块内位置 25 + 涨幅贴合 20 + 换手 10 + 市值 10。
+
+    min_chg 给「涨幅贴合」的下沿，缺省用配置基准值；动态下限下调时要一起传进来，
+    否则窗口放宽后进来的票会在这一项上被扣分，白放宽。
+    """
     p = lambda k, d=None: cfg.get(f"seed.pick.{k}", d)
     parts: Dict[str, float] = {}
     s_rank = sector.get("rank") or 99
@@ -102,7 +160,7 @@ def pick_score(member: dict, sector: dict, cfg: Config) -> dict:
     parts["板块内位置"] = utils.clamp(
         inner_w * (1.0 - (rank_pct if rank_pct is not None else inner_default)), 0.0, inner_w)
 
-    lo = float(cfg.get("seed.strict_min_chg", 3.0))
+    lo = float(cfg.get("seed.strict_min_chg", 3.0)) if min_chg is None else float(min_chg)
     hi = float(cfg.get("seed.strict_max_chg", 5.5))
     chg_w = float(p("chg_weight", 20.0))
     chg_penalty = float(p("chg_penalty_per_pct", 5.0))
@@ -264,6 +322,12 @@ class Screener:
         utils.tell(io, "  ⏳ 获取板块排名...")
         with utils.timed("板块排名", io, threshold=0.5):
             sectors = self.mk.get_sector_ranking()[:topn]
+        # 当日最强板块涨幅（取自排名表本身，比 TOP3 入池后的最大值更早拿到）：
+        # 温和票结构分要在遍历成分股前就知道窗口下限。
+        strongest = max([s.get("chg") or 0.0 for s in sectors], default=0.0)
+        # 温和票的定义跟选股窗口对齐：窗口降到 2.5% 而结构分还按 3% 数，
+        # 会把真正有温和票的板块当成「无温和票」剔出去。
+        mild_low = dyn_min_chg(cfg, strongest, "mild_chg_low")
         shadow = load_shadow(cfg)
         shadow_names = {s.get("bk") for s in shadow.get("sectors", [])}
         scored: List[dict] = []
@@ -291,7 +355,7 @@ class Screener:
             limit_ups = count_limit_ups(members)
             ups = sum(1 for m in members if (m.get("chg") or 0) > 0)
             mild = [m for m in members
-                    if m.get("chg") is not None and float(c("mild_chg_low", 3.0)) <= m["chg"] <= float(c("mild_chg_high", 5.5))
+                    if m.get("chg") is not None and mild_low <= m["chg"] <= float(c("mild_chg_high", 5.5))
                     and m.get("cap_yi") is not None
                     and float(c("mild_cap_low", 50.0)) <= m["cap_yi"] <= float(c("mild_cap_high", 300.0))
                     and m["chg"] < utils.limit_up_pct(m.get("code", ""), m.get("name", "")) - float(c("mild_chg_below_limit_up", 0.2))]
@@ -368,14 +432,17 @@ class Screener:
         if tracer:
             tracer.note(f"板块综合排序：候选 {len(scored)} → 达标 {len(qualified)} → TOP{len(top)}"
                         f"（最强涨幅 {max_chg:.2f}%）")
-        return {"top": top, "qualified": qualified, "scored": scored, "max_sector_chg": max_chg}
+        return {"top": top, "qualified": qualified, "scored": scored, "max_sector_chg": max_chg,
+                "strongest_sector_chg": strongest, "mild_chg_low": mild_low}
 
     # ============================================================== 第 2 步
     def screen_tier(self, sectors: List[dict], tier: str,
-                    tracer: Optional[seed_trace.Tracer] = None) -> List[dict]:
+                    tracer: Optional[seed_trace.Tracer] = None,
+                    max_sector_chg: Optional[float] = None) -> List[dict]:
         """单档涨幅窗筛选（硬过滤 + 身份/系统分门槛）。"""
         cfg = self.cfg
-        p = tier_params(tier, cfg)
+        p = tier_params(tier, cfg, max_sector_chg)
+        dyn_lo = dyn_min_chg(cfg, max_sector_chg)
         out: List[dict] = []
         cap_min = float(cfg.get("seed.cap_min", 30.0))
         to_max = float(cfg.get("seed.turnover_max", 20.0))
@@ -452,7 +519,7 @@ class Screener:
                 if idn["score"] < min_id:
                     trace("身份分不足", f"身份分 {idn['score']} < {min_id:.0f}")
                     continue
-                ps = pick_score(m, sec_ctx, cfg)
+                ps = pick_score(m, sec_ctx, cfg, min_chg=dyn_lo)
                 if ps["score"] < p["min_pick"]:
                     trace("系统分不足", f"系统分 {ps['score']} < {p['min_pick']:.0f}（{ps['parts']}）")
                     continue
@@ -472,23 +539,27 @@ class Screener:
         return out
 
     def screen_with_downgrade(self, sectors: List[dict], max_sector_chg: float,
-                              tracer: Optional[seed_trace.Tracer] = None) -> Tuple[List[dict], str, List[str]]:
+                              tracer: Optional[seed_trace.Tracer] = None,
+                              strongest_sector_chg: Optional[float] = None
+                              ) -> Tuple[List[dict], str, List[str]]:
         """三档降级逻辑：普涨日跳过严格档；逐档降级；三档全空则扫萌芽窗口。"""
         cfg = self.cfg
         notes: List[str] = []
         hot_chg = float(cfg.s("seed_hot_sector_chg", 6.0))
+        dyn_ref = strongest_sector_chg if strongest_sector_chg is not None else max_sector_chg
+        notes.append("动态窗口：" + dyn_window_text(dyn_window(cfg, dyn_ref)))
         order = [TIER_STRICT, TIER_RELAXED, TIER_MOMENTUM]
         if max_sector_chg >= hot_chg:
             order = [TIER_RELAXED, TIER_MOMENTUM]
             notes.append(f"板块最强涨幅 {max_sector_chg:.2f}% ≥{hot_chg:.0f}% → 跳过严格档（普涨日严格窗必空）")
         for tier in order:
-            cands = self.screen_tier(sectors, tier, tracer)
+            cands = self.screen_tier(sectors, tier, tracer, max_sector_chg=dyn_ref)
             if cands:
                 notes.append(f"启用 {tier}，候选 {len(cands)} 只")
                 return cands, tier, notes
             notes.append(f"{tier} 0 只 → 降级")
         if cfg.get("seed.sprout_scan_enabled", True):
-            cands = self.screen_tier(sectors, TIER_SPROUT, tracer)
+            cands = self.screen_tier(sectors, TIER_SPROUT, tracer, max_sector_chg=dyn_ref)
             if cands:
                 notes.append(f"三档全空 → 萌芽窗口扫描，候选 {len(cands)} 只")
                 return cands, TIER_SPROUT, notes
@@ -596,10 +667,11 @@ class Screener:
 
     # ============================================================== 前夕观察
     def eve_scan(self, sectors: List[dict], sent: Optional[dict],
-                 tracer: Optional[seed_trace.Tracer] = None, io: Any = None) -> List[dict]:
-        """前夕观察（1%~3% 涨幅窗）：仅观察/报告，永不写计划。"""
+                 tracer: Optional[seed_trace.Tracer] = None, io: Any = None,
+                 max_sector_chg: Optional[float] = None) -> List[dict]:
+        """前夕观察（1%~3% 涨幅窗，上限随动态下限收）：仅观察/报告，永不写计划。"""
         cfg = self.cfg
-        cands = self.screen_tier(sectors, TIER_EVE, tracer)
+        cands = self.screen_tier(sectors, TIER_EVE, tracer, max_sector_chg=max_sector_chg)
         out: List[dict] = []
         limit = int(cfg.get("seed.max_watch_output", 3))
         for cand in cands[:limit * 3]:
@@ -614,7 +686,7 @@ class Screener:
                 continue
             ev["tier_label"] = TIER_EVE
             ev["track"] = watch_pool.TRACK_EVE
-            lo = float(cfg.get("seed.strict_min_chg", 3.0))
+            lo = dyn_min_chg(cfg, max_sector_chg)
             hi = float(cfg.get("seed.strict_max_chg", 5.5))
             intr = float(cfg.get("seed.eve_trigger_intraday", 0.75))
             ev["triggers"] = [f"涨入严格窗 {lo}~{hi}%", f"分时回落至 ≤{intr:.0%} 后再预审"]
@@ -633,11 +705,16 @@ class Screener:
 
         step1 = self.rank_sectors(tracer, io=io)
         sectors = step1["top"]
+        strongest = step1.get("strongest_sector_chg")
+        eve_p = tier_params(TIER_EVE, cfg, strongest)
         result: Dict[str, Any] = {
             "at": utils.now().strftime("%Y-%m-%d %H:%M"), "scan_id": tracer.scan_id,
             "sentiment": sent, "sectors": [{k: v for k, v in s.items() if k != "members"} for s in sectors],
             "sector_pool": [{k: v for k, v in s.items() if k != "members"} for s in step1["qualified"][:10]],
             "max_sector_chg": step1["max_sector_chg"],
+            "strongest_sector_chg": strongest,
+            "dyn_window": dyn_window(cfg, strongest),
+            "eve_window": [eve_p["min_chg"], eve_p["max_chg"]],
             "tier": None, "buyable": [], "watch": [], "near_miss": [], "eve": [],
             "candidates": [], "notes": [], "verdict": VERDICT_EMPTY,
         }
@@ -649,7 +726,8 @@ class Screener:
             return result
 
         utils.tell(io, "  ⏳ 执行筛选（三档涨幅窗）...")
-        cands, tier, notes = self.screen_with_downgrade(sectors, step1["max_sector_chg"], tracer)
+        cands, tier, notes = self.screen_with_downgrade(sectors, step1["max_sector_chg"], tracer,
+                                                        strongest_sector_chg=strongest)
         result["tier"], result["notes"] = tier, notes
 
         vf = self.veto_filter(cands, sent, tracer, io=io)
@@ -671,7 +749,8 @@ class Screener:
             utils.tell(io, "  ⏳ 前夕观察扫描...")
             try:
                 with utils.timed("前夕观察扫描", io, threshold=0.5):
-                    result["eve"] = self.eve_scan(sectors, sent, tracer, io=io)
+                    result["eve"] = self.eve_scan(sectors, sent, tracer, io=io,
+                                                  max_sector_chg=strongest)
             except Exception as exc:
                 result["notes"].append(f"前夕观察扫描异常：{exc}")
 

@@ -1412,13 +1412,78 @@ def check_gates(t: Suite, cfg: Config, mk: FakeMarket, sent: dict) -> None:
 def check_seed(t: Suite, cfg: Config, mk: FakeMarket, sent: dict) -> dict:
     t.head("扫描 · 种子四步流（§9）")
     sc = screener_mod.Screener(cfg, mk)
+
+    # 涨幅窗下限随最强板块自适应：固定 3% 在弱市里会把候选排空
+    dyn = screener_mod.dynamic_min_chg
+    t.eq("强市（最强板块 6%）下限保持 3.0%", dyn(6.0), 3.0)
+    t.eq("边界：最强板块 5% 仍算强市", dyn(5.0), 3.0)
+    t.eq("4%~5%：下限降至 2.5%", dyn(4.5), 2.5)
+    t.eq("边界：最强板块 4% 降 0.5", dyn(4.0), 2.5)
+    t.eq("边界：3.99% 落弱市地板", dyn(3.99), 2.0)
+    t.eq("弱市（最强板块 3%）落地板 2.0%", dyn(3.0), 2.0)
+    t.ok("地板 2.0% 不再下探（R:R 撑不住）",
+         dyn(0.0) == 2.0 and dyn(-4.0) == 2.0, f"0%→{dyn(0.0)} -4%→{dyn(-4.0)}")
+    t.eq("板块涨幅未知时不下调", dyn(None), 3.0)
+
+    base_min = float(cfg.get("seed.strict_min_chg", 3.0))
+    base_max = float(cfg.get("seed.strict_max_chg", 5.5))
+    p_weak = screener_mod.tier_params(screener_mod.TIER_STRICT, cfg, 3.0)
+    p_sprout = screener_mod.tier_params(screener_mod.TIER_SPROUT, cfg, 3.0)
+    p_relaxed = screener_mod.tier_params(screener_mod.TIER_RELAXED, cfg, 3.0)
+    p_mom = screener_mod.tier_params(screener_mod.TIER_MOMENTUM, cfg, 3.0)
+    t.eq("严格档/萌芽档共享动态下限",
+         (p_weak["min_chg"], p_sprout["min_chg"]), (2.0, 2.0))
+    t.eq("热点降级档下限同步下调", p_relaxed["min_chg"], 2.0)
+    t.eq("动量档不动态化（面向强势票）", p_mom["min_chg"],
+         float(cfg.get("seed.momentum_min_chg", 5.0)))
+    t.eq("下限下调不动严格档上限（窗口变宽）", p_weak["max_chg"], base_max)
+    t.eq("不传板块涨幅时档位参数行为不变",
+         screener_mod.tier_params(screener_mod.TIER_STRICT, cfg)["min_chg"], base_min)
+    eve_mid = screener_mod.tier_params(screener_mod.TIER_EVE, cfg, 4.5)
+    t.eq("前夕上限收到动态下限，不与严格窗重叠",
+         (eve_mid["min_chg"], eve_mid["max_chg"]), (float(cfg.get("seed.eve_min_chg", 1.0)), 2.5))
+    t.eq("强市下前夕窗保持 1%~3%",
+         screener_mod.tier_params(screener_mod.TIER_EVE, cfg, 6.0)["max_chg"],
+         float(cfg.get("seed.eve_max_chg", 3.0)))
+
+    # 弱市回归：最强板块只涨 3.58% 的一天，2.86% 的前排票在固定 3% 下限里必被排空
+    weak_members = [{"code": "600111", "name": "领涨一号", "chg": 5.10,
+                     "turnover": 9.0, "cap_yi": 90.0, "rank": 1},
+                    {"code": "600123", "name": "测试科技", "chg": 2.86,
+                     "turnover": 8.5, "cap_yi": 120.0, "rank": 2}]
+    weak_members += [{"code": f"6009{i:02d}", "name": f"弱势{i:02d}",
+                      "chg": round(1.0 - i * 0.1, 2), "turnover": 2.0,
+                      "cap_yi": 60.0, "rank": 3 + i} for i in range(8)]
+    weak_sectors = [{"bk": "BK9001", "name": "弱市板块", "rank": 1, "chg": 3.58,
+                     "limit_up_count": 0, "member_total": 10, "up_ratio": 1.0,
+                     "mild_n": 1, "mild_ratio": 0.1, "total_score": 72.0,
+                     "gate": "放宽", "members": weak_members}]
+    weak_dyn = [c["code"] for c in sc.screen_tier(weak_sectors, screener_mod.TIER_STRICT,
+                                                  max_sector_chg=3.58)]
+    weak_fixed = [c["code"] for c in sc.screen_tier(weak_sectors, screener_mod.TIER_STRICT)]
+    t.ok("弱市：2.86% 的前排票进入严格档", "600123" in weak_dyn, f"候选={weak_dyn}")
+    t.ok("同一批数据在固定 3% 下限下被排空", "600123" not in weak_fixed,
+         f"候选={weak_fixed}")
+
     step1 = sc.rank_sectors()
     t.ok("第1步：板块池非空", bool(step1["top"]),
          f"入池 {len(step1['top'])} 个，合格 {len(step1.get('qualified') or [])} 个")
     top_names = [s["name"] for s in step1["top"]]
     t.ok("极热板块入池", HOT_NAME in top_names, f"top={top_names[:3]}")
+    t.eq("最强板块涨幅回传", step1.get("strongest_sector_chg"),
+         max(s["chg"] for s in SECTORS))
+    t.eq("强市下温和票下限不变", step1.get("mild_chg_low"),
+         float(cfg.get("seed.mild_chg_low", 3.0)))
 
     res = sc.seed_scan(sent=sent, include_eve=True, write_trace=True)
+    win = res.get("dyn_window") or {}
+    t.eq("扫描结果带动态窗口快照", (win.get("min_chg"), win.get("lowered")), (3.0, False))
+    t.ok("扫描输出显示当前动态下限",
+         "动态窗口：下限 3.0%" in seed_report.format_result(res, cfg),
+         screener_mod.dyn_window_text(win))
+    t.ok("扫描备注记下动态窗口",
+         any("动态窗口" in n for n in (res.get("notes") or [])),
+         "；".join(res.get("notes") or []))
     t.ok("四步流产出裁决", res["verdict"] in (screener_mod.VERDICT_TRADEABLE,
                                               screener_mod.VERDICT_PENDING,
                                               screener_mod.VERDICT_EMPTY),

@@ -9,7 +9,8 @@ from typing import Any, Dict, List, Optional
 from tea.config.config_store import Config, load_config
 from tea.core import utils
 from . import preflight
-from .screener import VERDICT_EMPTY, VERDICT_PENDING, VERDICT_TRADEABLE
+from .screener import (VERDICT_EMPTY, VERDICT_PENDING, VERDICT_TRADEABLE,
+                       dyn_window_text)
 
 VERDICT_LABEL = {
     VERDICT_TRADEABLE: "HAS_TRADEABLE（有可买标的，已写次日计划）",
@@ -76,6 +77,12 @@ def _cand_row(c: dict) -> str:
             f"| **{c.get('verdict') or '—'}** | {c.get('reason') or '—'} |")
 
 
+def _dyn_line(result: dict) -> Optional[str]:
+    """当前生效的涨幅窗口下限（随最强板块自适应），让用户知道用的是什么阈值。"""
+    win = result.get("dyn_window")
+    return f"动态窗口：{dyn_window_text(win)}" if win else None
+
+
 # ------------------------------------------------------------------ Markdown
 
 def render_md(result: dict, cfg: Optional[Config] = None) -> str:
@@ -91,8 +98,11 @@ def render_md(result: dict, cfg: Optional[Config] = None) -> str:
         f"- 漏斗：板块 TOP{len(result.get('sectors') or [])} → 初筛 {result.get('candidates_n', 0)} 只 "
         f"→ VETO 通过 {result.get('veto_passed_n', 0)} 只（软否决 {result.get('soft_n', 0)} 只）"
         f"→ 可买 {len(result.get('buyable') or [])} 只",
-        "",
     ]
+    dyn = _dyn_line(result)
+    if dyn:
+        lines.append(f"- {dyn}")
+    lines.append("")
 
     # ---- 第 1 步 板块
     lines += ["## 第 1 步 · 板块综合排序", ""]
@@ -139,7 +149,8 @@ def render_md(result: dict, cfg: Optional[Config] = None) -> str:
 
     # ---- 前夕观察
     eve = result.get("eve") or []
-    lines += ["## 前夕观察（1%~3% 涨幅窗 · 永不写计划）", ""]
+    ew = result.get("eve_window") or [1.0, 3.0]
+    lines += [f"## 前夕观察（{ew[0]:.1f}%~{ew[1]:.1f}% 涨幅窗 · 永不写计划）", ""]
     if eve:
         lines += _EV_HEADER + [_ev_row(e) for e in eve] + [""]
         for e in eve:
@@ -200,6 +211,9 @@ def format_result(result: dict, cfg: Optional[Config] = None) -> str:
         f"   漏斗 初筛 {result.get('candidates_n', 0)} → VETO 过 {result.get('veto_passed_n', 0)}"
         f" → 可买 {len(result.get('buyable') or [])}",
     ]
+    dyn = _dyn_line(result)
+    if dyn:
+        lines.append(f"  {dyn}")
 
     sectors = result.get("sectors") or []
     lines.append(f"  ---- 第1步 板块 TOP{len(sectors)} ----")

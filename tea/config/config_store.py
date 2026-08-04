@@ -435,6 +435,11 @@ DEFAULTS: Dict[str, Any] = {
         # 三档门槛
         "strict_min_chg": 3.0,
         "strict_max_chg": 5.5,
+        # 涨幅窗下限动态化：最强板块 ≥5% 保持基准，4%~5% 下调 0.5，<4% 落到地板
+        "dyn_min_chg_enabled": True,
+        "dyn_min_chg_floor": 2.0,
+        "dyn_strong_sector_chg": 5.0,
+        "dyn_weak_sector_chg": 4.0,
         "strict_min_identity": 70,
         "strict_min_pick": 60,
         "strict_rank_pct": 0.35,
