@@ -443,6 +443,9 @@ def menu_loop(cfg: Config) -> int:
             io.say("\n  已中断")
         except Exception as exc:  # 菜单里不让单条命令崩掉整个会话
             io.say(f"  执行出错：{exc}")
+        # 结果出完先停住，别把刚打印的东西立刻用菜单顶掉
+        if io.pause() in ("q", "quit", "exit"):
+            return 0
 
 
 # ==================================================================== 解析器

@@ -84,3 +84,12 @@ class IO:
                   key: str = "force") -> bool:
         raw = self.ask(prompt, key, "")
         return str(raw or "").strip().upper() == "FORCE"
+
+    def pause(self, hint: str = "  回车=继续 │ q=退出") -> str:
+        """动作执行完毕后停一下，让结果留在屏幕上。返回用户输入（已小写去空白）。"""
+        if not self.interactive:
+            return ""
+        try:
+            return input(hint + "\n").strip().lower()
+        except (EOFError, KeyboardInterrupt):
+            return "q"
