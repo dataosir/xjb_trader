@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import time
 from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import TimeoutError as FutureTimeout
 from typing import Any, Dict, List, Optional
 
 from tea.config.config_store import Config, load_config
@@ -25,6 +26,9 @@ STANCE_DEFEND = "防守"
 STANCE_ATTACK = "进攻"
 
 _CACHE: Dict[str, Any] = {"ts": 0.0, "data": None}
+
+# 单路行情最长等待秒数：超时只降级该路，不让情绪评分整体卡住。
+_FETCH_TIMEOUT = 15
 
 
 # ------------------------------------------------------------------ 采集
@@ -49,7 +53,11 @@ def fetch_raw(market: Market, io: Any = None) -> dict:
         # 在主线程按固定顺序收结果再打印，避开三个线程抢着往屏上写。
         for name, fut in (("index", f_idx), ("sectors", f_sec), ("hard", f_hard)):
             try:
-                res = fut.result()
+                res = fut.result(timeout=_FETCH_TIMEOUT)
+            except FutureTimeout:
+                out["errors"].append(f"{name}: 超时 {_FETCH_TIMEOUT}s")
+                utils.tell(io, f"    · {labels[name]} 超时（>{_FETCH_TIMEOUT}s），跳过")
+                continue
             except Exception as exc:
                 out["errors"].append(f"{name}: {exc}")
                 utils.tell(io, f"    · {labels[name]} 失败：{exc}")

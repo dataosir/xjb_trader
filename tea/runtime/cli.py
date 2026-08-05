@@ -7,6 +7,7 @@
   tea run --code 600519    单标的准入评估（Phase1→4）
   tea seed-plan            14:30 种子扫描 + 写次日计划
   tea plan-check           09:35 计划复核
+  tea plan-clear           清除过期旧计划
   tea review               盘后复核（跟涨回填 + 观察池）
   tea status / weather / pos / trades / stats / weekly
   tea setup                配置向导（首次启动自动进入）
@@ -79,8 +80,48 @@ def cmd_seed_plan(args, cfg: Config) -> int:
     return 0 if res.get("buyable") else 1
 
 
+def _plan_expired(plan: dict, cfg: Config) -> bool:
+    """计划是否已过期/作废：还挂着标的，但今日已不可执行。
+
+    已清除 / 已执行的计划没有收尾可做，不算过期。
+    """
+    if not plan or not plan.get("items"):
+        return False
+    status = plan.get("status")
+    if status in (plan_mod.STATUS_CLEARED, plan_mod.STATUS_EXECUTED):
+        return False
+    if status == plan_mod.STATUS_INVALID:
+        return True
+    return plan.get("execute_date") != utils.today_str()
+
+
+def _offer_clear_expired_plan(cfg: Config, io: IO) -> bool:
+    """复核完发现计划已过期/作废时，当场问一句要不要清除（非交互不阻塞）。
+
+    过期计划留在盘上会一直触发菜单 22 的提醒，顺手清掉比记着再敲一条命令省事。
+    """
+    plan = plan_mod.load_plan(cfg)
+    if not _plan_expired(plan, cfg):
+        return False
+    why = "计划已作废" if plan.get("status") == plan_mod.STATUS_INVALID else \
+        f"执行日 {plan.get('execute_date')} 已过"
+    if not io.ask_yes(f"该计划已过期（{why}），是否清除？", key="plan_clear"):
+        io.say("  已保留计划（随时可执行 plan-clear 清除）")
+        return False
+    labels = plan_mod.planned_labels(plan) or plan_mod.planned_labels(plan, only_active=False)
+    reason = "计划复核确认清除"
+    p = plan_mod.clear_plan(cfg, reason=reason)
+    accumulator.record_plan("clear", p, reason, cfg)
+    io.say(f"已清除旧计划：{'、'.join(labels)}")
+    io.say(f"  清除时间 {p.get('cleared_at')}")
+    return True
+
+
 def cmd_plan_check(args, cfg: Config) -> int:
-    res = runner.plan_check(cfg=cfg, io=_io(), apply=not args.dry)
+    io = _io()
+    res = runner.plan_check(cfg=cfg, io=io, apply=not args.dry)
+    if not args.dry:
+        _offer_clear_expired_plan(cfg, io)
     return 1 if res.get("changed") else 0
 
 
@@ -97,6 +138,20 @@ def cmd_plan(args, cfg: Config) -> int:
         io.say(f"计划已作废：{args.invalidate}")
         return 0
     io.say(plan_mod.format_plan(plan_mod.load_plan(cfg)))
+    return 0
+
+
+def cmd_plan_clear(args, cfg: Config) -> int:
+    """清除过期旧计划：种子扫描提示的「请执行 plan-clear」指的就是这条。"""
+    io = _io()
+    labels = plan_mod.planned_labels(plan_mod.load_plan(cfg))
+    if not labels:
+        io.say("当前无待清除计划")
+        return 0
+    p = plan_mod.clear_plan(cfg, reason=args.reason)
+    accumulator.record_plan("clear", p, args.reason, cfg)
+    io.say(f"已清除旧计划：{'、'.join(labels)}")
+    io.say(f"  清除时间 {p.get('cleared_at')}")
     return 0
 
 
@@ -323,6 +378,7 @@ MENU = [
     ("19", "配置一览", ["config", "list"]),
     ("20", "离线自测", ["selftest"]),
     ("21", "配置向导（重新配置）", ["setup"]),
+    ("22", "清除过期计划", ["plan-clear"]),
 ]
 
 # 展开视图按场景分组：全部平铺时无从下手，分成 6 组后每组只有 2–4 条。
@@ -330,34 +386,48 @@ MENU = [
 MENU_GROUPS = [
     ("道法 · 先看天气", ["1", "2"]),
     ("准入 · 买之前", ["3", "4"]),
-    ("计划 · 次日", ["5", "6", "7"]),
+    ("计划 · 次日", ["5", "6", "7", "22"]),
     ("持仓 · 买之后", ["10", "11", "12"]),
     ("复盘 · 收盘后", ["9", "8", "16", "17", "18", "13", "14", "15"]),
     ("工具", ["19", "21", "20"]),
 ]
 
 
-def suggest_keys(tm: Timing) -> list:
+def _has_stale_plan(cfg: Optional[Config]) -> bool:
+    """是否挂着过期旧计划：还有未执行标的，但执行日已经不是今天。"""
+    if cfg is None:
+        return False
+    try:
+        plan = plan_mod.load_plan(cfg)
+    except Exception:
+        return False       # 计划文件坏了不该拖累菜单
+    return bool(plan_mod.active_items(plan)) and not plan_mod.is_valid_today(plan, cfg)
+
+
+def suggest_keys(tm: Timing, cfg: Optional[Config] = None) -> list:
     """挑出此刻真正该做的几项，最多四条。
 
     同一时刻有意义的操作从来不超过四个：非交易日只能复盘和演练，买入窗口外
     再怎么评估也会被门禁挡回来。默认视图只印这几条，其余的按 m 展开。
     """
     if not tm.is_trading_day():
-        return ["9", "5", "2", "1"]
+        keys = ["9", "5", "2", "1"]
+    else:
+        keys = []
+        if tm.is_buy_window():
+            keys += ["3", "7"]                      # 唯一新开窗口，先看计划再评估
+        if tm.is_seed_window():
+            keys += ["5"]                            # 14:30 扫种子、写次日计划
+        if tm.is_plan_recheck_window() or tm.is_overnight_review_window():
+            keys += ["6", "7"]
+        if tm.is_after_close():
+            keys += ["9", "5"]
+        if not keys:
+            keys = ["1", "8"] if tm.in_session() else ["1", "7"]  # 盘中盯观察池，盘前看计划
+        keys += ["10", "2"]                          # 持仓和今日状态任何时候都想看
 
-    keys = []
-    if tm.is_buy_window():
-        keys += ["3", "7"]                      # 唯一新开窗口，先看计划再评估
-    if tm.is_seed_window():
-        keys += ["5"]                            # 14:30 扫种子、写次日计划
-    if tm.is_plan_recheck_window() or tm.is_overnight_review_window():
-        keys += ["6", "7"]
-    if tm.is_after_close():
-        keys += ["9", "5"]
-    if not keys:
-        keys = ["1", "8"] if tm.in_session() else ["1", "7"]  # 盘中盯观察池，盘前看计划
-    keys += ["10", "2"]                          # 持仓和今日状态任何时候都想看
+    if _has_stale_plan(cfg):
+        keys.insert(0, "22")                         # 旧计划没清干净，先收尾再谈别的
 
     out = []
     for k in keys:
@@ -382,7 +452,7 @@ def print_menu(io: IO, cfg: Config, full: bool = False) -> None:
         io.say("   c. 收起，只看此刻该做的")
     else:
         io.say(f"  此刻（{tm.phase()}）建议：")
-        for k in suggest_keys(tm):
+        for k in suggest_keys(tm, cfg):
             io.say(f"  {k:>2}. {labels[k]}")
         io.say(f"   m. 展开全部 {len(MENU)} 项（或直接输入 1-{len(MENU)}）")
     io.say(f"   q. 退出 │ 1-{len(MENU)} 任意编号 │ 回车刷新菜单")
@@ -485,6 +555,10 @@ def build_parser() -> argparse.ArgumentParser:
     pl.add_argument("--clear", action="store_true", help="清空计划")
     pl.add_argument("--invalidate", metavar="REASON", help="按理由作废计划")
     pl.set_defaults(func=cmd_plan)
+
+    plc = sub.add_parser("plan-clear", help="清除过期旧计划（计划过期后的收尾）")
+    plc.add_argument("--reason", default="手动清除过期计划", help="清除理由（写入计划备注）")
+    plc.set_defaults(func=cmd_plan_clear)
 
     rv = sub.add_parser("review", help="盘后复核：跟涨回填 + 观察池 + 当日累积")
     rv.add_argument("--no-prune", action="store_true", help="不自动清理超时观察项")

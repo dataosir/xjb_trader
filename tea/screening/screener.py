@@ -96,7 +96,7 @@ def tier_params(tier: str, cfg: Config, max_sector_chg: Optional[float] = None) 
     if tier == TIER_STRICT:
         return {"name": tier, "min_chg": strict_min, "max_chg": float(c("strict_max_chg", 5.5)),
                 "min_identity": float(c("strict_min_identity", 70)), "min_pick": float(c("strict_min_pick", 60)),
-                "rank_pct": float(c("strict_rank_pct", 0.35)), "min_turnover": float(c("strict_min_turnover", 2.0)),
+                "rank_pct": float(c("strict_rank_pct", 0.50)), "min_turnover": float(c("strict_min_turnover", 2.0)),
                 "cap_max": float(c("cap_max", 300.0)), "note": "温和突破，首选"}
     if tier == TIER_RELAXED:
         return {"name": tier, "min_chg": dyn_min_chg(cfg, max_sector_chg, "relaxed_min_chg"),
@@ -386,11 +386,11 @@ class Screener:
             scored.append(entry)
 
         # 板块硬门槛：排名 ≤8 且 涨停 ≥2 家（或 涨停1家 + 综合分 ≥60）
-        # 弱市补充通道：0 涨停但综合分 ≥70 且排名前 12（弱市中好板块常无涨停）
+        # 弱市补充通道：0 涨停但综合分 ≥65 且排名前 12（弱市中好板块常无涨停）
         min_rank = int(cfg.s("seed_min_sector_rank", 8))
         min_zt = int(cfg.s("seed_min_sector_limit_up", 2))
         relax_score = float(c("sector_relax_score", 60.0))
-        relax_score_nozt = float(c("sector_relax_score_nozt", 70.0))
+        relax_score_nozt = float(c("sector_relax_score_nozt", 65.0))
         relax_rank_nozt = int(c("sector_relax_rank_nozt", 12))
         qualified = []
         for e in scored:

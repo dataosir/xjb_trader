@@ -426,7 +426,8 @@ DEFAULTS: Dict[str, Any] = {
         "mild_chg_below_limit_up": 0.2,
         "mild_score_max": 100.0,
         "sector_relax_score": 60.0,
-        "sector_relax_score_nozt": 70.0,
+        # 无涨停通道：弱市好板块常无涨停，阈值从 70 下调到 65 扩容
+        "sector_relax_score_nozt": 65.0,
         "sector_relax_rank_nozt": 12,
         "diversify_replace_last": True,
         "shadow_bonus": 18.0,
@@ -442,7 +443,7 @@ DEFAULTS: Dict[str, Any] = {
         "dyn_weak_sector_chg": 4.0,
         "strict_min_identity": 70,
         "strict_min_pick": 60,
-        "strict_rank_pct": 0.35,
+        "strict_rank_pct": 0.50,
         "strict_min_turnover": 2.0,
         "relaxed_min_chg": 3.0,
         "relaxed_max_chg": 7.5,

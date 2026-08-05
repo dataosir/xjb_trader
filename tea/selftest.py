@@ -1581,6 +1581,115 @@ def check_plan_labels(t: Suite, cfg: Config, mk: FakeMarket, sent: dict) -> None
     gates.reset_state(cfg)
 
 
+def check_plan_clear(t: Suite, cfg: Config) -> None:
+    """plan-clear 必须真的存在，并且把旧计划清到底。
+
+    种子扫描在“今日无可买”时会叫用户去执行 plan-clear，提示里点名的命令不存在
+    比不提示更坏。这里同时盯住两件事：子命令注册到了 argparse，以及清除后
+    is_valid_today 真的翻成假（否则计划绑定门禁还会拿旧计划放行）。
+    """
+    t.head("计划 · plan-clear 清除旧计划")
+    from .runtime import cli
+
+    args = cli.build_parser().parse_args(["plan-clear"])
+    t.eq("plan-clear 已注册到 argparse", getattr(args, "func", None), cli.cmd_plan_clear)
+
+    plan_mod.save_plan({
+        "version": plan_mod.PLAN_VERSION, "planned_date": utils.today_str(),
+        "execute_date": utils.today_str(), "status": plan_mod.STATUS_PENDING,
+        "items": [{"code": "002882", "name": "中元股份", "status": plan_mod.STATUS_PENDING},
+                  {"code": "600312", "status": plan_mod.STATUS_READY}],
+        "notes": [],
+    }, cfg)
+    buf = io_mod.StringIO()
+    with contextlib.redirect_stdout(buf):
+        rc = cli.main(["plan-clear"])
+    out = buf.getvalue()
+    t.eq("plan-clear 退码 0", rc, 0)
+    t.ok("确认信息带代码与名称", "已清除旧计划：002882 中元股份" in out,
+         out.strip() or "（无输出）")
+    t.ok("确认信息覆盖 ready_exec 项", "600312" in out, out.strip())
+
+    cleared = plan_mod.load_plan(cfg)
+    t.eq("整单状态 → cleared", cleared.get("status"), plan_mod.STATUS_CLEARED)
+    t.eq("无残留待执行项", plan_mod.active_items(cleared), [])
+    t.ok("记下了清除时间", bool(cleared.get("cleared_at")), str(cleared.get("cleared_at")))
+    t.ok("清除理由写入备注",
+         any("清除" in n for n in cleared.get("notes", [])), str(cleared.get("notes")))
+    t.ok("清除后今日计划失效", not plan_mod.is_valid_today(cleared, cfg))
+
+    # 空计划下重跑不能报错，也不能谎称清了东西
+    buf2 = io_mod.StringIO()
+    with contextlib.redirect_stdout(buf2):
+        rc2 = cli.main(["plan-clear"])
+    out2 = buf2.getvalue()
+    t.eq("重跑仍退码 0", rc2, 0)
+    t.ok("无计划时明确告知", "当前无待清除计划" in out2, out2.strip() or "（无输出）")
+    t.ok("无计划时不报已清除", "已清除旧计划" not in out2, out2.strip())
+
+    gates.reset_state(cfg)
+
+
+def check_plan_check_clear_prompt(t: Suite, cfg: Config) -> None:
+    """计划复核后的清除询问：只在真过期时弹，而且必须可以拒绝。
+
+    这里盯三件事：过期判定不能误伤今日有效计划（否则复核完就把可执行计划
+    问掉了）、答 y 才真清（且 is_valid_today 翻假）、非交互下不能阻塞也不能擅自改盘。
+    """
+    t.head("计划 · plan-check 过期清除询问")
+    from .phases import IO
+    from .runtime import cli
+
+    def seed(execute_date: str, status: str) -> None:
+        plan_mod.save_plan({
+            "version": plan_mod.PLAN_VERSION, "planned_date": utils.today_str(),
+            "execute_date": execute_date, "status": status,
+            "items": [{"code": "002882", "name": "中元股份", "status": plan_mod.STATUS_PENDING}],
+            "notes": [],
+        }, cfg)
+
+    yesterday = utils.today_str(utils.prev_trading_day())
+
+    # 1. 今日有效计划：不弹提示
+    seed(utils.today_str(), plan_mod.STATUS_PENDING)
+    valid = plan_mod.load_plan(cfg)
+    t.ok("今日有效计划不算过期", not cli._plan_expired(valid, cfg))
+    io = IO(answers={"plan_clear": "y"}, quiet=True)
+    t.ok("有效计划不询问清除", cli._offer_clear_expired_plan(cfg, io) is False)
+    t.ok("有效计划复核后仍在", plan_mod.is_valid_today(plan_mod.load_plan(cfg), cfg))
+
+    # 2. 执行日已过 + 答 y → 真清
+    seed(yesterday, plan_mod.STATUS_PENDING)
+    stale = plan_mod.load_plan(cfg)
+    t.ok("执行日已过 → 过期", cli._plan_expired(stale, cfg))
+    io = IO(answers={"plan_clear": "y"}, quiet=True)
+    t.ok("答 y 执行清除", cli._offer_clear_expired_plan(cfg, io) is True)
+    log = "\n".join(io.transcript)
+    t.ok("询问文案点明已过期", "已过期" in log, log or "（无输出）")
+    t.ok("确认信息带代码与名称", "已清除旧计划：002882 中元股份" in log, log)
+    cleared = plan_mod.load_plan(cfg)
+    t.eq("整单状态 → cleared", cleared.get("status"), plan_mod.STATUS_CLEARED)
+    t.eq("无残留待执行项", plan_mod.active_items(cleared), [])
+    t.ok("清除后今日计划失效", not plan_mod.is_valid_today(cleared, cfg))
+    t.ok("已清除计划不再重复询问", not cli._plan_expired(cleared, cfg))
+
+    # 3. 计划作废 + 答 n → 原状不动
+    seed(utils.today_str(), plan_mod.STATUS_INVALID)
+    io = IO(answers={"plan_clear": "n"}, quiet=True)
+    t.ok("作废计划依旧询问", cli._plan_expired(plan_mod.load_plan(cfg), cfg))
+    t.ok("答 n 不清除", cli._offer_clear_expired_plan(cfg, io) is False)
+    t.ok("拒绝后告知保留", "已保留计划" in "\n".join(io.transcript), str(io.transcript))
+    t.eq("拒绝后状态不变", plan_mod.load_plan(cfg).get("status"), plan_mod.STATUS_INVALID)
+
+    # 4. 非交互（脚本调用）：不阻塞、不误删
+    io = IO(interactive=False, quiet=True)
+    t.ok("非交互不清除", cli._offer_clear_expired_plan(cfg, io) is False)
+    t.eq("非交互不改盘", plan_mod.load_plan(cfg).get("status"), plan_mod.STATUS_INVALID)
+
+    plan_mod.clear_plan(cfg)
+    gates.reset_state(cfg)
+
+
 def check_menu(t: Suite, cfg: Config) -> None:
     """菜单：默认只印四条建议，展开视图必须不多不少地盖住 20 项。
 
@@ -2058,6 +2167,8 @@ def main(verbose: bool = True, cfg: Optional[Config] = None) -> int:
         check_gates(t, c, mk, sent)
         check_seed(t, c, mk, sent)
         check_plan_labels(t, c, mk, sent)
+        check_plan_clear(t, c)
+        check_plan_check_clear_prompt(t, c)
         check_menu(t, c)
         check_config_migration(t, tmp)
         check_onboarding(t, tmp)

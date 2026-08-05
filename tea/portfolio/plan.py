@@ -181,13 +181,19 @@ def invalidate(reason: str, cfg: Optional[Config] = None, codes: Optional[List[s
     return plan
 
 
-def clear_plan(cfg: Optional[Config] = None) -> dict:
+def clear_plan(cfg: Optional[Config] = None, reason: str = "") -> dict:
+    """清空计划（过期旧计划的收尾），顺手记下清除时间备查。"""
     cfg = cfg or load_config()
     plan = load_plan(cfg)
+    stamp = utils.now().strftime("%Y-%m-%d %H:%M:%S")
     plan["status"] = STATUS_CLEARED
+    plan["cleared_at"] = stamp
+    if reason:
+        plan.setdefault("notes", []).append(f"[{utils.now().strftime('%m-%d %H:%M')}] 清除：{reason}")
     for i in plan.get("items", []):
         if i.get("status") in (STATUS_PENDING, STATUS_READY):
             i["status"] = STATUS_CLEARED
+            i["cleared_at"] = stamp
     save_plan(plan, cfg)
     return plan
 
