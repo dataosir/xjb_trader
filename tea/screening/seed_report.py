@@ -15,8 +15,8 @@ from .screener import (VERDICT_EMPTY, VERDICT_PENDING, VERDICT_TRADEABLE,
                        dyn_window_text)
 
 
-def _hl(text: str) -> str:
-    """ANSI 高亮（黄色加粗），Windows 10+ 支持。"""
+def _hl(text: str, color: str = "yellow") -> str:
+    """ANSI 高亮，支持颜色参数。"""
     if os.name == 'nt':
         try:
             import ctypes
@@ -24,7 +24,17 @@ def _hl(text: str) -> str:
             kernel32.SetConsoleMode(kernel32.GetStdHandle(-11), 7)
         except Exception:
             pass
-    return f"\033[1;33m{text}\033[0m"
+    colors = {
+        "red": "31",
+        "yellow": "33",
+        "blue": "34",
+        "green": "32",
+        "cyan": "36",
+        "magenta": "35",
+        "white": "37",
+    }
+    code = colors.get(color, "33")
+    return f"\033[1;{code}m{text}\033[0m"
 
 VERDICT_LABEL = {
     VERDICT_TRADEABLE: "HAS_TRADEABLE（有可买标的，已写次日计划）",
@@ -250,7 +260,8 @@ def format_result(result: dict, cfg: Optional[Config] = None) -> str:
             q = e.get("quote") or {}
             idn = e.get("identity") or {}
             lv = e.get("levels") or {}
-            lines.append(f"    {_hl(e.get('code'))} {_hl(e.get('name'))} "
+            color = {"buyable": "red", "watch": "yellow", "near_miss": "blue", "eve": "green"}.get(key, "yellow")
+            lines.append(f"    {_hl(e.get('code'), color)} {_hl(e.get('name'), color)} "
                          f"{utils.num(q.get('price')):>8} {utils.pct(q.get('chg_pct')):>8}"
                          f"  共振 {e.get('total_score')}/{e.get('pass_threshold')}"
                          f"  {idn.get('tier')}{utils.num(idn.get('score'), 0)}"
@@ -269,7 +280,7 @@ def format_result(result: dict, cfg: Optional[Config] = None) -> str:
     if not cands:
         lines.append("    —")
     for c in cands:
-        lines.append(f"    {_hl(c.get('code'))} {_hl(c.get('name') or '')} "
+        lines.append(f"    {_hl(c.get('code'), 'cyan')} {_hl(c.get('name') or '', 'cyan')} "
                      f"{utils.pct(c.get('chg')):>8}  分时 {_intr(c.get('intraday')):>4}"
                      f"  共振 {_reso(c):<5}  {_ident(c, 0):<8}"
                      f"  [{c.get('verdict') or '—'}]")
