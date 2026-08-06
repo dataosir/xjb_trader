@@ -249,9 +249,16 @@ def format_result(result: dict, cfg: Optional[Config] = None) -> str:
     else:
         lines.append("    无板块达标")
 
+    op_map = {
+        "buyable": ("买入", "red"),
+        "watch": ("观察", "yellow"),
+        "near_miss": ("不操作", "blue"),
+        "eve": ("观察", "green"),
+    }
     for title, key in (("可买", "buyable"), ("待启动观察", "watch"),
                        ("近失（只复盘）", "near_miss"), ("前夕观察", "eve")):
         evs = result.get(key) or []
+        op_label, color = op_map.get(key, ("", "yellow"))
         lines.append(f"  ---- {title}（{len(evs)}）----")
         if not evs:
             lines.append("    —")
@@ -260,8 +267,7 @@ def format_result(result: dict, cfg: Optional[Config] = None) -> str:
             q = e.get("quote") or {}
             idn = e.get("identity") or {}
             lv = e.get("levels") or {}
-            color = {"buyable": "red", "watch": "yellow", "near_miss": "blue", "eve": "green"}.get(key, "yellow")
-            lines.append(f"    {_hl(e.get('code'), color)} {_hl(e.get('name'), color)} "
+            lines.append(f"    [{_hl(op_label, color)}] {_hl(e.get('code'), color)} {_hl(e.get('name'), color)} "
                          f"{utils.num(q.get('price')):>8} {utils.pct(q.get('chg_pct')):>8}"
                          f"  共振 {e.get('total_score')}/{e.get('pass_threshold')}"
                          f"  {idn.get('tier')}{utils.num(idn.get('score'), 0)}"
@@ -280,7 +286,7 @@ def format_result(result: dict, cfg: Optional[Config] = None) -> str:
     if not cands:
         lines.append("    —")
     for c in cands:
-        lines.append(f"    {_hl(c.get('code'), 'cyan')} {_hl(c.get('name') or '', 'cyan')} "
+        lines.append(f"    [{_hl('候选', 'cyan')}] {_hl(c.get('code'), 'cyan')} {_hl(c.get('name') or '', 'cyan')} "
                      f"{utils.pct(c.get('chg')):>8}  分时 {_intr(c.get('intraday')):>4}"
                      f"  共振 {_reso(c):<5}  {_ident(c, 0):<8}"
                      f"  [{c.get('verdict') or '—'}]")
