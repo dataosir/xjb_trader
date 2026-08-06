@@ -4,6 +4,8 @@ verdict：HAS_TRADEABLE（有可买）/ PENDING（仅观察）/ EMPTY（今日�
 """
 from __future__ import annotations
 
+import os
+import sys
 from typing import Any, Dict, List, Optional
 
 from tea.config.config_store import Config, load_config
@@ -11,6 +13,18 @@ from tea.core import utils
 from . import preflight
 from .screener import (VERDICT_EMPTY, VERDICT_PENDING, VERDICT_TRADEABLE,
                        dyn_window_text)
+
+
+def _hl(text: str) -> str:
+    """ANSI 高亮（黄色加粗），Windows 10+ 支持。"""
+    if os.name == 'nt':
+        try:
+            import ctypes
+            kernel32 = ctypes.windll.kernel32
+            kernel32.SetConsoleMode(kernel32.GetStdHandle(-11), 7)
+        except Exception:
+            pass
+    return f"\033[1;33m{text}\033[0m"
 
 VERDICT_LABEL = {
     VERDICT_TRADEABLE: "HAS_TRADEABLE（有可买标的，已写次日计划）",
@@ -236,8 +250,8 @@ def format_result(result: dict, cfg: Optional[Config] = None) -> str:
             q = e.get("quote") or {}
             idn = e.get("identity") or {}
             lv = e.get("levels") or {}
-            lines.append(f"    {e.get('code')} {e.get('name'):<8} {utils.num(q.get('price')):>8}"
-                         f" {utils.pct(q.get('chg_pct')):>8}"
+            lines.append(f"    {_hl(e.get('code'))} {_hl(e.get('name'))} "
+                         f"{utils.num(q.get('price')):>8} {utils.pct(q.get('chg_pct')):>8}"
                          f"  共振 {e.get('total_score')}/{e.get('pass_threshold')}"
                          f"  {idn.get('tier')}{utils.num(idn.get('score'), 0)}"
                          f"  {(e.get('stage') or {}).get('stage') or '—'}"
@@ -255,8 +269,8 @@ def format_result(result: dict, cfg: Optional[Config] = None) -> str:
     if not cands:
         lines.append("    —")
     for c in cands:
-        lines.append(f"    {c.get('code')} {(c.get('name') or ''):<8}"
-                     f" {utils.pct(c.get('chg')):>8}  分时 {_intr(c.get('intraday')):>4}"
+        lines.append(f"    {_hl(c.get('code'))} {_hl(c.get('name') or '')} "
+                     f"{utils.pct(c.get('chg')):>8}  分时 {_intr(c.get('intraday')):>4}"
                      f"  共振 {_reso(c):<5}  {_ident(c, 0):<8}"
                      f"  [{c.get('verdict') or '—'}]")
         if c.get("reason"):
