@@ -19,3 +19,8 @@ build/
 *.zip
 cleanup_redundant.sh
 aider.conf.yml
+
+# 运行时生成（含个人信息、本金、持仓），禁止提交
+/data/
+/reports/
+tea_config.json
