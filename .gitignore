@@ -3,3 +3,9 @@
 *.log
 *tmp*
 *.bak
+
+# 防止对话/命令片段
+*（*）*
+*请运行*
+*py -m tea --help*
+*git commit -m*
