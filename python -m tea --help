@@ -1,4 +1,0 @@
-确保模块导入正常，无 `ImportError`。
-
-## 补充
-如果问题仍然存在，可查看 `git log --all --full-history -- **/tea` 找到引入重复的提交，然后使用 `git filter-repo` 彻底清除历史中的冗余 tree（谨慎操作）。

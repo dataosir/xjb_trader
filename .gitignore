@@ -9,3 +9,12 @@
 *请运行*
 *py -m tea --help*
 *git commit -m*
+
+.aider*
+.qoder/
+.tmp_review/
+.ruff_cache/
+dist/
+build/
+*.zip
+cleanup_redundant.sh
