@@ -44,7 +44,7 @@ tea = "tea.runtime.cli:main"
 Homepage = "https://github.com/dataosir/xjb_trader"
 Repository = "https://github.com/dataosir/xjb_trader"
 Issues = "https://github.com/dataosir/xjb_trader/issues"
-Changelog = "https://github.com/dataosir/xjb_trader/blob/main/CHANGELOG.md"
+Changelog = "https://github.com/dataosir/xjb_trader/blob/main/docs/CHANGELOG.md"
 
 [tool.setuptools]
 packages = [

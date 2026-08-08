@@ -10,6 +10,7 @@
 *py -m tea --help*
 *git commit -m*
 
+__pycache__/
 .aider*
 .qoder/
 .tmp_review/
