@@ -25,19 +25,20 @@ LOOKAHEAD_DAYS = [3, 5, 10]
 
 # ------------------------------------------------------------------ 辅助函数
 
-def _trading_days_from(date_str: str, count: int, mk: Market) -> List[str]:
-    """返回从 date_str（含）往后推 count 个交易日的日期列表。"""
+def _trading_days_from(date_str: str, count: int) -> List[str]:
+    """返回从 date_str（含）往后推 count 个日历日的日期列表，用于查找后续 K 线。"""
     dates = []
     cur = utils.parse_date(date_str)
     if not cur:
         return dates
     while len(dates) < count:
         dates.append(utils.compact_date(cur))
-        cur = utils.next_trading_day(cur)
+        cur = cur + datetime.timedelta(days=1)
     return dates
 
 
-def _retro_returns(code: str, start_date: str, lookahead: int, mk: Market) -> Dict[int, Optional[float]]:
+def _retro_returns(code: str, start_date: str, lookahead: int,
+                  mk: Market) -> Dict[int, Optional[float]]:
     """计算给定候选日之后第 N 个交易日的累计收益率（相对于候选日收盘）。"""
     try:
         klines = mk.get_klines(code)
@@ -58,8 +59,8 @@ def _retro_returns(code: str, start_date: str, lookahead: int, mk: Market) -> Di
     # 建立日期到收盘价的映射
     date_map = {k["date"]: float(k.get("close", 0)) for k in klines if "date" in k}
 
-    # 获取后续交易日列表
-    future_dates = _trading_days_from(start_date, max(LOOKAHEAD_DAYS), mk)
+    # 获取后续日期列表（简单日历推进，周六日难免偏差，但能满足复盘需求）
+    future_dates = _trading_days_from(start_date, max(LOOKAHEAD_DAYS))
     result = {}
     for d in LOOKAHEAD_DAYS:
         target = future_dates[d - 1] if len(future_dates) >= d else None
@@ -92,17 +93,18 @@ def _load_scan_details(start_ymd: str, end_ymd: str, cfg: Config) -> List[dict]:
                 for r in recs:
                     r["scan_date"] = raw.get("scan_date", utils.compact_date(cur))
                 records.extend(recs)
-        cur = utils.next_trading_day(cur)
+        cur = cur + datetime.timedelta(days=1)
     return records
 
 
 # ------------------------------------------------------------------ 报告生成
 
 def generate_retrospective(start_ymd: str, end_ymd: str,
-                           cfg: Optional[Config] = None) -> str:
+                           cfg: Optional[Config] = None,
+                           market: Optional[Market] = None) -> str:
     """生成后验分析 Markdown 报告，按裁决分组展示收益。"""
     cfg = cfg or load_config()
-    mk = Market(cfg)
+    mk = market or Market(cfg)
     records = _load_scan_details(start_ymd, end_ymd, cfg)
 
     # 按裁决分组
@@ -183,14 +185,16 @@ def generate_retrospective(start_ymd: str, end_ymd: str,
     return "\n".join(lines)
 
 
-def save_retrospective(start_ymd: str, end_ymd: str, cfg: Optional[Config] = None) -> str:
+def save_retrospective(start_ymd: str, end_ymd: str,
+                       cfg: Optional[Config] = None,
+                       market: Optional[Market] = None) -> str:
     """生成并保存后验报告到 reports/ 目录，文件名含日期。"""
     cfg = cfg or load_config()
+    mk = market or Market(cfg)
+    content = generate_retrospective(start_ymd, end_ymd, cfg, mk)
     today = utils.today_str()
-    content = generate_retrospective(start_ymd, end_ymd, cfg)
     path = os.path.join(cfg.reports_dir(), f"retrospective_{today}.md")
     utils.ensure_dir(cfg.reports_dir())
-    # 写入文件
     with open(path, "w", encoding="utf-8") as f:
         f.write(content)
     return path
@@ -224,24 +228,6 @@ def main(argv: Optional[List[str]] = None) -> int:
     print(f"后验分析报告已生成：{path}")
     return 0
 
-
-# ------------------------------------------------------------------ 补丁工具
-
-def _patch_utils():
-    """若 tea.core.utils 缺少某些函数，在此补上简易版本。"""
-    if not hasattr(utils, "next_trading_day"):
-        def next_trading_day(d: datetime.date) -> datetime.date:
-            return d + datetime.timedelta(days=1)  # 简单版，后续可替换为真实交易日历
-        utils.next_trading_day = next_trading_day
-    if not hasattr(utils, "write_file"):
-        def write_file(p: str, text: str) -> str:
-            with open(p, "w", encoding="utf-8") as f:
-                f.write(text)
-            return p
-        utils.write_file = write_file
-
-
-_patch_utils()
 
 if __name__ == "__main__":
     sys.exit(main())
