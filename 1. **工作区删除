@@ -1,0 +1,7 @@
+rm -rf "（我将只给出最终完整的文件。）tea" \
+       "Windows 用 dir 和" \
+       "请运行：" \
+       "python -m tea --help" \
+       "git commit -m \"fix: remove duplicate tea folders\"" \
+       "docs/duplicate_tea_folders.md" \
+       "└── tea" 2>/dev/null
