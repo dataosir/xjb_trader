@@ -695,6 +695,33 @@ class Screener:
                 break
         return out
 
+    # ============================================================== 每日扫描明细日志
+    def _write_scan_log(self, result: dict) -> None:
+        """将本次扫描的完整候选明细写入 data/ 目录，供周度复盘使用。"""
+        cfg = self.cfg
+        today = utils.today_str()
+        path = os.path.join(cfg.data_dir(), f"scan_details_{today}.json")
+        payload = {
+            "scan_date": today,
+            "scan_id": result.get("scan_id"),
+            "timestamp": result.get("at"),
+            "verdict": result.get("verdict"),
+            "tier": result.get("tier"),
+            "notes": result.get("notes"),
+            "dyn_window": result.get("dyn_window"),
+            "sectors": result.get("sectors"),
+            "candidates": result.get("candidates"),
+            "buyable": [e.get("code") for e in result.get("buyable", [])],
+            "watch": [e.get("code") for e in result.get("watch", [])],
+            "near_miss": [e.get("code") for e in result.get("near_miss", [])],
+        }
+        utils.ensure_dir(cfg.data_dir())
+        try:
+            utils.write_json(path, payload)
+        except Exception:
+            # 日志写入失败不中断主流程
+            pass
+
     # ============================================================== 主流程
     def seed_scan(self, sent: Optional[dict] = None, include_eve: bool = True,
                   write_trace: bool = True, io: Any = None) -> dict:
@@ -763,4 +790,8 @@ class Screener:
 
         if write_trace:
             result["trace"] = tracer.flush()
+
+        # 将本次详细扫描日志写入 data/ 目录，供周末复盘
+        self._write_scan_log(result)
+
         return result
