@@ -18,3 +18,4 @@ dist/
 build/
 *.zip
 cleanup_redundant.sh
+aider.conf.yml
