@@ -1,3 +1,8 @@
-git add -A
-git commit -m "chore: 代码整理与一致性检查通过"
-git push origin main
+# 1. 从工作区删除
+rm "（我将只给出最终完整的文件。）tea" "Windows 用 dir 和" "请运行：" "python -m tea --help" "git commit -m \"fix: remove duplicate tea folders\"" "docs/duplicate_tea_folders.md"
+
+# 2. 从 Git 暂存区移除记录
+git rm --cached "（我将只给出最终完整的文件。）tea" "Windows 用 dir 和" "请运行：" "python -m tea --help" "git commit -m \"fix: remove duplicate tea folders\"" "docs/duplicate_tea_folders.md"
+
+# 3. 提交清理
+git commit -m "chore: 移除误提交的临时对话/命令文件"
