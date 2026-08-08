@@ -106,7 +106,7 @@
 - CLI：23 个子命令 + 20 项数字菜单，交易逻辑全部下沉，`cli.py` 不含策略
 - 一键启动：`run.sh`（macOS / Linux）与 `run.bat`（Windows，可双击），自动挑 3.8+ 解释器、把数据目录锁在仓库根、参数原样透传；CI 在三个平台各启动一次
 - 分层：行情数据层拆为 `tea/data/`（indicators → cache → fetcher → market，依赖单向无回边），四阶段流程拆为 `tea/phases/`（results / prompt / session / phase1~4）；两个子包的 `__init__.py` 只做再导出
-- 配置：363 个可调参数，JSON 深合并，缺项自动回落默认值，新增参 数自动生效
+- 配置：363 个可调参数，JSON 深合并，缺项自动回落默认值，新增参数自动生效
 - 行情：东方财富 push2 系列接口，随机 UA/Referer、请求延时、代理池、指数退避重试、板块成分多级缓存
 - 三路数据并行采集，单路失败降级不影响整体
 - 所有文件写入原子化（先写 `.tmp` 再 `rename`）
@@ -117,3 +117,37 @@
 
 - 离线自测不触网，**东财接口的真实连通性与字段映射尚未经实盘验证**
 - 观察池闭环与防封策略没有自动断言覆盖
+
+## [0.x] - 2025-03-31
+
+内部开发里程碑。
+
+### 种子扫描覆盖范围放宽
+
+- 开启科创板扫描 `permissions.star` → `true`
+- 扩大板块初筛池 `seed.sector_scan_topn` 30 → 40
+- 提高预审候选上限 `seed.candidate_fetch_cap` 60 → 80
+- 增加成分股拉取页数 `market.member_max_pages` 10 → 15
+
+### 新增每日扫描明细日志
+
+- `tea/screening/screener.py` 新增 `_write_scan_log` 方法
+- `seed_scan` 结束后将完整候选明细（含裁决、硬否决原因、各项分数）写入 `data/scan_details_{date}.json`
+- 写入失败不会中断主流程，日志文件存储于数据目录，供周末复盘使用
+
+### 项目开发规则文档
+
+- 新增 `.github/PULL_REQUEST_TEMPLATE.md` 与 `CONTRIBUTING.md`
+- 明确分支管理、单元测试要求以及合并准则
+
+### 变更文件清单
+
+- `tea/config/config_store.py`
+- `tea/screening/screener.py`
+- `.github/CONTRIBUTING.md`
+
+### 影响评估
+
+- 所有配置改动仅影响默认值，已存在的 `tea_config.json` 不受影响
+- 日志文件每日生成，磁盘占用极小
+- 科创板权限开启后可能增加候选股，但后续 VETO 与身份分过滤仍会保证质量
