@@ -82,7 +82,7 @@ DEFAULTS: Dict[str, Any] = {
         # clist 硬限 100 行/页（pz 填再大也不多给），下面的上限是「最多翻几页」。
         # 实际翻几页看接口自报的 data.total，抽到够数就停。
         "sector_max_pages": 12,
-        "member_max_pages": 10,
+        "member_max_pages": 15,    # 提高上限，捕获超大规模板块（如机械设备）的全部成员
         "member_fields": "f3,f8,f12,f14,f20",
         # 板块成分股就东财一家有，无家可降；而种子扫描要扫 30 个板块×多页。
         # 东财挂的时候每一环都死磕到顶，总耗时从几十秒满到几分钟，
@@ -342,7 +342,8 @@ DEFAULTS: Dict[str, Any] = {
     "permissions": {
         "main": True,
         "gem": True,
-        "star": False,
+        # 科创板存在大量符合策略的标的，默认开启以避免系统性遗漏
+        "star": True,
         "bse": False,
     },
     # ---------------------------------------------------------- 法/术：策略主段
@@ -363,7 +364,9 @@ DEFAULTS: Dict[str, Any] = {
         "seed_max_output": 2,
         "seed_min_identity": 70,
         "seed_min_pick_score": 60,
-        "seed_min_sector_rank": 8,
+        # 板块硬门槛排名上限，适度放宽以捕获排名稍靠后但强度仍够的板块，
+        # 避免在弱平衡市中漏掉候选。原值 8→10（需结合实盘验证）。
+        "seed_min_sector_rank": 10,
         "seed_min_sector_limit_up": 2,
         "seed_cap_max": 300,
         "seed_rank_pct": 0.35,
@@ -408,7 +411,8 @@ DEFAULTS: Dict[str, Any] = {
     },
     # ---------------------------------------------------------- 种子扫描细则
     "seed": {
-        "sector_scan_topn": 30,
+        # 板块初筛池从 30 拓宽至 40，以覆盖排名靠后但仍可能产生候选的板块
+        "sector_scan_topn": 40,
         "rank_score_base": 40.0,
         "rank_score_step": 3.0,
         "limit_up_score_div": 5.0,
@@ -443,7 +447,9 @@ DEFAULTS: Dict[str, Any] = {
         "dyn_weak_sector_chg": 4.0,
         "strict_min_identity": 70,
         "strict_min_pick": 60,
-        "strict_rank_pct": 0.50,
+        # 板块内排名比例上限，略微放宽以减少温和票因板块排名悬在半截而被过滤。
+        # 原值 0.50 → 0.55（需结合实盘验证）。
+        "strict_rank_pct": 0.55,
         "strict_min_turnover": 2.0,
         "relaxed_min_chg": 3.0,
         "relaxed_max_chg": 7.5,
@@ -474,7 +480,8 @@ DEFAULTS: Dict[str, Any] = {
         "eve_trigger_intraday": 0.75,
         "sprout_scan_enabled": True,
         "member_fetch_cap": 60,
-        "candidate_fetch_cap": 30,
+        # 预审候选上限：板块池拓宽后需相应提高，防止有效候选被截断
+        "candidate_fetch_cap": 80,
         # pick_score 系统分权重与分档（默认与历史硬编码一致）
         "pick": {
             "sector_position_weight": 35.0,
