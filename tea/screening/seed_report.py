@@ -199,9 +199,15 @@ def render_md(result: dict, cfg: Optional[Config] = None) -> str:
         lines += ["## 扫描备注", ""] + [f"- {n}" for n in result["notes"]] + [""]
     trace = result.get("trace") or {}
     if trace:
+        md_path = trace.get("md")
+        jl_path = trace.get("jsonl")
+        if md_path:
+            md_path = os.path.relpath(md_path)
+        if jl_path:
+            jl_path = os.path.relpath(jl_path)
         lines += ["## 落选追溯", "",
-                  f"- 人类可读：`{trace.get('md')}`",
-                  f"- 机器可读：`{trace.get('jsonl')}`", ""]
+                  f"- 人类可读：`{md_path}`",
+                  f"- 机器可读：`{jl_path}`", ""]
 
     lines += ["---", "",
               f"> 生成于 {utils.now().strftime('%Y-%m-%d %H:%M:%S')} · "
