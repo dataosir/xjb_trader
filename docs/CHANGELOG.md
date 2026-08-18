@@ -24,6 +24,22 @@
 - **历史跟涨样本去重（`followthrough.dedupe_records`）**：一次性清理已落盘的重复记录（本次实测 `data/seed_records.jsonl` 84 → 32 条，去掉 52 条重复）；`record_seed` 防新、`dedupe_records` 清旧，两者配套
 - **打包 spec 补齐隐式导入**：`tea.core.logger` 与 `tea.reporting.retrospective` 加入 `packaging/tea.spec`（此前后者缺失导致打包后复盘命令 ImportError）
 
+### 数据可靠性（2026-08-18）
+
+> 问题：`涨跌家数`（clist）与 `涨停池`（ztpool）是东财独家、无备源，且东财会
+> 间歇性 `RemoteDisconnected`（实测约 1/3 概率失败），导致天气里出现
+> 「涨跌比 — / 涨停 — 家」，情绪分随之失真。
+
+- **涨跌家数 / 涨停池新增磁盘兜底缓存**：实时取数失败时回退最近一次成功值
+  （`data/.tea_breadth_cache.json` / `.tea_ztpool_cache.json`，保留时长
+  `market.breadth_disk_cache_hours` / `ztpool_disk_cache_hours`，默认 6h），
+  并标注 `stale=True`；天气屏显示「· 涨跌家数/涨停池为缓存回退值（实时取数失败，
+  非实时）」。兜底不再写 `error` 字段，避免被误报成「数据缺口」
+  - 实现：`Market.get_breadth` / `get_limit_up_stats` 拆出实时计算与兜底两层，
+    复用通用 `_kv_disk_load` / `_kv_disk_save`；失败路径记 `logs/tea.log` 警告
+  - 自测新增「数据层 · 涨跌家数/涨停池磁盘兜底」3 项断言（回退命中 + stale 标注 +
+    不含 error），自测 401 → **404**
+
 ### 策略
 
 - **涨幅窗口下限动态化**：根据当日最强板块涨幅自适应（≥5% → 3.0%，4~5% → 2.5%，<4% → 2.0%），弱市不再系统性空仓。硬地板 2.0%（再低 R:R 撑不到 ≥3）；影响严格档 / 萌芽窗口 / 热点降级档，动量档（5.0%）不变，严格档上限 5.5% 不变（窗口只变宽）

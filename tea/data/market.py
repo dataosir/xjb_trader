@@ -16,7 +16,7 @@ from contextlib import nullcontext
 from typing import Any, ContextManager, List, Optional
 
 from tea.config.config_store import Config, load_config
-from tea.core import utils
+from tea.core import logger as logger_mod, utils
 from .cache import MemCache
 from .errors import MarketError
 from .fetcher import Fetcher
@@ -194,6 +194,24 @@ class Market:
         utils.write_json(self.cfg.data_file("sector_cache_file"),
                          {"__version__": SECTOR_CACHE_SCHEMA_VERSION, "data": payload})
 
+    # -------------------------------------------------- 通用磁盘兜底缓存
+    def _kv_disk_load(self, name: str, ttl_hours: float) -> Optional[dict]:
+        """读 data/.tea_<name>_cache.json，超过 ttl 小时返回 None（无备源接口的兜底）。"""
+        raw = utils.read_json(self.cfg.data_file(f"{name}_cache_file"))
+        if not raw:
+            return None
+        js = raw.get("data") or {}
+        age_h = (time.time() - float(js.get("ts", 0) or 0)) / 3600.0
+        if age_h > ttl_hours:
+            return None
+        return js.get("value")
+
+    def _kv_disk_save(self, name: str, value: dict) -> None:
+        """写 data/.tea_<name>_cache.json（兜底缓存，供下次实时取数失败时回退）。"""
+        utils.write_json(self.cfg.data_file(f"{name}_cache_file"),
+                         {"data": {"ts": time.time(), "date": utils.today_str(),
+                                   "value": value}})
+
     def find_sector(self, name_or_bk: str) -> Optional[dict]:
         """按板块名（模糊）或 bk 代码查排名条目。"""
         if not name_or_bk:
@@ -262,7 +280,7 @@ class Market:
 
     # -------------------------------------------------- 3.6 涨跌家数
     def get_breadth(self) -> dict:
-        """全市场涨跌家数。
+        """全市场涨跌家数（东财独家；实时失败时回退磁盘兜底缓存并标注 stale）。
 
         全市场五千多只，按 100 行/页翻完要 56 次请求，与防封目标相冲。但列表是
         按涨幅降序的，「涨幅 > 阈值」就是一段前缀，于是二分定位到跨界的那一页、
@@ -274,6 +292,21 @@ class Market:
         if hit:
             self.f.stats["cache_hits"] += 1
             return hit
+        try:
+            out = self._compute_breadth()
+        except MarketError as exc:
+            # 东财 clist 间歇性 RemoteDisconnected：无备源，回退最近一次成功值。
+            disk = self._kv_disk_load("breadth",
+                                      float(self.cfg.get("market.breadth_disk_cache_hours", 6.0)))
+            if disk is not None:
+                logger_mod.get_logger("data").warning("涨跌家数实时取数失败，回退磁盘缓存：%s", exc)
+                return self.cache.put(key, {**disk, "stale": True})
+            raise
+        self._kv_disk_save("breadth", out)
+        return self.cache.put(key, out)
+
+    def _compute_breadth(self) -> dict:
+        """二分精确数全市场涨跌家数（约 8~11 次请求，见 get_breadth 说明）。"""
         base = {
             "po": 1, "np": 1, "fltt": 2, "invt": 2, "fid": "f3",
             "fs": self.cfg.get("market.breadth_fs"), "fields": "f12,f3",
@@ -327,7 +360,7 @@ class Market:
         not_falling = count_above(-eps - 1e-9)
         falling = max(0, total - not_falling)
         denom = rising + falling
-        out = {
+        return {
             "rising": rising,
             "falling": falling,
             "flat": max(0, total - rising - falling),
@@ -335,7 +368,6 @@ class Market:
             "advance_ratio": (rising / denom) if denom else None,
             "exact": not truncated,
         }
-        return self.cache.put(key, out)
 
     # -------------------------------------------------- 3.7 涨停池
     def get_limit_up_stats(self, date: Optional[str] = None) -> dict:
@@ -344,19 +376,32 @@ class Market:
         涨停池是唯一按日期取的数据源，指数 / 板块 / 涨跌比都会自动给上一交易日。
         不回退的话，情绪公式会拿「涨停 0 家」去和上一交易日的板块涨幅做加减，
         算出来的周期是假的——非交易日看到的「涨停 0 家 + 前5板块均涨 10%」就是这么来的。
+
+        东财 ztpool 间歇性 RemoteDisconnected 时，回退磁盘兜底缓存（标注 stale）。
         """
         want = date
         d = date or utils.compact_date()
         tries = 1 if want else (1 + max(0, int(self.cfg.get("market.ztpool_fallback_days", 3))))
         asked = d
-        out = self._ztpool_once(d)
-        for _ in range(tries - 1):
-            # 取数失败就不必往前翻了：换日子治不了坏令牌，只是白打四次请求。
-            if not out["ok"] or out["limit_up_count"]:
-                break
-            cur = utils.parse_date(d) or utils.now().date()
-            d = utils.compact_date(utils.prev_trading_day(cur))
+        try:
             out = self._ztpool_once(d)
+            for _ in range(tries - 1):
+                # 取数失败就不必往前翻了：换日子治不了坏令牌，只是白打四次请求。
+                if not out["ok"] or out["limit_up_count"]:
+                    break
+                cur = utils.parse_date(d) or utils.now().date()
+                d = utils.compact_date(utils.prev_trading_day(cur))
+                out = self._ztpool_once(d)
+        except MarketError as exc:
+            disk = self._kv_disk_load("ztpool",
+                                      float(self.cfg.get("market.ztpool_disk_cache_hours", 6.0)))
+            if disk is not None:
+                logger_mod.get_logger("data").warning("涨停池实时取数失败，回退磁盘缓存：%s", exc)
+                return {**disk, "stale": True}
+            raise
+        # 只在成功时落兜底缓存：ok=False（坏令牌）的结果不能回退出去再误导下一次。
+        if out.get("ok"):
+            self._kv_disk_save("ztpool", out)
         # 得另拼一份：_ztpool_once 返回的是缓存对象，直接改它会把 fallback
         # 标记写回缓存，下一次同日请求就读到错的。
         return {**out, "fallback": out["date"] != asked}

@@ -59,6 +59,9 @@ DEFAULTS: Dict[str, Any] = {
         "seed_trace_md": "SEED_TRACE.md",
         "accumulator_file": "accumulator.jsonl",
         "sector_cache_file": ".tea_sector_cache.json",
+        # 无备源的东财接口（涨跌家数/涨停池）磁盘兜底缓存：实时取数失败时回退最近值。
+        "breadth_cache_file": ".tea_breadth_cache.json",
+        "ztpool_cache_file": ".tea_ztpool_cache.json",
         "shadow_pool_file": "shadow_pool.json",
     },
     # ---------------------------------------------------------- 行情/防封
@@ -173,6 +176,10 @@ DEFAULTS: Dict[str, Any] = {
         "member_cache_sec": 600,
         "breadth_cache_sec": 120,
         "ztpool_cache_sec": 120,
+        # 涨跌家数 / 涨停池磁盘兜底缓存的保留时长（小时）。这两个是东财独家、无备源，
+        # 实时取数间歇性 RemoteDisconnected 时回退到最近一次成功值，避免天气里出现「—」。
+        "breadth_disk_cache_hours": 6.0,
+        "ztpool_disk_cache_hours": 6.0,
         "index_cache_sec": 120,
         "offline": False,
     },

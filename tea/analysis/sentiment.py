@@ -159,6 +159,7 @@ def compute_score(raw: dict, cfg: Config) -> dict:
         "limit_up_date": zt.get("date"),
         "limit_up_fallback": bool(zt.get("fallback")),
         "limit_up_error": zt.get("error"),
+        "limit_up_stale": bool(zt.get("stale")),
         "index": idx,
         "breadth": breadth,
     }
@@ -294,6 +295,7 @@ def get_sentiment(market: Optional[Market] = None, cfg: Optional[Config] = None,
         "limit_up_date": scored["limit_up_date"],
         "limit_up_fallback": scored["limit_up_fallback"],
         "limit_up_error": scored["limit_up_error"],
+        "limit_up_stale": scored["limit_up_stale"],
         "hot_n": sec.get("hot_n"),
         "avg5": sec.get("avg5"),
         "hot_sectors": [{"name": s["name"], "chg": s["chg"], "rank": s["rank"]} for s in sec.get("hot_sectors", [])],
@@ -338,6 +340,8 @@ def format_weather(s: dict) -> str:
         lines.append(f"· 涨停数据来自上一交易日 {s['limit_up_date']}")
     if (s.get("breadth") or {}).get("exact") is False:
         lines.append("· 涨跌家数探测预算用尽，上面的值是估值")
+    if (s.get("breadth") or {}).get("stale") or s.get("limit_up_stale"):
+        lines.append("· 涨跌家数/涨停池为缓存回退值（实时取数失败，非实时）")
     if s.get("hot_sectors"):
         top = "  ".join(f"{x['name']}{x['chg']:+.2f}%" for x in s["hot_sectors"][:6])
         lines.append(f"热点：{top}")

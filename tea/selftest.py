@@ -348,6 +348,48 @@ def check_clist_paging(t: Suite, cfg: Config) -> None:
     t.eq("板块总数不是 3×100", len(sectors) % 100 != 0, True)
 
 
+def check_disk_fallback(t: Suite, cfg: Config) -> None:
+    """无备源接口（涨跌家数/涨停池）的磁盘兜底：实时取数失败回退最近成功值。
+
+    东财 clist/ztpool 间歇性 RemoteDisconnected，且无备源。实时失败时回退磁盘
+    缓存并标注 stale，避免天气里出现「涨跌比 — / 涨停 —」。
+    """
+    t.head("数据层 · 涨跌家数/涨停池磁盘兜底")
+
+    class _FailFetcher:
+        def __init__(self):
+            self.stats = {"requests": 0, "errors": 0, "cache_hits": 0}
+
+        def get_json(self, url, params, host_pool=None):
+            self.stats["requests"] += 1
+            self.stats["errors"] += 1
+            raise MarketError("模拟网络失败")
+
+        def stats_line(self):
+            return ""
+
+    # 先落一份兜底缓存（模拟上一次成功取数）
+    mk0 = Market(cfg)
+    mk0._kv_disk_save("breadth", {"rising": 3000, "falling": 1500, "flat": 45,
+                                  "total": 4545, "advance_ratio": 3000 / 4500,
+                                  "exact": True})
+    mk0._kv_disk_save("ztpool", {"limit_up_count": 55, "max_boards": 5,
+                                 "date": "20260818", "ok": True})
+
+    # 实时取数全失败 → 回退兜底缓存并标注 stale
+    mk = Market(cfg, fetcher=_FailFetcher())
+    br = mk.get_breadth()
+    t.ok("涨跌家数回退缓存且标注 stale",
+         br.get("stale") is True and br.get("rising") == 3000,
+         f"stale={br.get('stale')} rising={br.get('rising')}")
+    zt = mk.get_limit_up_stats()
+    t.ok("涨停池回退缓存且标注 stale",
+         zt.get("stale") is True and zt.get("limit_up_count") == 55,
+         f"stale={zt.get('stale')} count={zt.get('limit_up_count')}")
+    t.ok("兜底不含 error（避免被误报为数据缺口）", zt.get("error") is None,
+         f"error={zt.get('error')}")
+
+
 class _FakeZtPool:
     """模拟涨停池：只有 good_date 那天有数据，其余日期回空池。
 
@@ -2159,6 +2201,7 @@ def main(verbose: bool = True, cfg: Optional[Config] = None) -> int:
         mk = FakeMarket(c)
         check_raw_parsing(t, c)
         check_clist_paging(t, c)
+        check_disk_fallback(t, c)
         check_ztpool_fallback(t, c)
         check_host_failover(t, c)
         check_providers(t, c)
