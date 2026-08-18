@@ -176,15 +176,26 @@ def seed_plan(cfg: Optional[Config] = None, market: Optional[Market] = None,
     plan = None
     buyable = result.get("buyable") or []
     if buyable and write_plan:
-        notes = [f"种子扫描 {result.get('scan_id')}　档位 {result.get('tier')}",
-                 f"天气：{sent.get('cycle')} / {sent.get('stance')} "
-                 f"情绪 {sent.get('score')} 乘数 ×{utils.num(sent.get('base_pos_mult'), 2)}"]
-        notes += list(result.get("notes") or [])[:3]
-        plan = plan_mod.write_plan(buyable, cfg, notes=notes)
-        accumulator.record_plan("write", plan, f"种子扫描产出 {len(buyable)} 只", cfg)
-        io.say("")
-        io.say(plan_mod.format_plan(plan))
-        io.say("  → 次日 09:35 先跑 plan-check，复核无变动才可在 14:00-14:45 执行")
+        codes = [ev.get("code") for ev in buyable if ev.get("code")]
+        execute_date = utils.today_str(utils.next_trading_day())
+        cur = plan_mod.load_plan(cfg)
+        if codes and plan_mod.active_codes_equal(cur, codes, execute_date=execute_date):
+            # 同日多次扫描产出同一批 code：不重写、不重记 plan.write，幂等跳过。
+            # 否则 accumulator 里同一计划刷三遍，事后按 code 维度复盘会被重复计数。
+            plan = cur
+            io.say("")
+            io.say("  计划与现有未执行计划一致（按 code 幂等），跳过重写")
+            io.say(plan_mod.format_plan(plan))
+        else:
+            notes = [f"种子扫描 {result.get('scan_id')}　档位 {result.get('tier')}",
+                     f"天气：{sent.get('cycle')} / {sent.get('stance')} "
+                     f"情绪 {sent.get('score')} 乘数 ×{utils.num(sent.get('base_pos_mult'), 2)}"]
+            notes += list(result.get("notes") or [])[:3]
+            plan = plan_mod.write_plan(buyable, cfg, execute_date=execute_date, notes=notes)
+            accumulator.record_plan("write", plan, f"种子扫描产出 {len(buyable)} 只", cfg)
+            io.say("")
+            io.say(plan_mod.format_plan(plan))
+            io.say("  → 次日 09:35 先跑 plan-check，复核无变动才可在 14:00-14:45 执行")
     elif buyable:
         io.say("  （write_plan=False，本次不落计划）")
     else:

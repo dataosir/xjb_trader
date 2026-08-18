@@ -236,9 +236,11 @@ def candidate_row(cand: dict, ev: Optional[dict] = None,
         # 止损止盈/R:R（评分维度⑥与盈亏比门槛的输出）
         "sl_pct": lv.get("sl_pct"), "tp_pct": lv.get("tp_pct"),
         "odds": lv.get("odds"), "min_odds": lv.get("min_odds"),
-        # 9 分共振逐维拆解（不含 detail，detail 见 SEED 报告）
+        # 9 分共振逐维拆解。带上 detail：中性化等特殊状态（如消息面 0/0）要靠它
+        # 才能在 scan_details 里被复盘识别出来。
         "scoring_dims": [{"name": d.get("name"), "score": d.get("score"),
-                          "max": d.get("max")} for d in sc.get("dims", [])],
+                          "max": d.get("max"), "detail": d.get("detail")}
+                         for d in sc.get("dims", [])],
         # 会话/否决留痕
         "in_session": ev.get("in_session"),
         "intraday_skipped": vt.get("intraday_skipped"),

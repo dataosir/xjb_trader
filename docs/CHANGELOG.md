@@ -13,6 +13,7 @@
 - **分时高位/封顶否决改为仅在盘中交易时段生效**（`veto.skip_intraday_check_off_session`，默认 true）：盘后扫描时「现价≈当日最高」是强势股常态，分时位置≈1.0 会把龙头误判成「追高/封顶」——28 只候选里 71% 被此否决杀掉。跳过时在 `veto.intraday_skipped`/`intraday_note` 留痕；T+1 真实买入在 14:00–14:45 盘中重新评估，不受影响
 - **龙头 MA20 乖离软否决阈值 20% → 25%（`strategy.veto_bias_leader_pct`）**：实证被 20%~26% 乖离否决的龙头 T+3/T+5 多数继续上涨（成都先导 +9.6%、博腾 +3.3%）
 - **样本不足不再抬升通过门槛（`expectancy.insufficient_pass_bump` 1 → 0）**：当前零实盘样本，这个 +1 无依据地收紧本就过严的共振门槛
+- **消息面维度中性化（`score_nine.has_news` 改为三态）**：自动种子扫描没有消息数据源，之前 `has_news` 默认 `False`，③ 消息面恒为 `0/1`，把有效满分从 9 悄悄压到 8、门槛却仍是 6。现在自动扫描 `has_news=None` → 该维 `0/0` 中性化（不计分、不占满分），满分诚实显示为 8；手动 `eval`/`run` 仍按「有/无催化」给 0/1
 
 ### 数据积累与运行日志（2026-08-18）
 
@@ -20,6 +21,7 @@
 
 - **新增运行日志 `tea/core/logger.py`**：落到独立 `logs/` 目录（与 `data/` 结构化数据分开），标准库 `logging` + `TimedRotatingFileHandler` 按日切割（`logs/tea.log`，历史 `tea.log.YYYY-MM-DD`，保留 `logs.backup_days` 天）。日志子系统装配失败静默降级，不打断主流程。关键节点已接入：启动（配置/数据/日志路径）、`config set` 参数变更、每次种子扫描漏斗结果与跟涨样本去重数、盘后分时否决跳过
 - **种子明细数据增强（`screener.candidate_row`）**：`scan_details_{date}.json` 的每只候选新增关键指标，供日后复盘迭代——技术/量价（`atr_pct`/`bias_ma20`/`vol_ratio`/`amount_yi`/`turnover`/`cap_yi`）、止损止盈（`sl_pct`/`tp_pct`/`odds`/`min_odds`）、**9 分共振逐维拆解 `scoring_dims`**、会话/否决留痕（`in_session`/`intraday_skipped`/`identity_flags`/`veto_labels`）。此前只有总分与裁决，看不清「哪一维在系统性拖分」
+- **`scoring_dims` 增加 `detail` 字段**：把「消息面 0/0（中性化）」「板块强度 stale 归零」等特殊状态的原因一并落进 `scan_details_*.json`，复盘时能一眼区分「数据缺失」还是「真没分」
 - **修复 `phase1.py` 未同步 `in_session`**：`run` 交互流现在同样按 `s.tm.in_session()` 判定，`--any-time` 盘后执行时不再误用失真分时否决（与 `eval`/种子扫描行为一致）
 - **历史跟涨样本去重（`followthrough.dedupe_records`）**：一次性清理已落盘的重复记录（本次实测 `data/seed_records.jsonl` 84 → 32 条，去掉 52 条重复）；`record_seed` 防新、`dedupe_records` 清旧，两者配套
 - **种子扫描收尾提示未回填的 T+1 样本**（新增 `followthrough.pending_backfill`）：若 `seed_records.jsonl` 里仍有历史记录 `result=null`，扫描结束屏上提示 `跑 tea review 补齐`，避免跟涨胜率模块长期零样本（当前 32 条记录全部未回填，胜率一直在跑默认值）
@@ -76,6 +78,7 @@
 
 ### 修复
 
+- **计划写入按 code 幂等（`plan.active_codes_equal` + `runner.seed_plan`）**：同日多次种子扫描产出同一批 code 时，不再重复写 `trade_plan.json` 和 `plan.write` 记录（实测 12:49/12:54/13:00 同一计划 002385 写了三次）。现在检测「execute_date + 有效 code 集合」一致则跳过重写并提示，accumulator 里同一计划不再被重复计数
 - **跟涨样本按 (date, code) 去重（`followthrough.record_seed`）**：`seed-plan` 一天跑多次时同一标的被重复 append（84 条记录去重后仅 32 个唯一），导致 T+1 样本翻倍、跟涨胜率失真。现在只落首条，返回 `{"added": n, "skipped": m}` 并在控制台提示去重数量
 - **东财 `clist` 接口硬限 100 行/页，配置里却写着 `pz=6000`**：`pz` 填多大都不报错，只是默默地只回 100 行；叠上 `po=1&fid=f3`（按涨幅降序），拿到的是涨幅榜前 100 名——数据看着完整，实际是极端偏样本。现在按接口自报的 `data.total` 真正翻页：
   - `get_breadth` 的涨跌比不再结构性恒为 100%。全市场五千多只按 100 行/页翻完要 56 次请求，与防封目标冲突；但列表按涨幅降序，「涨幅 > 阈值」是一段前缀，于是二分定位到跨界那一页、页内线性数一遍，得到**精确值**。实测 9 次请求拿到 5545 只的确切涨跌家数。返回值新增 `exact` 标记探测预算是否够用

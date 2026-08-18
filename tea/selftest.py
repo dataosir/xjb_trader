@@ -1345,6 +1345,17 @@ def check_scoring(t: Suite, cfg: Config, mk: FakeMarket, sent: dict, lv: dict) -
     t.eq("满分基准", sc["max"], 9)
     t.ok("无量价扣分项", not sc["penalties"], f"penalties={sc['penalties']}")
 
+    # 消息面中性化：自动扫描无消息数据（has_news=None）→ 该维 0/0、不计分不占满分
+    sc_neutral = preflight.score_nine(q, ind, sec, sent, lv, has_news=None, cfg=cfg)
+    by_no_n = {d["no"]: d for d in sc_neutral["dims"]}
+    t.eq("无消息数据时③消息面中性化为 0/0",
+         (by_no_n[3]["score"], by_no_n[3]["max"]), (0, 0))
+    t.eq("中性化后满分 9→8", sc_neutral["max"], 8)
+    t.eq("中性化后总分=其余 5 维之和", sc_neutral["total"], 8)
+    t.ok("中性化明细带标识",
+         "中性" in by_no_n[3]["detail"] and "不计分" in by_no_n[3]["detail"],
+         by_no_n[3]["detail"])
+
     # 扣分项：换手 >20% 应扣 1 分
     q_hi = dict(q, turnover=22.0)
     sc2 = preflight.score_nine(q_hi, ind, sec, sent, lv, has_news=True, cfg=cfg)
@@ -1632,6 +1643,15 @@ def check_plan_labels(t: Suite, cfg: Config, mk: FakeMarket, sent: dict) -> None
     t.ok("任何一项都不带 None", all("None" not in s for s in labels), f"labels={labels}")
     t.eq("planned_codes 语义不变（纯代码，供集合匹配）",
          plan_mod.planned_codes(cur), ["002882", "600312"])
+    t.ok("active_codes_equal 相同 code+execute_date 判等",
+         plan_mod.active_codes_equal(cur, ["002882", "600312"],
+                                     execute_date=utils.today_str()))
+    t.ok("active_codes_equal 不同 code 判不等",
+         not plan_mod.active_codes_equal(cur, ["002882"],
+                                         execute_date=utils.today_str()))
+    t.ok("active_codes_equal execute_date 不一致判不等（防旧计划误判）",
+         not plan_mod.active_codes_equal(cur, ["002882", "600312"],
+                                         execute_date="2020-01-01"))
 
     # 机器字段与展示字段各走一路：JSON 里的 plan_codes 不能因为排版好看而变形
     st = gates.status(sent, cfg)

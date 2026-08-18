@@ -146,7 +146,7 @@ def classify_stage(quote: dict, ind: dict, identity: Optional[dict], intraday: O
 # ------------------------------------------------------------------ 5.1 六维评分
 
 def score_nine(quote: dict, ind: dict, sector: dict, sent: Optional[dict],
-               levels: Optional[dict], has_news: bool = False,
+               levels: Optional[dict], has_news: Optional[bool] = None,
                cfg: Optional[Config] = None) -> dict:
     """9 分共振评分：板块强度2 + 大盘1 + 消息1 + 市值2 + 量价2 + 止损结构1。"""
     cfg = cfg or load_config()
@@ -190,9 +190,16 @@ def score_nine(quote: dict, ind: dict, sector: dict, sent: Optional[dict],
     dims.append({"no": 2, "name": "大盘趋势", "max": 1, "score": s2, "detail": d2})
 
     # ③ 消息面（1）
-    s3 = 1 if has_news else 0
-    dims.append({"no": 3, "name": "消息面", "max": 1, "score": s3,
-                 "detail": "有催化（政策/业绩/题材）" if has_news else "无明确催化"})
+    # 自动扫描没有消息数据源，has_news 会是 None：这一维既不扣分也不占满分，
+    # 用 0/0 留一个「中性化」标识，方便扫完盘后在 scan_details 里区分
+    # 「无明确催化（0/1）」与「无消息数据、不计分（0/0）」。
+    if has_news is None:
+        s3, d3, m3 = 0, "无消息数据（中性，不计分）", 0
+    else:
+        s3 = 1 if has_news else 0
+        d3 = "有催化（政策/业绩/题材）" if has_news else "无明确催化"
+        m3 = 1
+    dims.append({"no": 3, "name": "消息面", "max": m3, "score": s3, "detail": d3})
 
     # ④ 市值区间（2）
     cap = quote.get("cap_yi")
@@ -262,7 +269,9 @@ def score_nine(quote: dict, ind: dict, sector: dict, sent: Optional[dict],
     total = sum(d["score"] for d in dims)
     return {
         "total": int(total),
-        "max": int(c("max_total", 9)),
+        # 满分由实际计入的维度决定：消息面中性化时其 max=0，满分从 9 降到 8，
+        # 让「X/满分」诚实地反映当前可争取的上限，而不是恒定 9。
+        "max": int(sum(d["max"] for d in dims)),
         "dims": dims,
         "penalties": penalties,
     }
@@ -305,7 +314,7 @@ def effective_threshold(identity: Optional[dict] = None, sent: Optional[dict] = 
 
 def evaluate(code: str, market: Optional[Market] = None, cfg: Optional[Config] = None,
                     sent: Optional[dict] = None, quote: Optional[dict] = None,
-                    sector: Optional[dict] = None, has_news: bool = False,
+                    sector: Optional[dict] = None, has_news: Optional[bool] = None,
                     sl_pct: Optional[float] = None, tp_pct: Optional[float] = None,
                     seed_leader_relax: bool = False, insufficient_samples: bool = False,
                     prefer_sector: Optional[str] = None) -> dict:

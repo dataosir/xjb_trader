@@ -107,6 +107,18 @@ def planned_codes(plan: dict, only_active: bool = True) -> List[str]:
     return [i.get("code") for i in items if i.get("code")]
 
 
+def active_codes_equal(plan: dict, codes: List[str],
+                       execute_date: Optional[str] = None) -> bool:
+    """有效计划里的代码集合是否与给定 codes 完全一致（幂等写计划用）。
+
+    仅当 execute_date 也一致时才判等，避免把「昨日的旧计划恰好同 code」误判成
+    今天的计划已写好而跳过重写。
+    """
+    if execute_date is not None and plan.get("execute_date") != execute_date:
+        return False
+    return set(planned_codes(plan)) == {c for c in codes if c}
+
+
 def planned_labels(plan: dict, only_active: bool = True) -> List[str]:
     """给人看的「代码 名称」列表：光一串代码认不出是哪只票，缺名字时只回退到代码。"""
     items = active_items(plan) if only_active else plan.get("items", [])
