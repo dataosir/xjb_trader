@@ -17,6 +17,7 @@ KIND_SESSION = "session"
 KIND_PLAN = "plan"
 KIND_TRADE = "trade"
 KIND_NOTE = "note"
+KIND_PARAM = "param_change"
 
 
 def log_path(cfg: Optional[Config] = None) -> str:
@@ -93,6 +94,15 @@ def record_trade(trade: dict, action: str, cfg: Optional[Config] = None) -> dict
 
 def note(text: str, cfg: Optional[Config] = None) -> dict:
     return record(KIND_NOTE, {"text": text}, cfg)
+
+
+def record_param(key: str, old: Any, new: Any, cfg: Optional[Config] = None) -> dict:
+    """留痕一次参数变更：old → new，供「何时动了哪个阈值」复盘。
+
+    调参是高频动作，若不落盘，事后无法回答「这个阈值是那天改的吗、改前是多少」。
+    写进 accumulator.jsonl（param_change），与扫描/评估/交易同一条追溯链。
+    """
+    return record(KIND_PARAM, {"key": key, "old": old, "new": new}, cfg)
 
 
 # ------------------------------------------------------------------ 查询

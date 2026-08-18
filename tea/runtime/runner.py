@@ -18,7 +18,7 @@ from typing import Any, Dict, List, Optional
 from tea.analysis import followthrough as ft_mod, stats
 from tea.analysis.sentiment import format_weather, get_sentiment
 from tea.config.config_store import Config, load_config
-from tea.core import utils
+from tea.core import logger as logger_mod, utils
 from tea.core.timing import Timing
 from tea.data import Market
 from tea.phases import IO, Session, phase1, phase2, phase3, phase4, results
@@ -158,6 +158,13 @@ def seed_plan(cfg: Optional[Config] = None, market: Optional[Market] = None,
     io.say(format_weather(sent))
 
     result = sc.seed_scan(sent=sent, include_eve=include_eve, io=io)
+    # 运行日志留痕：每次扫描的漏斗结果，供日后按日志复盘「为什么没票」。
+    logger_mod.get_logger("scan").info(
+        "扫描完成 %s | 裁决 %s | 档位 %s | 初筛 %s | VETO过 %s | 可买 %d | 观察 %d | 近失 %d",
+        result.get("scan_id"), result.get("verdict"), result.get("tier"),
+        result.get("candidates_n"), result.get("veto_passed_n"),
+        len(result.get("buyable") or []), len(result.get("watch") or []),
+        len(result.get("near_miss") or []))
     # 网络摘要只是一行装饰，不能因为注入的是个简易 fetcher 就把扫描结果带死。
     # 优先报源命中（东财 45｜腾讯 18）：降级链有没接上比累计耗时更值得看。
     net = mk.stats_line() if hasattr(mk, "stats_line") else (
@@ -203,9 +210,15 @@ def seed_plan(cfg: Optional[Config] = None, market: Optional[Market] = None,
 
     # ---------------------------------------------------------- 跟涨样本 + 报告
     entries = _ft_entries(result)
-    n = ft_mod.record_seed(entries, cfg) if entries else 0
-    if n:
-        io.say(f"  已落 {n} 条跟涨样本，次日 close-review 自动回填 T+1 结果")
+    ft_res = ft_mod.record_seed(entries, cfg) if entries else {"added": 0, "skipped": 0}
+    logger_mod.get_logger("scan").info("跟涨样本落盘 %s | 新增 %d | 去重跳过 %d",
+                                       result.get("scan_id"),
+                                       ft_res.get("added"), ft_res.get("skipped"))
+    if ft_res.get("added"):
+        io.say(f"  已落 {ft_res['added']} 条跟涨样本（去重跳过 {ft_res['skipped']} 条），"
+               f"次日 close-review 自动回填 T+1 结果")
+    elif ft_res.get("skipped"):
+        io.say(f"  跟涨样本全部与历史重复（{ft_res['skipped']} 条），未新增落盘")
 
     path = seed_report.write_report(result, cfg)
     result["report_path"] = path

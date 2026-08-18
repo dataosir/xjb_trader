@@ -4,6 +4,26 @@
 
 ## [Unreleased]
 
+### 策略（2026-08-18 准入松绑：修复"9 天 0 可买"的结构性死锁）
+
+> 复盘 08-08 ~ 08-18 的 30+ 次扫描与观察池/种子记录：从未产出过 1 只「可买」，
+> 根因不是市场差，而是三处过滤器互相锁死。详见 `docs/STRATEGY_ADJUSTMENT_2026-08-18.md`。
+
+- **R:R 门槛 3 → 2（`strategy.min_odds` + `scoring.sl_struct_min_odds`）**：止损硬顶 6% + 止盈上限 15% + 双边滑点 0.5% 的结构下，含滑点最大盈亏比 ≈2.1，3 恒不可达——观察池 12 只 odds 全部卡在 2.08~2.18，无一达标。降到 2 后由「止盈抬升」逻辑自动满足（需 tp≈14.4% ≤ 15% 上限）。同时修复连锁问题：「止损结构」维度因 `odds≥3` 恒为 0 分、有效满分从 9 掉到 8
+- **分时高位/封顶否决改为仅在盘中交易时段生效**（`veto.skip_intraday_check_off_session`，默认 true）：盘后扫描时「现价≈当日最高」是强势股常态，分时位置≈1.0 会把龙头误判成「追高/封顶」——28 只候选里 71% 被此否决杀掉。跳过时在 `veto.intraday_skipped`/`intraday_note` 留痕；T+1 真实买入在 14:00–14:45 盘中重新评估，不受影响
+- **龙头 MA20 乖离软否决阈值 20% → 25%（`strategy.veto_bias_leader_pct`）**：实证被 20%~26% 乖离否决的龙头 T+3/T+5 多数继续上涨（成都先导 +9.6%、博腾 +3.3%）
+- **样本不足不再抬升通过门槛（`expectancy.insufficient_pass_bump` 1 → 0）**：当前零实盘样本，这个 +1 无依据地收紧本就过严的共振门槛
+
+### 数据积累与运行日志（2026-08-18）
+
+> 目标：**积累数据是第一位**，让每一次扫描/评估/调参都可回溯，据此迭代指标与阈值。
+
+- **新增运行日志 `tea/core/logger.py`**：落到独立 `logs/` 目录（与 `data/` 结构化数据分开），标准库 `logging` + `TimedRotatingFileHandler` 按日切割（`logs/tea.log`，历史 `tea.log.YYYY-MM-DD`，保留 `logs.backup_days` 天）。日志子系统装配失败静默降级，不打断主流程。关键节点已接入：启动（配置/数据/日志路径）、`config set` 参数变更、每次种子扫描漏斗结果与跟涨样本去重数、盘后分时否决跳过
+- **种子明细数据增强（`screener.candidate_row`）**：`scan_details_{date}.json` 的每只候选新增关键指标，供日后复盘迭代——技术/量价（`atr_pct`/`bias_ma20`/`vol_ratio`/`amount_yi`/`turnover`/`cap_yi`）、止损止盈（`sl_pct`/`tp_pct`/`odds`/`min_odds`）、**9 分共振逐维拆解 `scoring_dims`**、会话/否决留痕（`in_session`/`intraday_skipped`/`identity_flags`/`veto_labels`）。此前只有总分与裁决，看不清「哪一维在系统性拖分」
+- **修复 `phase1.py` 未同步 `in_session`**：`run` 交互流现在同样按 `s.tm.in_session()` 判定，`--any-time` 盘后执行时不再误用失真分时否决（与 `eval`/种子扫描行为一致）
+- **历史跟涨样本去重（`followthrough.dedupe_records`）**：一次性清理已落盘的重复记录（本次实测 `data/seed_records.jsonl` 84 → 32 条，去掉 52 条重复）；`record_seed` 防新、`dedupe_records` 清旧，两者配套
+- **打包 spec 补齐隐式导入**：`tea.core.logger` 与 `tea.reporting.retrospective` 加入 `packaging/tea.spec`（此前后者缺失导致打包后复盘命令 ImportError）
+
 ### 策略
 
 - **涨幅窗口下限动态化**：根据当日最强板块涨幅自适应（≥5% → 3.0%，4~5% → 2.5%，<4% → 2.0%），弱市不再系统性空仓。硬地板 2.0%（再低 R:R 撑不到 ≥3）；影响严格档 / 萌芽窗口 / 热点降级档，动量档（5.0%）不变，严格档上限 5.5% 不变（窗口只变宽）
@@ -22,6 +42,7 @@
 
 ### 修复
 
+- **跟涨样本按 (date, code) 去重（`followthrough.record_seed`）**：`seed-plan` 一天跑多次时同一标的被重复 append（84 条记录去重后仅 32 个唯一），导致 T+1 样本翻倍、跟涨胜率失真。现在只落首条，返回 `{"added": n, "skipped": m}` 并在控制台提示去重数量
 - **东财 `clist` 接口硬限 100 行/页，配置里却写着 `pz=6000`**：`pz` 填多大都不报错，只是默默地只回 100 行；叠上 `po=1&fid=f3`（按涨幅降序），拿到的是涨幅榜前 100 名——数据看着完整，实际是极端偏样本。现在按接口自报的 `data.total` 真正翻页：
   - `get_breadth` 的涨跌比不再结构性恒为 100%。全市场五千多只按 100 行/页翻完要 56 次请求，与防封目标冲突；但列表按涨幅降序，「涨幅 > 阈值」是一段前缀，于是二分定位到跨界那一页、页内线性数一遍，得到**精确值**。实测 9 次请求拿到 5545 只的确切涨跌家数。返回值新增 `exact` 标记探测预算是否够用
   - `get_sector_members` 翻完整个板块。之前只取前 100 名对种子扫描是致命的——它要找的正是 3.0~5.5% 的温和票，而这些票全在涨幅榜前 100 名之外，等于在一个结构性不含目标的样本里搜索
@@ -49,6 +70,8 @@
 
 ### 工程
 
+- **参数变更留痕（`accumulator.record_param`）**：`tea config set <key> <value>` 现在把 `old → new` 写进 `accumulator.jsonl`（`param_change`），与扫描/评估/交易同一条追溯链，事后可回答「何时改了哪个阈值、改前是多少」
+- **R:R / 分时判定关键节点留痕**：`compute_levels` 返回 `min_odds`；`veto.check` 返回 `intraday_skipped`/`intraday_note`；`preflight.evaluate` 返回 `in_session`——这些字段随 scan_details / 观察池快照 / 种子记录落盘，便于复盘「为什么被拒/被放行」
 - 自测 245 → **275 项**。新增：老配置迁移到 5 源 / 用户显式组合不被覆盖 / 迁移幂等（含已迁移过又手工改回单源时不再二次升级）、`load_config` 端到端只提示一次且确实落盘、配置文件不存在时不凭空创建、降级链命中计数与切源提示文案、切源只跳到「真的实现了该方法」的下一家、`member_retries` 作用域生效且用完还原
 - 自测 97 → **163 项**。新增：用东财真实 `fltt=2` payload 验证行情解析量级（含尺度无关的 `(price/pre_close-1)*100 == chg_pct` 自洽断言）、模拟 clist 硬限行为验证精确涨跌家数与板块成分不被截断、涨停池按交易日回退、坏令牌不被当成「涨停 0 家」且不触发冰点降仓、CDN 节点故障转移（坏节点不拖垮取数、会话内记住坏节点、整池全坏仍逐个试）、K 线单挂时保留指数点位且 MA20 未知不谎报退潮、菜单分组与 MENU 完全对齐、各时段建议 1-4 条且均合法
   - 之前的 97 项全走 `FakeMarket`，绕开了 `_parse_quote` / `get_index` / `get_breadth` / `get_sector_members`——数据层一直没被任何断言跑过，上面那些 bug 就是这么漏出去的
@@ -59,6 +82,7 @@
 
 ### 配置
 
+- 默认值变更：`strategy.min_odds` 3 → 2、`scoring.sl_struct_min_odds` 3.0 → 2.0、`strategy.veto_bias_leader_pct` 20 → 25、`expectancy.insufficient_pass_bump` 1 → 0；新增 `veto.skip_intraday_check_off_session: true`。已落盘的 `tea_config.json` 需手动同步（`save()` 写全量配置，DEFAULTS 不覆盖既有值）
 - 移除 `sector_pages` / `sector_page_size` / `member_page_size` / `breadth_page_size`（它们描述的是接口不存在的能力）；新增 `sector_max_pages: 12` / `member_max_pages: 10` / `breadth_max_probes: 24` / `ztpool_fallback_days: 3`；再新增 `use_env_proxy: false`（是否让请求走 shell 环境里的代理，国内站默认关）、`member_retries: 2`（板块成分单独的重试预算）。默认值变更：`data_sources` 单源 → 五源全开、`retries` 4 → 2、`retry_notice_gap_sec` 2.5 → 5.0。参数总数 362 → **410**
 
 ## [1.0.0] - 2026-08-02

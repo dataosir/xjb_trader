@@ -59,11 +59,29 @@ def intraday_limit(identity: Optional[dict], cfg: Config) -> float:
 
 
 def check(quote: dict, ind: Optional[dict] = None, identity: Optional[dict] = None,
-          intraday: Optional[float] = None, cfg: Optional[Config] = None) -> dict:
-    """执行全部否决项检查。"""
+          intraday: Optional[float] = None, cfg: Optional[Config] = None,
+          in_session: Optional[bool] = None) -> dict:
+    """执行全部否决项检查。
+
+    in_session=None 时视为「盘中」，分时否决始终生效（自测/交互直接调用时的向后
+    兼容行为）；preflight.evaluate 会显式传入 Timing 判定的会话状态，从而在盘前/
+    午间/盘后跳过分时否决（skip_intraday_check_off_session=True 时）并留痕。
+    """
     cfg = cfg or load_config()
     ind = ind or {}
     items: List[dict] = []
+
+    # 分时否决是否生效：仅在盘中交易时段执行（可配）。盘后扫描时现价≈当日最高，
+    # 分时位置≈1.0 是强势股常态而非追高，跳过并留痕到 intraday_skipped/intraday_note。
+    if in_session is None:
+        in_session = True
+    intraday_active = bool(cfg.get("veto.check_intraday", True))
+    intraday_skipped = False
+    intraday_note = ""
+    if intraday_active and not in_session and cfg.get("veto.skip_intraday_check_off_session", True):
+        intraday_active = False
+        intraday_skipped = True
+        intraday_note = "非盘中时段（盘前/午间/盘后），分时位置失真，跳过追高/封顶否决"
 
     def veto(name: str, label: str, kind: str, detail: str,
              value=None, threshold=None) -> None:
@@ -114,8 +132,8 @@ def check(quote: dict, ind: Optional[dict] = None, identity: Optional[dict] = No
             veto("bias_ma20", "MA20 乖离过热", KIND_SOFT,
                  f"MA20 乖离 {bias:.2f}% > {soft:.0f}%（过热，等回踩）", bias, soft)
 
-    # ⑥ 分时高位
-    if cfg.get("veto.check_intraday", True) and intraday is not None:
+    # ⑥ 分时高位（仅盘中生效；非盘中且开启跳过时被静默略过并留痕）
+    if intraday_active and intraday is not None:
         hard = float(cfg.s("veto_intraday_hard_pct", 0.95))
         soft = intraday_limit(identity, cfg)
         if intraday >= hard:
@@ -136,6 +154,9 @@ def check(quote: dict, ind: Optional[dict] = None, identity: Optional[dict] = No
         "watchable": bool(soft_items) and not hard_items,
         "labels": [i["label"] for i in items],
         "reason": "；".join(i["detail"] for i in items) if items else "",
+        # 留痕：分时否决是否因非盘中而被跳过（供报告/scan_details/观察池快照追溯）
+        "intraday_skipped": intraday_skipped,
+        "intraday_note": intraday_note,
     }
 
 
@@ -151,12 +172,14 @@ def overheat_bias_limit(stage: str, identity: Optional[dict], cfg: Optional[Conf
 
 
 def format_veto(result: dict) -> str:
-    if not result.get("items"):
+    if not result.get("items") and not result.get("intraday_skipped"):
         return "VETO 检查：全部通过"
-    lines = ["VETO 检查：触发 %d 项" % len(result["items"])]
+    lines = ["VETO 检查：触发 %d 项" % len(result["items"])] if result.get("items") else ["VETO 检查：全部通过"]
     for i in result["items"]:
         tag = "硬否决" if i["kind"] == KIND_HARD else "软否决"
         lines.append(f"  [{tag}] {i['label']} — {i['detail']}")
+    if result.get("intraday_skipped"):
+        lines.append(f"  [提示] {result.get('intraday_note') or '分时否决已跳过（非盘中）'}")
     if result["rejected"]:
         lines.append("→ 结论：REJECT（硬否决，直接放弃）")
     elif result["watchable"]:

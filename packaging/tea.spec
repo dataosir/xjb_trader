@@ -68,6 +68,7 @@ HIDDEN = [
     "tea.config.onboarding",
     # 基础层
     "tea.core",
+    "tea.core.logger",
     "tea.core.paths",
     "tea.core.timing",
     "tea.core.utils",
@@ -105,6 +106,7 @@ HIDDEN = [
     # 报告
     "tea.reporting",
     "tea.reporting.report",
+    "tea.reporting.retrospective",
     "tea.reporting.seed_trace",
     "tea.reporting.weekly",
     # 运行时入口

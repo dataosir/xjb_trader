@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import logging
 import sys
 from typing import List, Optional
 
@@ -25,7 +26,7 @@ from tea.analysis import followthrough as ft_mod
 from tea.analysis.sentiment import clear_cache, format_weather
 from tea.config import config_store, onboarding
 from tea.config.config_store import Config, load_config
-from tea.core import utils
+from tea.core import logger as logger_mod, utils
 from tea.core.timing import Timing
 from tea.data import Market
 from tea.phases import IO
@@ -312,8 +313,13 @@ def cmd_config(args, cfg: Config) -> int:
             io.say("用法：tea config set <点分键> <值>")
             return 2
         old = cfg.get(args.key)
-        cfg.set(args.key, _parse_value(args.value))
+        new = _parse_value(args.value)
+        cfg.set(args.key, new)
         cfg.save()
+        # 留痕：参数变更写进 accumulator.jsonl + 运行日志，双轨追溯「何时改了哪个阈值」。
+        accumulator.record_param(args.key, old, cfg.get(args.key), cfg)
+        logger_mod.get_logger("config").info("配置变更 %s: %s → %s",
+                                             args.key, old, cfg.get(args.key))
         io.say(f"{args.key}: {json.dumps(old, ensure_ascii=False)} → "
                f"{json.dumps(cfg.get(args.key), ensure_ascii=False)}")
         return 0
@@ -676,6 +682,11 @@ def main(argv: Optional[List[str]] = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
     cfg = load_config()
+    # 运行日志：落到 logs/（与 data/ 分开），按日切割。失败不打断主流程。
+    _level = getattr(logging, str(cfg.get("logs.level", "INFO")).upper(), logging.INFO)
+    logger_mod.init_logging(cfg, _level)
+    logger_mod.get_logger("cli").info("启动 tea v%s | 配置 %s | 数据 %s | 日志 %s",
+                                      __version__, cfg.path, cfg.data_dir(), cfg.logs_dir())
 
     if getattr(args, "version", False) and not args.cmd:
         return cmd_version(args, cfg)

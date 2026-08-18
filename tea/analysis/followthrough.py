@@ -24,13 +24,23 @@ def load_records(cfg: Optional[Config] = None) -> List[dict]:
 
 
 def record_seed(entries: List[dict], cfg: Optional[Config] = None,
-                date: Optional[str] = None) -> int:
-    """落盘当日种子记录（供次日回填 T+1 结果）。"""
+                date: Optional[str] = None) -> dict:
+    """落盘当日种子记录（供次日回填 T+1 结果），按 (date, code) 去重。
+
+    seed-plan 一天可能跑多次，同一标的会被重复 append，导致 T+1 样本翻倍、胜率
+    失真。这里以 (date, code) 去重，只落首条；返回 {"added": n, "skipped": m}。
+    """
     cfg = cfg or load_config()
     path = records_path(cfg)
     d = date or utils.today_str()
-    n = 0
+    existing = {(r.get("date"), r.get("code"))
+                for r in load_records(cfg) if r.get("date") and r.get("code")}
+    added = skipped = 0
     for e in entries:
+        key = (d, e.get("code"))
+        if not e.get("code") or key in existing:
+            skipped += 1
+            continue
         utils.append_jsonl(path, {
             "date": d, "code": e.get("code"), "name": e.get("name"),
             "stage": e.get("stage"), "tier": e.get("tier"), "track": e.get("track"),
@@ -39,8 +49,9 @@ def record_seed(entries: List[dict], cfg: Optional[Config] = None,
             "sector_name": e.get("sector_name"), "sector_rank": e.get("sector_rank"),
             "close": e.get("price"), "next_chg": None, "result": None,
         })
-        n += 1
-    return n
+        existing.add(key)
+        added += 1
+    return {"added": added, "skipped": skipped}
 
 
 def save_records(records: List[dict], cfg: Optional[Config] = None) -> str:
@@ -48,6 +59,28 @@ def save_records(records: List[dict], cfg: Optional[Config] = None) -> str:
     cfg = cfg or load_config()
     lines = "\n".join(json.dumps(r, ensure_ascii=False) for r in records)
     return utils.atomic_write(records_path(cfg), lines + ("\n" if lines else ""))
+
+
+def dedupe_records(cfg: Optional[Config] = None) -> dict:
+    """历史跟涨样本按 (date, code) 去重（保留首条），返回 {before, after, removed}。
+
+    去重只对新写入生效（见 record_seed），已落盘的历史重复需要这里一次性清理，
+    否则 update_results / aggregate 仍会被历史重复污染跟涨胜率。原子写，安全。
+    """
+    cfg = cfg or load_config()
+    recs = load_records(cfg)
+    seen = set()
+    kept: List[dict] = []
+    for r in recs:
+        key = (r.get("date"), r.get("code"))
+        if key in seen:
+            continue
+        seen.add(key)
+        kept.append(r)
+    removed = len(recs) - len(kept)
+    if removed:
+        save_records(kept, cfg)
+    return {"before": len(recs), "after": len(kept), "removed": removed}
 
 
 # ------------------------------------------------------------------ T+1 回填

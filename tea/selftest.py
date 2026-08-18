@@ -1242,7 +1242,11 @@ def check_levels(t: Suite, cfg: Config, mk: FakeMarket) -> dict:
     target = price * (1 + lv["tp_pct"] / 100.0)
     want_odds = (target - adj_entry) / (adj_entry - adj_stop)
     t.eq("R:R（买入+0.5% / 止损-0.5%）", lv["odds"], round(want_odds, 2), tol=0.02)
-    t.ok("R:R ≥ 3", lv["odds"] >= 3.0 - 1e-9 and lv["odds_ok"], f"odds={lv['odds']}")
+    # min_odds 已从 3 降到 2（止损硬顶 6% + 止盈 15% 结构下 3 恒不可达），
+    # 断言改为「达到当前 min_odds 且 odds_ok」。
+    min_odds = float(cfg.s("min_odds", 2))
+    t.ok(f"R:R ≥ {min_odds:.0f}（min_odds）且 odds_ok",
+         lv["odds"] >= min_odds - 1e-9 and lv["odds_ok"], f"odds={lv['odds']}")
     t.eq("打平胜率 = 1/(1+odds)", lv["breakeven_wr"],
          round(1.0 / (1.0 + lv["odds"]), 4), tol=1e-3)
     t.ok("止损/ATR ≤ 2.5（止损结构分前提）", lv["sl_atr_mult"] <= 2.5,
@@ -1301,8 +1305,8 @@ def check_veto(t: Suite, cfg: Config, mk: FakeMarket, idn: dict) -> None:
     t.ok("ST → 硬否决", "st" in names(r, "hard"))
     r = veto_mod.check(base, dict(ind, bias_ma20=31.0), idn, 0.60, cfg)
     t.ok("乖离 31% >30% → 硬否决", "bias_hard" in names(r, "hard"))
-    r = veto_mod.check(base, dict(ind, bias_ma20=22.0), idn, 0.60, cfg)
-    t.ok("龙头乖离 22% >20% → 软否决", "bias_ma20" in names(r, "soft"))
+    r = veto_mod.check(base, dict(ind, bias_ma20=26.0), idn, 0.60, cfg)
+    t.ok("龙头乖离 26% >25% → 软否决", "bias_ma20" in names(r, "soft"))
     r = veto_mod.check(base, dict(ind, bias_ma20=16.0),
                        {"tier": ident_mod.TIER_FOLLOW, "score": 50}, 0.60, cfg)
     t.ok("普通乖离 16% >15% → 软否决", "bias_ma20" in names(r, "soft"))

@@ -66,7 +66,10 @@ def run(s: Session, code: Optional[str] = None, ask_levels: bool = True) -> str:
     s.identity = ident_mod.judge(s.quote, s.sector, s.ind, cfg)
     s.intraday = intraday_position(s.quote.get("price"), s.quote.get("high"), s.quote.get("low"))
     s.stage = preflight.classify_stage(s.quote, s.ind, s.identity, s.intraday, cfg)
-    s.veto = veto_mod.check(s.quote, s.ind, s.identity, s.intraday, cfg)
+    # 与 preflight.evaluate 保持一致：分时否决仅盘中生效，盘前/午间/盘后跳过。
+    # run 默认被买入窗口门禁限制在盘中，但 --any-time 盘后跑时这里也要跳过失真分时。
+    s.veto = veto_mod.check(s.quote, s.ind, s.identity, s.intraday, cfg,
+                            in_session=s.tm.in_session())
 
     q, sec, ind = s.quote, s.sector, s.ind
     io.say(f"  {s.code} {s.name}　现价 {utils.num(q.get('price'))}　"

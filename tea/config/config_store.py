@@ -274,7 +274,9 @@ DEFAULTS: Dict[str, Any] = {
         # ⑥ 止损结构 1
         "sl_struct_max_pct": 8.0,
         "sl_struct_atr_mult": 2.5,
-        "sl_struct_min_odds": 3.0,
+        # 与 strategy.min_odds 同步降到 2：否则「止损结构」维度恒为 0 分，
+        # 有效满分从 9 掉到 8，共振门槛更难到。
+        "sl_struct_min_odds": 2.0,
         # 阶段/分时
         "sprout_max_chg": 5.5,
         "intraday_chase_pct": 0.75,
@@ -336,6 +338,10 @@ DEFAULTS: Dict[str, Any] = {
         "check_turnover": True,
         "check_bias": True,
         "check_intraday": True,
+        # 分时否决只在盘中交易时段生效：收盘/盘后扫描时「现价≈当日最高」是强势股
+        # 常态，分时位置≈1.0 会把龙头误判成「追高/封顶」。盘前/午间/盘后跳过该否决
+        # 并留痕（veto.intraday_skipped）。T+1 真实买入在 14:00–14:45 盘中会重新评估。
+        "skip_intraday_check_off_session": True,
         "limit_up_pct_base": 10.0,
         "soft_items": ["intraday_high", "bias_ma20", "near_limit_up", "chase_high"],
     },
@@ -353,7 +359,11 @@ DEFAULTS: Dict[str, Any] = {
         "gray_ratio": 0.30,
         "confirm_ratio": 0.70,
         "pass_threshold": 6,
-        "min_odds": 3,
+        # R:R 门槛 3 → 2：止损硬顶 6%（atr_sl_hard_max_pct）+ 止盈上限 15%
+        # （atr_tp_cap_pct）+ 双边滑点 0.5% 的结构下，含滑点最大盈亏比 ≈2.1，
+        # 3 恒不可达 → 引擎结构性地出不了「可买」。降到 2 后 R:R 由「止盈抬升」
+        # 逻辑自动满足（需 tp≈14.4% ≤ 15% 上限）。见 docs/CHANGELOG.md。
+        "min_odds": 2,
         "consec_loss_limit": 2,
         "daily_max_new_trades": 1,
         "daily_max_evaluations": 5,
@@ -380,7 +390,9 @@ DEFAULTS: Dict[str, Any] = {
         "veto_limit_zone_pct": 9.5,
         "veto_max_turnover": 25.0,
         "veto_bias_ma20_pct": 8.0,
-        "veto_bias_leader_pct": 20.0,
+        # 龙头 MA20 乖离软否决 20% → 25%：实证被 20%~26% 乖离否决的龙头
+        # T+3/T+5 多数继续上涨（成都先导 +9.6%、博腾 +3.3%），20% 阈值偏严误杀。
+        "veto_bias_leader_pct": 25.0,
         "veto_bias_normal_pct": 15.0,
         "veto_bias_hard_max_pct": 30.0,
         "veto_intraday_high_pct": 0.75,
@@ -536,7 +548,9 @@ DEFAULTS: Dict[str, Any] = {
         "mult_neg": 0.50,
         "mult_insufficient": 0.85,
         "default_win_rate": 0.40,
-        "insufficient_pass_bump": 1,
+        # 样本不足时不再抬升通过门槛（1 → 0）：当前零实盘样本，这个 +1 会让
+        # 共振门槛无依据地 +1，进一步收紧本就过严的准入。样本积累后再评估是否恢复。
+        "insufficient_pass_bump": 0,
     },
     # ---------------------------------------------------------- 跟涨经验
     "followthrough": {
@@ -570,6 +584,14 @@ DEFAULTS: Dict[str, Any] = {
         "seed_prefix": "SEED",
         "weekly_prefix": "WEEKLY",
         "keep_reports": 200,
+    },
+    # ---------------------------------------------------------- 运行日志
+    # 与 data/ 下的结构化追溯互补：这里记「程序运行过程」，按日切割到 logs/ 目录。
+    "logs": {
+        # 历史日志保留天数（TimedRotatingFileHandler 的 backupCount）
+        "backup_days": 30,
+        # 日志级别：DEBUG / INFO / WARNING / ERROR
+        "level": "INFO",
     },
     # ---------------------------------------------------------- 交互
     "ui": {

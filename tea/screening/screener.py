@@ -212,7 +212,13 @@ def candidate_row(cand: dict, ev: Optional[dict] = None,
     ev = ev or {}
     idn = ev.get("identity") or cand.get("identity") or {}
     q = ev.get("quote") or {}
+    ind = ev.get("ind") or {}
+    lv = ev.get("levels") or {}
+    sc = ev.get("scoring") or {}
+    vt = ev.get("veto") or {}
     chg = q.get("chg_pct")
+    # 数据积累：把预审的关键指标与 9 分共振逐维拆解一并落进 scan_details，
+    # 供日后复盘「哪一维在系统性拖分、R:R 卡在哪」，据此迭代指标与阈值。
     return {
         "code": cand.get("code"), "name": cand.get("name"),
         "sector_name": cand.get("sector_name"), "tier_label": cand.get("tier"),
@@ -220,6 +226,25 @@ def candidate_row(cand: dict, ev: Optional[dict] = None,
         "intraday": ev.get("intraday"),
         "score": ev.get("total_score"), "threshold": ev.get("pass_threshold"),
         "identity_tier": idn.get("tier"), "identity_score": idn.get("score"),
+        # 技术/量价指标（评分与 VETO 的输入）
+        "atr_pct": ind.get("atr_pct"),
+        "bias_ma20": ind.get("bias_ma20"),
+        "vol_ratio": q.get("vol_ratio"),
+        "amount_yi": q.get("amount_yi"),
+        "turnover": q.get("turnover"),
+        "cap_yi": q.get("cap_yi"),
+        # 止损止盈/R:R（评分维度⑥与盈亏比门槛的输出）
+        "sl_pct": lv.get("sl_pct"), "tp_pct": lv.get("tp_pct"),
+        "odds": lv.get("odds"), "min_odds": lv.get("min_odds"),
+        # 9 分共振逐维拆解（不含 detail，detail 见 SEED 报告）
+        "scoring_dims": [{"name": d.get("name"), "score": d.get("score"),
+                          "max": d.get("max")} for d in sc.get("dims", [])],
+        # 会话/否决留痕
+        "in_session": ev.get("in_session"),
+        "intraday_skipped": vt.get("intraday_skipped"),
+        "intraday_note": vt.get("intraday_note") or None,
+        "identity_flags": idn.get("flags") or [],
+        "veto_labels": [i.get("label") for i in vt.get("items", [])],
         "verdict": verdict, "reason": reason,
     }
 

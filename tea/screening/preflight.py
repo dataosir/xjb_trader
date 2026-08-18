@@ -9,7 +9,8 @@ from typing import List, Optional
 
 from tea.analysis import identity as ident_mod
 from tea.config.config_store import Config, load_config
-from tea.core import utils
+from tea.core import logger as logger_mod, utils
+from tea.core.timing import Timing
 from tea.data import Market, intraday_position
 from . import veto as veto_mod
 
@@ -99,7 +100,9 @@ def compute_levels(price: float, atr_pct: Optional[float], cfg: Optional[Config]
     res = odds_calc(price, sl, tp, cfg)
     res.update({"atr_pct": atr_pct, "source": source, "notes": notes,
                 "odds_ok": bool(odds_ok and (res["odds"] or 0) >= min_odds),
-                "sl_atr_mult": round(sl / atr_pct, 2) if atr_pct else None})
+                "sl_atr_mult": round(sl / atr_pct, 2) if atr_pct else None,
+                # 留痕：本次 R:R 判定的门槛，便于复盘「为什么 odds 2.08 仍被拒/放行」
+                "min_odds": min_odds})
     return res
 
 
@@ -310,8 +313,13 @@ def evaluate(code: str, market: Optional[Market] = None, cfg: Optional[Config] =
     sec = sector if sector is not None else mk.sector_context(q, prefer=prefer_sector)
     idn = ident_mod.judge(q, sec, ind, cfg)
     intr = intraday_position(q.get("price"), q.get("high"), q.get("low"))
+    # 分时否决的会话判定：仅盘中交易时段生效；盘前/午间/盘后由 veto.check 跳过并留痕。
+    in_session = Timing(cfg).in_session()
     stage = classify_stage(q, ind, idn, intr, cfg)
-    vt = veto_mod.check(q, ind, idn, intr, cfg)
+    vt = veto_mod.check(q, ind, idn, intr, cfg, in_session=in_session)
+    if vt.get("intraday_skipped"):
+        logger_mod.get_logger("veto").info("分时否决跳过 %s %s：%s",
+                                           code, q.get("name"), vt.get("intraday_note"))
 
     price = q.get("price")
     if price and sl_pct is not None:
@@ -358,7 +366,8 @@ def evaluate(code: str, market: Optional[Market] = None, cfg: Optional[Config] =
     return {
         "code": code, "name": q.get("name"),
         "quote": q, "ind": ind, "sector": sec, "identity": idn,
-        "intraday": intr, "stage": stage, "veto": vt, "levels": levels,
+        "intraday": intr, "in_session": in_session,
+        "stage": stage, "veto": vt, "levels": levels,
         "scoring": scored, "threshold": th,
         "total_score": total, "pass_threshold": threshold,
         "gap": threshold - total,
