@@ -69,6 +69,8 @@ def fetch_raw(market: Market, io: Any = None) -> dict:
                 out["sectors"] = res or []
             else:
                 out["breadth"], out["limit_up"] = res[0] or {}, res[1] or {}
+    # 板块排名是否来自磁盘兜底（可能是昨日排序），透传出去给天气屏提示。
+    out["sector_stale"] = bool(getattr(market, "sector_stale", False))
     return out
 
 
@@ -160,6 +162,7 @@ def compute_score(raw: dict, cfg: Config) -> dict:
         "limit_up_fallback": bool(zt.get("fallback")),
         "limit_up_error": zt.get("error"),
         "limit_up_stale": bool(zt.get("stale")),
+        "sector_stale": raw.get("sector_stale", False),
         "index": idx,
         "breadth": breadth,
     }
@@ -296,6 +299,7 @@ def get_sentiment(market: Optional[Market] = None, cfg: Optional[Config] = None,
         "limit_up_fallback": scored["limit_up_fallback"],
         "limit_up_error": scored["limit_up_error"],
         "limit_up_stale": scored["limit_up_stale"],
+        "sector_stale": scored["sector_stale"],
         "hot_n": sec.get("hot_n"),
         "avg5": sec.get("avg5"),
         "hot_sectors": [{"name": s["name"], "chg": s["chg"], "rank": s["rank"]} for s in sec.get("hot_sectors", [])],
@@ -342,6 +346,8 @@ def format_weather(s: dict) -> str:
         lines.append("· 涨跌家数探测预算用尽，上面的值是估值")
     if (s.get("breadth") or {}).get("stale") or s.get("limit_up_stale"):
         lines.append("· 涨跌家数/涨停池为缓存回退值（实时取数失败，非实时）")
+    if s.get("sector_stale"):
+        lines.append("⚠️  板块排名为磁盘兜底缓存（可能是昨日排序，选股方向仅供参考，建议稍后重跑）")
     if s.get("hot_sectors"):
         top = "  ".join(f"{x['name']}{x['chg']:+.2f}%" for x in s["hot_sectors"][:6])
         lines.append(f"热点：{top}")

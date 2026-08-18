@@ -389,6 +389,14 @@ def check_disk_fallback(t: Suite, cfg: Config) -> None:
     t.ok("兜底不含 error（避免被误报为数据缺口）", zt.get("error") is None,
          f"error={zt.get('error')}")
 
+    # 板块排名兜底：实时失败回退磁盘缓存，且标注 sector_stale（选股据此告警）
+    mk0._sector_disk_save([{"bk": "BK1", "name": "农业", "chg": 8.0, "rank": 1}])
+    mk3 = Market(cfg, fetcher=_FailFetcher())
+    sec = mk3.get_sector_ranking()
+    t.ok("板块排名回退缓存且标注 sector_stale",
+         mk3.sector_stale is True and len(sec) == 1 and sec[0]["name"] == "农业",
+         f"stale={mk3.sector_stale} sec={[s['name'] for s in sec]}")
+
 
 class _FakeZtPool:
     """模拟涨停池：只有 good_date 那天有数据，其余日期回空池。

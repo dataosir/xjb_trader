@@ -47,6 +47,9 @@ class Market:
         self.f = fetcher or Fetcher(self.cfg)
         self.cache = MemCache()
         self.provider = provider or build_provider(self.cfg, self.f)
+        # 上次板块排名是否来自磁盘兜底（实时取数失败）。板块排名直接影响选股，
+        # 种子扫描据此给用户醒目告警，避免拿昨天的板块排序选今天的股。
+        self.sector_stale = False
 
     # -------------------------------------------------- clist 翻页
     def _retry_scope(self, key: str, default: int) -> "ContextManager[Any]":
@@ -139,9 +142,23 @@ class Market:
             if hit:
                 self.f.stats["cache_hits"] += 1
                 return hit
+        # 板块排名直接影响选股（种子扫描第 1 步按它排序），必须尽量实时：
+        # 先实时取数，失败才回退磁盘兜底并标注 self.sector_stale。旧逻辑是「磁盘
+        # 缓存优先于实时」，24h 内都不重拉，等于拿昨天的板块排序选今天的股。
+        try:
+            sectors = self._fetch_sector_ranking()
+        except MarketError as exc:
             disk = self._sector_disk_load()
-            if disk:
+            if disk is not None:
+                self.sector_stale = True
+                logger_mod.get_logger("data").warning("板块排名实时取数失败，回退磁盘缓存：%s", exc)
                 return self.cache.put(key, disk)
+            raise
+        self._sector_disk_save(sectors)
+        self.sector_stale = False
+        return self.cache.put(key, sectors)
+
+    def _fetch_sector_ranking(self) -> List[dict]:
         pages = int(self.cfg.get("market.sector_max_pages", 12))
         rows = self._clist_all({
             "po": 1, "np": 1, "fltt": 2, "invt": 2,
@@ -164,8 +181,7 @@ class Market:
         sectors.sort(key=lambda x: x["chg"], reverse=True)
         for i, s in enumerate(sectors, 1):
             s["rank"] = i
-        self._sector_disk_save(sectors)
-        return self.cache.put(key, sectors)
+        return sectors
 
     def _sector_disk_load(self) -> Optional[List[dict]]:
         path = self.cfg.data_file("sector_cache_file")

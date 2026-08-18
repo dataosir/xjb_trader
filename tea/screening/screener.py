@@ -347,6 +347,11 @@ class Screener:
         utils.tell(io, "  ⏳ 获取板块排名...")
         with utils.timed("板块排名", io, threshold=0.5):
             sectors = self.mk.get_sector_ranking()[:topn]
+        # 板块排名是选股的根：一旦是磁盘兜底（昨天的排序），选股方向可能整个错掉，
+        # 必须醒目告警，而不是闷头用一份旧数据跑完整套扫描。
+        if getattr(self.mk, "sector_stale", False):
+            utils.tell(io, "  ⚠️  板块排名实时取数失败，正使用磁盘兜底缓存（可能是昨日数据，"
+                          "选股方向仅供参考，建议稍后重跑 seed）")
         # 当日最强板块涨幅（取自排名表本身，比 TOP3 入池后的最大值更早拿到）：
         # 温和票结构分要在遍历成分股前就知道窗口下限。
         strongest = max([s.get("chg") or 0.0 for s in sectors], default=0.0)
