@@ -396,6 +396,12 @@ def check_disk_fallback(t: Suite, cfg: Config) -> None:
     t.ok("板块排名回退缓存且标注 sector_stale",
          mk3.sector_stale is True and len(sec) == 1 and sec[0]["name"] == "农业",
          f"stale={mk3.sector_stale} sec={[s['name'] for s in sec]}")
+    t.ok("板块排名兜底条目带 stale 标记（共振分据此归零板块强度）",
+         sec[0].get("stale") is True, f"sec[0].stale={sec[0].get('stale')}")
+    ctx = mk3.sector_context({"industry": "农业", "code": "000001"})
+    t.ok("sector_context 透传 stale（非种子路径的共振分同样归零）",
+         ctx.get("stale") is True and ctx.get("found") is True and ctx.get("name") == "农业",
+         f"stale={ctx.get('stale')} found={ctx.get('found')} name={ctx.get('name')}")
 
 
 class _FakeZtPool:
@@ -1331,6 +1337,15 @@ def check_scoring(t: Suite, cfg: Config, mk: FakeMarket, sent: dict, lv: dict) -
     q_hi = dict(q, turnover=22.0)
     sc2 = preflight.score_nine(q_hi, ind, sec, sent, lv, has_news=True, cfg=cfg)
     t.eq("换手 22% 触发量价扣分", sc2["total"], 8)
+
+    # 板块排名磁盘兜底（stale）：板块强度整维归零，不拿昨日排名给假分。
+    sec_stale = dict(sec, stale=True)
+    sc_stale = preflight.score_nine(q, ind, sec_stale, sent, lv, has_news=True, cfg=cfg)
+    by_no_stale = {d["no"]: d for d in sc_stale["dims"]}
+    t.eq("stale 时①板块强度归零", by_no_stale[1]["score"], 0)
+    t.eq("stale 时共振总分扣掉板块强度（9→7）", sc_stale["total"], 7)
+    t.ok("stale 提示出现在板块强度明细里",
+         "不参与共振分" in by_no_stale[1]["detail"], by_no_stale[1]["detail"])
     return sc
 
 

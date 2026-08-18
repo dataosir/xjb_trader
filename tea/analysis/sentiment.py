@@ -347,7 +347,7 @@ def format_weather(s: dict) -> str:
     if (s.get("breadth") or {}).get("stale") or s.get("limit_up_stale"):
         lines.append("· 涨跌家数/涨停池为缓存回退值（实时取数失败，非实时）")
     if s.get("sector_stale"):
-        lines.append("⚠️  板块排名为磁盘兜底缓存（可能是昨日排序，选股方向仅供参考，建议稍后重跑）")
+        lines.append("⚠️  板块排名为磁盘兜底缓存（可能是昨日排序，板块强度不计入共振分，建议稍后重跑）")
     if s.get("hot_sectors"):
         top = "  ".join(f"{x['name']}{x['chg']:+.2f}%" for x in s["hot_sectors"][:6])
         lines.append(f"热点：{top}")

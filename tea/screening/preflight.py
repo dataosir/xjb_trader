@@ -154,24 +154,29 @@ def score_nine(quote: dict, ind: dict, sector: dict, sent: Optional[dict],
     dims: List[dict] = []
 
     # ① 板块强度（2）
-    rank = (sector or {}).get("rank")
-    zt = int((sector or {}).get("limit_up_count") or 0)
-    rank_pct = (sector or {}).get("stock_rank_pct")
-    if rank is not None and rank <= int(c("sector_rank_full", 8)) and zt >= int(c("sector_limit_up_full", 2)):
-        s1, d1 = 2, f"板块第 {rank} 名（≤8）且涨停 {zt} 家（≥2）"
-    elif rank is not None and rank <= int(c("sector_rank_half", 15)) and zt >= int(c("sector_limit_up_half", 1)):
-        s1, d1 = 1, f"板块第 {rank} 名（≤15）且涨停 {zt} 家（≥1）"
+    # 板块排名是这一维的唯一数据源。实时取数失败回退磁盘兜底时，排名可能是
+    # 昨日收盘数据——拿旧排名给今天选股打「板块强」是假分，所以 stale 时整维归零。
+    if (sector or {}).get("stale"):
+        s1, d1 = 0, "板块排名为昨日缓存（实时取数失败），不参与共振分"
     else:
-        s1 = 0
-        d1 = (f"板块第 {rank} 名 / 涨停 {zt} 家（不达标）" if rank else "板块未识别")
-    if rank_pct is not None:
-        if rank_pct <= float(c("sector_inner_top_pct", 0.10)):
-            s1 += int(c("sector_inner_bonus", 1))
-            d1 += f"；板块内前 {rank_pct:.0%} +1"
-        elif rank_pct > float(c("sector_inner_tail_pct", 0.50)):
-            s1 -= int(c("sector_inner_penalty", 1))
-            d1 += f"；板块内后 {1 - rank_pct:.0%} -1"
-    s1 = int(utils.clamp(s1, 0, int(c("sector_dim_cap", 2))))
+        rank = (sector or {}).get("rank")
+        zt = int((sector or {}).get("limit_up_count") or 0)
+        rank_pct = (sector or {}).get("stock_rank_pct")
+        if rank is not None and rank <= int(c("sector_rank_full", 8)) and zt >= int(c("sector_limit_up_full", 2)):
+            s1, d1 = 2, f"板块第 {rank} 名（≤8）且涨停 {zt} 家（≥2）"
+        elif rank is not None and rank <= int(c("sector_rank_half", 15)) and zt >= int(c("sector_limit_up_half", 1)):
+            s1, d1 = 1, f"板块第 {rank} 名（≤15）且涨停 {zt} 家（≥1）"
+        else:
+            s1 = 0
+            d1 = (f"板块第 {rank} 名 / 涨停 {zt} 家（不达标）" if rank else "板块未识别")
+        if rank_pct is not None:
+            if rank_pct <= float(c("sector_inner_top_pct", 0.10)):
+                s1 += int(c("sector_inner_bonus", 1))
+                d1 += f"；板块内前 {rank_pct:.0%} +1"
+            elif rank_pct > float(c("sector_inner_tail_pct", 0.50)):
+                s1 -= int(c("sector_inner_penalty", 1))
+                d1 += f"；板块内后 {1 - rank_pct:.0%} -1"
+        s1 = int(utils.clamp(s1, 0, int(c("sector_dim_cap", 2))))
     dims.append({"no": 1, "name": "板块强度", "max": 2, "score": s1, "detail": d1})
 
     # ② 大盘趋势（1）

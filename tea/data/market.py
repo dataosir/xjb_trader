@@ -152,7 +152,9 @@ class Market:
             if disk is not None:
                 self.sector_stale = True
                 logger_mod.get_logger("data").warning("板块排名实时取数失败，回退磁盘缓存：%s", exc)
-                return self.cache.put(key, disk)
+                # 逐条打上 stale 标记：这些排名来自磁盘（可能是昨日收盘），下游
+                # 共振评分看到标记后会把「板块强度」维度归零，避免用旧排名给假分。
+                return self.cache.put(key, [{**s, "stale": True} for s in disk])
             raise
         self._sector_disk_save(sectors)
         self.sector_stale = False
@@ -467,6 +469,7 @@ class Market:
             "rank": None, "total": None, "chg": None, "up_n": None, "down_n": None,
             "limit_up_count": 0, "member_total": None, "stock_rank": None,
             "stock_rank_pct": None, "up_ratio": None, "members": [],
+            "stale": bool(getattr(self, "sector_stale", False)),
         }
         if not entry:
             return ctx
@@ -484,6 +487,7 @@ class Market:
             "chg": entry["chg"], "up_n": entry.get("up_n"), "down_n": entry.get("down_n"),
             "members": members, "member_total": len(members) or None,
             "limit_up_count": count_limit_ups(members),
+            "stale": bool(getattr(self, "sector_stale", False)),
         })
         if members:
             ups = sum(1 for m in members if (m["chg"] or 0) > 0)
