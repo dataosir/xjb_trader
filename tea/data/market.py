@@ -146,7 +146,10 @@ class Market:
         # 先实时取数，失败才回退磁盘兜底并标注 self.sector_stale。旧逻辑是「磁盘
         # 缓存优先于实时」，24h 内都不重拉，等于拿昨天的板块排序选今天的股。
         try:
-            sectors = self._fetch_sector_ranking()
+            # 板块排名是选股的根，且东财独家无备源：重试要覆盖整条 quote 节点池，
+            # 别因为只试前两个节点就把第三个（常是可用的 push2delay）漏掉。
+            with self._retry_scope("sector_retries", 3):
+                sectors = self._fetch_sector_ranking()
         except MarketError as exc:
             disk = self._sector_disk_load()
             if disk is not None:
@@ -311,7 +314,10 @@ class Market:
             self.f.stats["cache_hits"] += 1
             return hit
         try:
-            out = self._compute_breadth()
+            # 涨跌家数同样是东财独家无备源，且第一个页面失败就整体失败：重试覆盖
+            # 整条 quote 节点池，避免漏掉可用的第三个节点而回退磁盘兜底。
+            with self._retry_scope("breadth_retries", 3):
+                out = self._compute_breadth()
         except MarketError as exc:
             # 东财 clist 间歇性 RemoteDisconnected：无备源，回退最近一次成功值。
             disk = self._kv_disk_load("breadth",

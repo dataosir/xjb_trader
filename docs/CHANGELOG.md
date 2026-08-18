@@ -22,6 +22,7 @@
 - **种子明细数据增强（`screener.candidate_row`）**：`scan_details_{date}.json` 的每只候选新增关键指标，供日后复盘迭代——技术/量价（`atr_pct`/`bias_ma20`/`vol_ratio`/`amount_yi`/`turnover`/`cap_yi`）、止损止盈（`sl_pct`/`tp_pct`/`odds`/`min_odds`）、**9 分共振逐维拆解 `scoring_dims`**、会话/否决留痕（`in_session`/`intraday_skipped`/`identity_flags`/`veto_labels`）。此前只有总分与裁决，看不清「哪一维在系统性拖分」
 - **修复 `phase1.py` 未同步 `in_session`**：`run` 交互流现在同样按 `s.tm.in_session()` 判定，`--any-time` 盘后执行时不再误用失真分时否决（与 `eval`/种子扫描行为一致）
 - **历史跟涨样本去重（`followthrough.dedupe_records`）**：一次性清理已落盘的重复记录（本次实测 `data/seed_records.jsonl` 84 → 32 条，去掉 52 条重复）；`record_seed` 防新、`dedupe_records` 清旧，两者配套
+- **种子扫描收尾提示未回填的 T+1 样本**（新增 `followthrough.pending_backfill`）：若 `seed_records.jsonl` 里仍有历史记录 `result=null`，扫描结束屏上提示 `跑 tea review 补齐`，避免跟涨胜率模块长期零样本（当前 32 条记录全部未回填，胜率一直在跑默认值）
 - **打包 spec 补齐隐式导入**：`tea.core.logger` 与 `tea.reporting.retrospective` 加入 `packaging/tea.spec`（此前后者缺失导致打包后复盘命令 ImportError）
 
 ### 数据可靠性（2026-08-18）
@@ -49,6 +50,13 @@
     复用通用 `_kv_disk_load` / `_kv_disk_save`；失败路径记 `logs/tea.log` 警告
   - 自测新增「数据层 · 涨跌家数/涨停池磁盘兜底」3 项断言（回退命中 + stale 标注 +
     不含 error），自测 401 → **404**
+
+- **板块排名 / 涨跌家数重试覆盖整条 CDN 节点池**（新增 `market.sector_retries` /
+  `breadth_retries`，默认 3）：两者都是东财独家、无备源，全局 `retries=2` 只轮
+  `cdn_hosts_quote` 三个节点里的前两个，第三个（常是可用的 `push2delay`）根本
+  试不到就回退磁盘兜底。现在这两个关键单源取数点单独抬到 3 次重试、覆盖全节点池
+  后再回退——治本，减少「回退昨天数据」的发生
+  - 自测新增「板块排名/涨跌家数重试覆盖全节点池 + 作用域用完即还原」断言
 
 ### 策略
 

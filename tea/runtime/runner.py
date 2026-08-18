@@ -219,6 +219,10 @@ def seed_plan(cfg: Optional[Config] = None, market: Optional[Market] = None,
                f"次日 close-review 自动回填 T+1 结果")
     elif ft_res.get("skipped"):
         io.say(f"  跟涨样本全部与历史重复（{ft_res['skipped']} 条），未新增落盘")
+    pending_ft = ft_mod.pending_backfill(cfg)
+    if pending_ft:
+        io.say(f"  ⏳ 仍有 {pending_ft} 条历史跟涨样本未回填 T+1，"
+               f"跑 `tea review` 补齐后跟涨胜率才有数据")
 
     path = seed_report.write_report(result, cfg)
     result["report_path"] = path

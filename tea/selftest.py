@@ -14,7 +14,8 @@ import sys
 import tempfile
 from typing import Any, Dict, List, Optional
 
-from .analysis import expectancy as exp_mod, identity as ident_mod, sentiment as sent_mod
+from .analysis import (expectancy as exp_mod, followthrough as ft_mod,
+                       identity as ident_mod, sentiment as sent_mod)
 from .config import config_store
 from .config.config_store import Config
 from .core import paths, utils
@@ -577,11 +578,22 @@ def check_host_failover(t: Suite, cfg: Config) -> None:
         t.ok("成分股全失败时报错", True)
     t.eq("成分股重试单独削到 member_retries", len(tries), member_retries)
     tries.clear()
+    sector_retries = max(1, int(cfg.get("market.sector_retries", 3)))
     try:
         mkt.get_sector_ranking(force=True)
     except MarketError:
         pass
-    t.eq("作用域用完即还原（其余取数点仍按全局重试）", len(tries), 8)
+    t.eq("板块排名重试覆盖整条 quote 节点池（sector_retries）", len(tries), sector_retries)
+    t.eq("sector_retries 作用域用完即还原为全局重试", fetcher.retries, 8)
+
+    # 涨跌家数同样是东财独家无备源：第一个页面失败即整体失败，重试也应覆盖全节点池。
+    tries.clear()
+    breadth_retries = max(1, int(cfg.get("market.breadth_retries", 3)))
+    try:
+        mkt.get_breadth()
+    except MarketError:
+        pass
+    t.eq("涨跌家数重试覆盖整条 quote 节点池（breadth_retries）", len(tries), breadth_retries)
 
     # ---- 重试次数不再被节点池大小抬高：retries=2 就只试 2 次，报错文案同步报 2。
     # 真实踩坑：旧实现取 max(retries, len(hosts))，kline 池 4 个节点把一家源的死磕
@@ -1860,6 +1872,30 @@ def check_end_to_end(t: Suite, cfg: Config, mk: FakeMarket, sent: dict) -> None:
     t.eq("持仓已清空", len(portfolio.positions(cfg)), 0)
 
 
+def check_followthrough(t: Suite, cfg: Config) -> None:
+    """跟涨样本：T+1 未回填计数 + 按 (date, code) 去重。"""
+    t.head("跟涨样本 · T+1 回填提示与去重")
+    recs = [
+        {"date": "2026-08-08", "code": "600001", "name": "历史未回填",
+         "next_chg": None, "result": None},
+        {"date": "2026-08-09", "code": "600002", "name": "历史已回填",
+         "next_chg": 3.5, "result": "win"},
+        {"date": utils.today_str(), "code": "600003", "name": "今日待回填",
+         "next_chg": None, "result": None},
+    ]
+    ft_mod.save_records(recs, cfg)
+    t.eq("未回填数只算历史日期（跳过今日）", ft_mod.pending_backfill(cfg), 1)
+
+    r_dup = ft_mod.record_seed([{"code": "600001", "name": "历史未回填", "price": 10.0}],
+                               cfg, date="2026-08-08")
+    t.eq("record_seed 对已存在 (date,code) 去重跳过", r_dup, {"added": 0, "skipped": 1})
+
+    r_new = ft_mod.record_seed([{"code": "600999", "name": "新样本", "price": 20.0}],
+                               cfg, date="2026-08-10")
+    t.eq("record_seed 新 (date,code) 正常落盘", r_new, {"added": 1, "skipped": 0})
+    t.eq("新增后未回填历史数 +1", ft_mod.pending_backfill(cfg), 2)
+
+
 def check_config_migration(t: Suite, home: str) -> None:
     """单源→多源的一次性配置迁移。
 
@@ -2245,6 +2281,7 @@ def main(verbose: bool = True, cfg: Optional[Config] = None) -> int:
         check_paths(t)
         check_packaging(t)
         check_end_to_end(t, c, mk, sent)
+        check_followthrough(t, c)
         return t.report()
     finally:
         sent_mod.clear_cache()

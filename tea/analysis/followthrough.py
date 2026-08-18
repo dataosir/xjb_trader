@@ -122,6 +122,18 @@ def update_results(market: Optional[Market] = None, cfg: Optional[Config] = None
     return {"updated": updated, "pending": pending, "total": len(recs)}
 
 
+def pending_backfill(cfg: Optional[Config] = None) -> int:
+    """未回填 T+1 的历史记录数（不含今日：今日的样本本就要等下一个交易日）。
+
+    用于种子扫描收尾提示——若历史样本一直没人跑 review，跟涨胜率模块就是零样本，
+    白白积累了一周数据。返回 0 表示都已回填（或没有历史记录）。
+    """
+    cfg = cfg or load_config()
+    today = utils.today_str()
+    return sum(1 for r in load_records(cfg)
+               if r.get("result") is None and r.get("code") and r.get("date") != today)
+
+
 # ------------------------------------------------------------------ 聚合
 
 def key_of(stage: Optional[str], tier: Optional[str], track: Optional[str]) -> str:

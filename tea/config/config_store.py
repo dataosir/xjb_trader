@@ -92,6 +92,11 @@ DEFAULTS: Dict[str, Any] = {
         # 东财挂的时候每一环都死磕到顶，总耗时从几十秒满到几分钟，
         # 所以这一项的重试单独压得更低（反正拿不到就跳过这个板块）。
         "member_retries": 2,
+        # 板块排名 / 涨跌家数是选股的根、且同样东财独家无备源。它们的重试要覆盖
+        # 整条 cdn_hosts_quote 节点池（默认 3 个节点）：全局 retries=2 只试前两个
+        # 节点，第三个（常是 push2delay 这类可用的）根本轮不到就回退磁盘兜底。
+        "sector_retries": 3,
+        "breadth_retries": 3,
         "breadth_fs": "m:0+t:6,m:0+t:80,m:1+t:2,m:1+t:23",
         "breadth_flat_eps": 0.05,
         "breadth_max_probes": 24,
