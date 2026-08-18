@@ -1577,6 +1577,14 @@ def check_seed(t: Suite, cfg: Config, mk: FakeMarket, sent: dict) -> dict:
     t.ok("同一批数据在固定 3% 下限下被排空", "600123" not in weak_fixed,
          f"候选={weak_fixed}")
 
+    # strongest_sector_chg / max_sector_chg 口径对齐：跳过严格档与动态窗口必须用同一个
+    # 「最强板块涨幅」（排名表首位），不能一个 13.56% 一个 11.10%。
+    _, _, notes_align = sc.screen_with_downgrade(weak_sectors, max_sector_chg=5.0,
+                                                 strongest_sector_chg=7.0)
+    t.ok("跳过严格档用 strongest_sector_chg（7.0%）而非 max_sector_chg（5.0%）",
+         any("7.00%" in n and "跳过严格档" in n for n in notes_align),
+         "；".join(notes_align))
+
     step1 = sc.rank_sectors()
     t.ok("第1步：板块池非空", bool(step1["top"]),
          f"入池 {len(step1['top'])} 个，合格 {len(step1.get('qualified') or [])} 个")

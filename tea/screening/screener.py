@@ -585,9 +585,12 @@ class Screener:
         dyn_ref = strongest_sector_chg if strongest_sector_chg is not None else max_sector_chg
         notes.append("动态窗口：" + dyn_window_text(dyn_window(cfg, dyn_ref)))
         order = [TIER_STRICT, TIER_RELAXED, TIER_MOMENTUM]
-        if max_sector_chg >= hot_chg:
+        # 跳过严格档的判据要和动态窗口用同一个「最强板块涨幅」（都取自排名表首位，
+        # 即 strongest_sector_chg），而不是 TOP3 入池后的最大值——否则两条备注会印出
+        # 两个不同的「最强板块涨幅」（实测 13.56% vs 11.10%）。
+        if dyn_ref >= hot_chg:
             order = [TIER_RELAXED, TIER_MOMENTUM]
-            notes.append(f"板块最强涨幅 {max_sector_chg:.2f}% ≥{hot_chg:.0f}% → 跳过严格档（普涨日严格窗必空）")
+            notes.append(f"板块最强涨幅 {dyn_ref:.2f}% ≥{hot_chg:.0f}% → 跳过严格档（普涨日严格窗必空）")
         for tier in order:
             cands = self.screen_tier(sectors, tier, tracer, max_sector_chg=dyn_ref)
             if cands:
