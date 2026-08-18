@@ -39,6 +39,7 @@ CAND_HARD = "硬否决"
 CAND_SOFT = "软否决"
 CAND_ERROR = "数据缺"
 CAND_SKIPPED = "未预审"
+CAND_CHG_OUT = "涨幅移出窗口"
 
 
 # ------------------------------------------------------------------ 档位参数
@@ -562,6 +563,9 @@ class Screener:
                     "sector": sec_ctx, "sector_name": sec.get("name"), "sector_rank": sec.get("rank"),
                     "sector_chg": sec.get("chg"), "identity": idn, "pick": ps,
                     "tier": tier, "hot_sector": hot,
+                    # 第 3 步拉到实时行情后要用最新涨幅再核一次窗口（见 veto_filter），
+                    # 这里把当初筛入时用的窗口下/上限记下来，避免批量快照涨幅与实时行情的偏差。
+                    "win_min": p["min_chg"], "win_max": p["max_chg"],
                 })
                 seen[code] = sec.get("name") or "?"
         out.sort(key=lambda x: (-x["identity"]["score"], -x["pick"]["score"]))
@@ -627,6 +631,21 @@ class Screener:
                 continue
             ev["tier_label"] = cand["tier"]
             ev["pick"] = cand["pick"]
+            # 涨幅窗口复检：第 2 步用板块成分股的批量快照涨幅筛入窗口，可能比实时
+            # 行情慢一拍。这里已拿到实时行情，用最新涨幅再核一次；移出窗口的候选
+            # 不再作为种子输出（避免「显示 6.77%，实际已涨到 7.6% 却还当温和票」）。
+            fresh_chg = (ev.get("quote") or {}).get("chg_pct")
+            win_min, win_max = cand.get("win_min"), cand.get("win_max")
+            if (fresh_chg is not None and win_min is not None and win_max is not None
+                    and not (win_min <= fresh_chg <= win_max)):
+                details.append(candidate_row(
+                    cand, ev, CAND_CHG_OUT,
+                    reason=f"实时涨幅 {fresh_chg:.2f}% 不在 {win_min:.2f}~{win_max:.2f}%"))
+                if tracer:
+                    tracer.add(seed_trace.STEP_VETO, cand["code"], cand["name"], "涨幅移出窗口",
+                               f"实时 {fresh_chg:.2f}% 不在 {win_min:.2f}~{win_max:.2f}%",
+                               tier=cand["tier"], sector=cand.get("sector_name"), chg=fresh_chg)
+                continue
             vt = ev.get("veto") or {}
             if vt.get("rejected"):
                 details.append(candidate_row(cand, ev, CAND_HARD, veto_detail(vt["hard"])))

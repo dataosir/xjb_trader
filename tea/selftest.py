@@ -1635,6 +1635,24 @@ def check_seed(t: Suite, cfg: Config, mk: FakeMarket, sent: dict) -> dict:
     t.ok("SEED 报告含候选明细表且覆盖全部候选",
          "候选明细" in md and all(d["code"] in md for d in det),
          f"codes={[d['code'] for d in det]}")
+
+    # 涨幅窗口复检：第 2 步按板块成分股的批量快照涨幅筛入，第 3 步拉到实时行情后
+    # 要用最新涨幅再核一次；实时涨幅已移出窗口的候选不得再作为种子输出。
+    old_q = mk.quotes.get(TARGET)
+    mk.quotes[TARGET] = _quote(TARGET, TARGET_NAME, 12.00, 6.80, HOT_NAME,
+                               high=12.20, low=11.50, open=11.60)
+    try:
+        cand_out = mkcand(TARGET, TARGET_NAME, 5.20)
+        cand_out["win_min"], cand_out["win_max"] = 3.0, 5.5
+        vf2 = sc.veto_filter([cand_out], sent)
+        chg_out = [d for d in vf2["candidates"] if d["verdict"] == screener_mod.CAND_CHG_OUT]
+        t.eq("实时涨幅移出窗口 → 不再作为种子输出",
+             (len(chg_out), len(vf2["passed"]), len(vf2["soft"])), (1, 0, 0))
+        t.ok("移出窗口原因带实时涨幅",
+             chg_out and "6.80%" in (chg_out[0].get("reason") or ""),
+             chg_out[0].get("reason") if chg_out else "无移出窗口明细")
+    finally:
+        mk.quotes[TARGET] = old_q
     return res
 
 
