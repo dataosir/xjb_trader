@@ -65,11 +65,12 @@ class EastmoneyProvider(IDataProvider):
         if len(code) != 6:
             raise MarketError(f"非法股票代码: {code}")
         mkt = utils.market_of(code)
-        data = self.fetcher.get_json(self.cfg.get("market.quote_url"), {
-            "secid": f"{mkt}.{code}",
-            "fields": self.cfg.get("market.quote_fields"),
-            "invt": 2, "fltt": 2, "ut": EM_UT,
-        }, host_pool="cdn_hosts_quote").get("data") or {}
+        with self.retry_scope("quote_retries", 3):
+            data = self.fetcher.get_json(self.cfg.get("market.quote_url"), {
+                "secid": f"{mkt}.{code}",
+                "fields": self.cfg.get("market.quote_fields"),
+                "invt": 2, "fltt": 2, "ut": EM_UT,
+            }, host_pool="cdn_hosts_quote").get("data") or {}
         if not data:
             raise MarketError(f"行情为空: {code}")
         return parse_quote(code, mkt, data)
@@ -79,16 +80,17 @@ class EastmoneyProvider(IDataProvider):
         lmt = int(limit or self.cfg.get("market.kline_limit", 30))
         c = utils.norm_code(code)
         sid = secid or f"{utils.market_of(c)}.{c}"
-        js = self.fetcher.get_json(self.cfg.get("market.kline_url"), {
-            "secid": sid,
-            "klt": self.cfg.get("market.kline_klt", 101),
-            "fqt": self.cfg.get("market.kline_fqt", 1),
-            "lmt": lmt,
-            "end": "20500101",
-            "fields1": self.cfg.get("market.kline_fields1"),
-            "fields2": self.cfg.get("market.kline_fields2"),
-            "ut": EM_UT,
-        }, host_pool="cdn_hosts_kline")
+        with self.retry_scope("kline_retries", 4):
+            js = self.fetcher.get_json(self.cfg.get("market.kline_url"), {
+                "secid": sid,
+                "klt": self.cfg.get("market.kline_klt", 101),
+                "fqt": self.cfg.get("market.kline_fqt", 1),
+                "lmt": lmt,
+                "end": "20500101",
+                "fields1": self.cfg.get("market.kline_fields1"),
+                "fields2": self.cfg.get("market.kline_fields2"),
+                "ut": EM_UT,
+            }, host_pool="cdn_hosts_kline")
         rows = ((js.get("data") or {}).get("klines") or [])
         out = []
         for line in rows:
@@ -114,9 +116,10 @@ class EastmoneyProvider(IDataProvider):
 
     def _point_chg(self, secid: str) -> tuple:
         """指数点位与涨跌幅（走 quote 池，push2delay 兜底）。"""
-        js = self.fetcher.get_json(self.cfg.get("market.quote_url"), {
-            "secid": secid, "fields": "f43,f170", "invt": 2, "fltt": 2, "ut": EM_UT,
-        }, host_pool="cdn_hosts_quote")
+        with self.retry_scope("quote_retries", 3):
+            js = self.fetcher.get_json(self.cfg.get("market.quote_url"), {
+                "secid": secid, "fields": "f43,f170", "invt": 2, "fltt": 2, "ut": EM_UT,
+            }, host_pool="cdn_hosts_quote")
         d = js.get("data") or {}
         # 同 parse_quote：fltt=2 已是最终值。除以 100 会把上证 3832 点算成 38 点，
         # 而 MA20 来自 K 线（本来就是真实点位），于是 ma20_above 恒为 False，

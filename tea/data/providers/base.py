@@ -119,6 +119,22 @@ class IDataProvider:
         with scope(self.timeout_for(method)):
             yield
 
+    @contextmanager
+    def retry_scope(self, key: str, default: int) -> Iterator[None]:
+        """在本源的请求期间临时把抓取器重试次数换成配置值（覆盖 CDN 节点池）。
+
+        东财的报价 / K 线都走节点池（quote 池 3 个、kline 池 4 个），全局 retries=2
+        只试前两个节点，健康节点排在后面就漏掉、被迫切到备源。这里按配置覆盖整条
+        池，用完即还原；自测里的假抓取器没有 with_retries 能力，退化成空操作。
+        """
+        scope = getattr(self.fetcher, "with_retries", None)
+        if scope is None:
+            yield
+            return
+        times = int(self.cfg.get(f"market.{key}", default) or default)
+        with scope(max(1, times)):
+            yield
+
     # -------------------------------------------------- 能力（子类按需覆盖）
     def fetch_quote(self, code: str) -> dict:
         """实时行情，返回东财 schema 的标准 dict。"""

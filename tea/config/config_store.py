@@ -97,6 +97,11 @@ DEFAULTS: Dict[str, Any] = {
         # 节点，第三个（常是 push2delay 这类可用的）根本轮不到就回退磁盘兜底。
         "sector_retries": 3,
         "breadth_retries": 3,
+        # 报价 / K 线是东财主源（push2 / push2his），同样要走节点池：报价池 3 个、
+        # K 线池 4 个节点，全局 retries=2 只试前两个，健康节点排在后面就漏掉、
+        # 被迫切到腾讯等备源。单独覆盖整条池，尽量在主源内命中。
+        "quote_retries": 3,
+        "kline_retries": 4,
         "breadth_fs": "m:0+t:6,m:0+t:80,m:1+t:2,m:1+t:23",
         "breadth_flat_eps": 0.05,
         "breadth_max_probes": 24,

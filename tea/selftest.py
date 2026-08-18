@@ -595,6 +595,26 @@ def check_host_failover(t: Suite, cfg: Config) -> None:
         pass
     t.eq("涨跌家数重试覆盖整条 quote 节点池（breadth_retries）", len(tries), breadth_retries)
 
+    # 东财报价/K 线是主源（push2/push2his），同样走节点池；重试要覆盖各自整条池
+    # （报价 3、K 线 4），别只试前两个节点就切到腾讯等备源。
+    from .data.providers.eastmoney import EastmoneyProvider
+    em = EastmoneyProvider(cfg, fetcher)
+    tries.clear()
+    try:
+        em.fetch_klines("600519")
+    except MarketError:
+        pass
+    kline_retries = max(1, int(cfg.get("market.kline_retries", 4)))
+    t.eq("东财 K 线重试覆盖 kline 节点池（kline_retries）", len(tries), kline_retries)
+    t.eq("kline_retries 作用域用完即还原", fetcher.retries, 8)
+    tries.clear()
+    try:
+        em.fetch_quote("600519")
+    except MarketError:
+        pass
+    quote_retries = max(1, int(cfg.get("market.quote_retries", 3)))
+    t.eq("东财报价重试覆盖 quote 节点池（quote_retries）", len(tries), quote_retries)
+
     # ---- 重试次数不再被节点池大小抬高：retries=2 就只试 2 次，报错文案同步报 2。
     # 真实踩坑：旧实现取 max(retries, len(hosts))，kline 池 4 个节点把一家源的死磕
     # 拉到 4×8s，降级链要等半分钟才轮得到下家——广度该由链提供，不是节点池。
