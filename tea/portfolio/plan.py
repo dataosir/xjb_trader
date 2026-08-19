@@ -212,6 +212,27 @@ def clear_plan(cfg: Optional[Config] = None, reason: str = "") -> dict:
 
 # ------------------------------------------------------------------ 11.2 变动检测
 
+def _resonance_dim_diff(old_dims: Optional[List[dict]],
+                        new_dims: Optional[List[dict]]) -> List[str]:
+    """对比共振六维旧/新得分，返回发生变化维度的可读描述。
+
+    供「共振分不足」展开使用：只报一句 `6<7` 是黑盒，复盘时不知道到底掉在
+    板块强度还是量价结构。这里按 no 对齐，只列得分真正变化的维度。
+    """
+    if not old_dims or not new_dims:
+        return []
+    old_by = {d.get("no"): d for d in old_dims if isinstance(d, dict)}
+    new_by = {d.get("no"): d for d in new_dims if isinstance(d, dict)}
+    diffs: List[str] = []
+    for no in sorted(set(old_by) | set(new_by)):
+        o, n = old_by.get(no) or {}, new_by.get(no) or {}
+        os_, ns_ = o.get("score"), n.get("score")
+        if os_ != ns_:
+            name = n.get("name") or o.get("name") or f"维度{no}"
+            diffs.append(f"{name} {os_}→{ns_}")
+    return diffs
+
+
 def check_item(item: dict, ev: dict, cfg: Optional[Config] = None) -> List[dict]:
     """对比计划快照与当前预审，返回变动列表（空 = 无变动）。"""
     cfg = cfg or load_config()
@@ -242,7 +263,22 @@ def check_item(item: dict, ev: dict, cfg: Optional[Config] = None) -> List[dict]
     th = ev.get("pass_threshold")
     total = ev.get("total_score")
     if total is not None and th is not None and total < th:
-        chg("共振分不足", f"共振分 {total} < 当前门槛 {th}")
+        detail = f"共振分 {total} < 当前门槛 {th}"
+        # 展开变化来源：门槛本身涨了，或某几维得分掉了——否则只报 6<7 让人猜。
+        old_th = snap.get("pass_threshold")
+        if old_th is not None and old_th != th:
+            detail += f"（门槛 {old_th}→{th}）"
+        dims = _resonance_dim_diff(snap.get("scoring_dims"),
+                                   (ev.get("scoring") or {}).get("dims"))
+        if dims:
+            detail += "；" + "、".join(dims)
+        elif not snap.get("scoring_dims"):
+            # 旧计划快照没存六维拆解，无法做新旧对比：至少列出当前各维得分。
+            cur_dims = (ev.get("scoring") or {}).get("dims") or []
+            if cur_dims:
+                detail += "；当前六维：" + "、".join(
+                    f"{d.get('name')}{d.get('score')}/{d.get('max')}" for d in cur_dims)
+        chg("共振分不足", detail)
 
     min_odds = float(cfg.s("min_odds", 3))
     odds = (ev.get("levels") or {}).get("odds")

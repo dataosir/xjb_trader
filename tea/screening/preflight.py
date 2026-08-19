@@ -424,6 +424,13 @@ def snapshot(ev: dict) -> dict:
         "ma_bull": (ev.get("ind") or {}).get("ma_bull"),
         "intraday": ev.get("intraday"), "stage": (ev.get("stage") or {}).get("stage"),
         "total_score": ev.get("total_score"), "pass_threshold": ev.get("pass_threshold"),
+        # 六维拆解（不含 detail，只留可对比的得分）：计划复核时据此指出「共振分
+        # 具体掉在哪一维」，而不是只报一句 6<7 让人猜。
+        "scoring_dims": [
+            {"no": d.get("no"), "name": d.get("name"), "score": d.get("score"),
+             "max": d.get("max")}
+            for d in (ev.get("scoring") or {}).get("dims", [])
+        ],
         "odds": lv.get("odds"), "sl_pct": lv.get("sl_pct"), "tp_pct": lv.get("tp_pct"),
         "verdict": ev.get("verdict"), "ts": ev.get("ts"),
     }

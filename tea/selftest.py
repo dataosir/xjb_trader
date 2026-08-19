@@ -1870,6 +1870,51 @@ def check_plan_check_clear_prompt(t: Suite, cfg: Config) -> None:
     gates.reset_state(cfg)
 
 
+def check_plan_recheck(t: Suite, cfg: Config) -> None:
+    """计划复核的「共振分不足」必须指出具体哪一维/门槛变化，而非只报 6<7。
+
+    复核输出如果只说「共振分 6 < 当前门槛 7」，复盘时无从知道是门槛涨了还是
+    板块强度掉了。这里直接喂一组旧/新六维给 check_item，盯住展开文案。
+    """
+    t.head("计划 · 共振分不足展开到维度")
+    dims = [
+        {"no": 1, "name": "板块强度", "score": 2, "max": 2},
+        {"no": 2, "name": "大盘趋势", "score": 1, "max": 1},
+        {"no": 3, "name": "消息面", "score": 1, "max": 1},
+        {"no": 4, "name": "市值区间", "score": 2, "max": 2},
+        {"no": 5, "name": "量价结构", "score": 2, "max": 2},
+        {"no": 6, "name": "止损结构", "score": 1, "max": 1},
+    ]
+    item = {
+        "ref_price": 12.0,
+        "snapshot": {
+            "price": 12.0, "pass_threshold": 6,
+            "scoring_dims": dims, "sector_rank": 1,
+            "identity_tier": "龙头", "bias_ma20": 2.0,
+        },
+    }
+    new_dims = [dict(d) for d in dims]
+    new_dims[0]["score"] = 1  # 板块强度 2→1
+    ev = {
+        "veto": {},
+        "quote": {"price": 12.0},
+        "sector": {"rank": 1},
+        "pass_threshold": 7,
+        "total_score": 6,
+        "levels": {"odds": 2.5},
+        "identity": {"tier": "龙头"},
+        "ind": {"bias_ma20": 3.0},
+        "intraday": 0.5,
+        "scoring": {"dims": new_dims},
+    }
+    changes = plan_mod.check_item(item, ev, cfg)
+    kinds = sorted({c["kind"] for c in changes})
+    t.eq("只触发共振分不足", kinds, ["共振分不足"])
+    detail = changes[0]["detail"]
+    t.ok("详情含维度变化（板块强度 2→1）", "板块强度 2→1" in detail, detail)
+    t.ok("详情含门槛变化（6→7）", "门槛 6→7" in detail, detail)
+
+
 def check_menu(t: Suite, cfg: Config) -> None:
     """菜单：默认只印四条建议，展开视图必须不多不少地盖住 20 项。
 
@@ -2374,6 +2419,7 @@ def main(verbose: bool = True, cfg: Optional[Config] = None) -> int:
         check_plan_labels(t, c, mk, sent)
         check_plan_clear(t, c)
         check_plan_check_clear_prompt(t, c)
+        check_plan_recheck(t, c)
         check_menu(t, c)
         check_config_migration(t, tmp)
         check_onboarding(t, tmp)
