@@ -624,8 +624,7 @@ class Screener:
             utils.tell(io, f"    · [{i}/{len(batch)}] {cand['code']} {cand['name']}")
             try:
                 ev = preflight.evaluate(
-                    cand["code"], self.mk, cfg, sent=sent, sector=cand["sector"],
-                    seed_leader_relax=True)
+                    cand["code"], self.mk, cfg, sent=sent, sector=cand["sector"])
             except Exception as exc:
                 details.append(candidate_row(cand, verdict=CAND_ERROR,
                                              reason=f"行情/指标异常：{exc}"))

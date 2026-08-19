@@ -1304,9 +1304,9 @@ def check_identity(t: Suite, cfg: Config, mk: FakeMarket) -> dict:
     t.eq("杂毛层级", idn2["tier"], ident_mod.TIER_ZAMAO)
     t.ok("杂毛 flags ≥2", len(idn2["flags"]) >= 2, f"flags={idn2['flags']}")
 
-    # §6.3 杂毛预警：门槛 6 → 7
-    th_leader = preflight.effective_threshold(idn, None, False, False, cfg)
-    th_zamao = preflight.effective_threshold(idn2, None, False, False, cfg)
+    # §6.3 杂毛预警：门槛 6 → 7（龙头无加成时不破 6 的地板）
+    th_leader = preflight.effective_threshold(idn, None, False, cfg)
+    th_zamao = preflight.effective_threshold(idn2, None, False, cfg)
     t.eq("龙头门槛", th_leader["threshold"], int(cfg.s("pass_threshold", 6)))
     t.eq("杂毛门槛 +1", th_zamao["threshold"], th_leader["threshold"] + 1)
     return idn
@@ -1919,6 +1919,34 @@ def check_plan_recheck(t: Suite, cfg: Config) -> None:
     t.ok("详情含门槛变化（6→7）", "门槛 6→7" in detail, detail)
 
 
+def check_leader_relax(t: Suite, cfg: Config) -> None:
+    """龙头 -1 是门槛公式的一部分，任何评估入口同口径生效。
+
+    陕西黑猫实例：种子扫描按 6 分放行龙头，plan-check 却按 7 分卡掉（漏传龙头
+    放宽），导致 6/6 通过后仍被「共振分不足」作废。修法是让龙头 -1 内建在
+    effective_threshold 里，不设调用方开关，扫描/复核/执行/eval 一处不漏。
+    """
+    t.head("门槛 · 龙头 -1 统一生效")
+    leader = {"tier": ident_mod.TIER_LEADER, "score": 70.0}
+    follower = {"tier": ident_mod.TIER_FOLLOW, "score": 50.0}
+    defend = {"stance": sent_mod.STANCE_DEFEND}
+
+    th = preflight.effective_threshold(leader, defend, cfg=cfg)
+    t.eq("防守姿态下龙头门槛 6（-1）", th["threshold"], 6)
+    t.ok("龙头 -1 留痕在 notes", any("龙头 -1" in n for n in th["notes"]), str(th["notes"]))
+
+    th2 = preflight.effective_threshold(follower, defend, cfg=cfg)
+    t.eq("防守姿态下跟风门槛 7（不 -1）", th2["threshold"], 7)
+
+    th3 = preflight.effective_threshold(leader, None, cfg=cfg)
+    t.eq("无加成时龙头门槛不破地板 → 6", th3["threshold"], 6)
+
+    # 全链路：evaluate → effective_threshold 不再需要调用方传开关，龙头在防守
+    # 姿态下门槛就是 6，而不是漏传开关导致的 7。
+    ev = preflight.evaluate(TARGET, FakeMarket(cfg), cfg, sent=defend)
+    t.eq("evaluate 对龙头在防守姿态的门槛为 6", ev["pass_threshold"], 6)
+
+
 def check_menu(t: Suite, cfg: Config) -> None:
     """菜单：默认只印四条建议，展开视图必须不多不少地盖住 20 项。
 
@@ -2424,6 +2452,7 @@ def main(verbose: bool = True, cfg: Optional[Config] = None) -> int:
         check_plan_clear(t, c)
         check_plan_check_clear_prompt(t, c)
         check_plan_recheck(t, c)
+        check_leader_relax(t, c)
         check_menu(t, c)
         check_config_migration(t, tmp)
         check_onboarding(t, tmp)

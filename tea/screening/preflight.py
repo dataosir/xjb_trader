@@ -294,9 +294,13 @@ def score_nine(quote: dict, ind: dict, sector: dict, sent: Optional[dict],
 # ------------------------------------------------------------------ 8.4 有效门槛
 
 def effective_threshold(identity: Optional[dict] = None, sent: Optional[dict] = None,
-                        insufficient_samples: bool = False, seed_leader_relax: bool = False,
+                        insufficient_samples: bool = False,
                         cfg: Optional[Config] = None) -> dict:
-    """动态通过门槛：base 6 + 杂毛warn +1 + 样本不足 +1 + 防守姿态 +1（龙头预审可 -1）。"""
+    """动态通过门槛：base 6 + 杂毛warn +1 + 样本不足 +1 + 防守姿态 +1，龙头 -1（下限 6）。
+
+    龙头 -1 是门槛公式的一部分，不设调用方开关：种子扫描、计划复核、run 执行、
+    eval/watch 全走同一套口径，避免「选票按 6 分、复核按 7 分」这类分叉。
+    """
     cfg = cfg or load_config()
     base = int(cfg.s("pass_threshold", 6))
     th = base
@@ -314,12 +318,12 @@ def effective_threshold(identity: Optional[dict] = None, sent: Optional[dict] = 
         bump_defend = int(cfg.s("defend_stance_bump", 1))
         th += bump_defend
         notes.append(f"防守姿态 +{bump_defend}")
-    if seed_leader_relax and ident_mod.is_leader(identity or {}):
+    if ident_mod.is_leader(identity or {}):
         floor = int(cfg.get("seed.leader_pass_floor", 6))
         relax = int(cfg.get("seed.leader_pass_bonus", 1))
         new_th = max(floor, th - relax)
         if new_th != th:
-            notes.append(f"种子预审龙头 -{th - new_th}（下限 {floor}）")
+            notes.append(f"龙头 -{th - new_th}（下限 {floor}）")
         th = new_th
     return {"threshold": int(th), "base": base, "notes": notes}
 
@@ -330,7 +334,7 @@ def evaluate(code: str, market: Optional[Market] = None, cfg: Optional[Config] =
                     sent: Optional[dict] = None, quote: Optional[dict] = None,
                     sector: Optional[dict] = None, has_news: Optional[bool] = None,
                     sl_pct: Optional[float] = None, tp_pct: Optional[float] = None,
-                    seed_leader_relax: bool = False, insufficient_samples: bool = False,
+                    insufficient_samples: bool = False,
                     prefer_sector: Optional[str] = None) -> dict:
     """轻量版 9 分共振预审：行情 → 身份 → VETO → 评分 → 判定。"""
     cfg = cfg or load_config()
@@ -369,7 +373,7 @@ def evaluate(code: str, market: Optional[Market] = None, cfg: Optional[Config] =
         levels = {}
 
     scored = score_nine(q, ind, sec, sent, levels, has_news, cfg)
-    th = effective_threshold(idn, sent, insufficient_samples, seed_leader_relax, cfg)
+    th = effective_threshold(idn, sent, insufficient_samples, cfg)
     total, threshold = scored["total"], th["threshold"]
 
     reasons: List[str] = []
