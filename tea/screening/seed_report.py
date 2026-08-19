@@ -107,6 +107,27 @@ def _dyn_line(result: dict) -> Optional[str]:
     return f"动态窗口：{dyn_window_text(win)}" if win else None
 
 
+def _scoring_dims_lines(ev: dict) -> List[str]:
+    """共振六维逐项展开（Markdown 列表），供种子文档复盘「每一分从哪来」。
+
+    dims 既可能来自完整预审的 `scoring.dims`（带 no），也可能来自候选明细的
+    `scoring_dims`（不带 no）；两种都兼容，缺 no 时用顺序号补齐。
+    """
+    sc = ev.get("scoring") or {}
+    dims = sc.get("dims") or ev.get("scoring_dims") or []
+    if not dims:
+        return []
+    total = sc.get("total")
+    if total is None:
+        total = ev.get("total_score")
+    maxv = sc.get("max")
+    lines = [f"  - 共振六维（{total}/{maxv}）："]
+    for i, d in enumerate(dims, 1):
+        no = d.get("no") or i
+        lines.append(f"    - {no}. {d.get('name')} {d.get('score')}/{d.get('max')} — {d.get('detail')}")
+    return lines
+
+
 # ------------------------------------------------------------------ Markdown
 
 def render_md(result: dict, cfg: Optional[Config] = None) -> str:
@@ -169,6 +190,7 @@ def render_md(result: dict, cfg: Optional[Config] = None) -> str:
                 detail.append("软否决：" + "；".join(i["label"] for i in vt["soft"]))
             if detail:
                 lines.append(f"- **{e.get('code')} {e.get('name')}** — " + " ｜ ".join(detail))
+            lines += _scoring_dims_lines(e)
         lines.append("")
 
     # ---- 前夕观察
@@ -181,6 +203,7 @@ def render_md(result: dict, cfg: Optional[Config] = None) -> str:
             if e.get("triggers"):
                 lines.append(f"- {e.get('code')} {e.get('name')} — 触发条件："
                              + "；".join(e["triggers"]))
+            lines += _scoring_dims_lines(e)
         lines.append("")
     else:
         lines += ["无前夕观察标的。", ""]

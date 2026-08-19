@@ -1676,6 +1676,10 @@ def check_seed(t: Suite, cfg: Config, mk: FakeMarket, sent: dict) -> dict:
     t.ok("SEED 报告含候选明细表且覆盖全部候选",
          "候选明细" in md and all(d["code"] in md for d in det),
          f"codes={[d['code'] for d in det]}")
+    t.ok("SEED 报告含共振六维逐项展开", "共振六维" in md, "")
+    t.ok("共振六维含市值具体值", "市值 120.0亿" in md, "")
+    t.ok("共振六维含量价结构条件与结果",
+         "放量上涨" in md and "量比 1.80≥1.2" in md and "均线多头" in md, "")
 
     # 涨幅窗口复检：第 2 步按板块成分股的批量快照涨幅筛入，第 3 步拉到实时行情后
     # 要用最新涨幅再核一次；实时涨幅已移出窗口的候选不得再作为种子输出。

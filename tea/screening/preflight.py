@@ -206,17 +206,21 @@ def score_nine(quote: dict, ind: dict, sector: dict, sent: Optional[dict],
 
     # ④ 市值区间（2）
     cap = quote.get("cap_yi")
+    lo_mid = float(c("cap_mid_low", 30))
+    lo_ideal = float(c("cap_ideal_low", 50))
+    hi_ideal = float(c("cap_ideal_high", 300))
+    hi_mid = float(c("cap_mid_high", 500))
+    small = float(c("cap_small_zero_below", 30))
     if cap is None:
         s4, d4 = 0, "市值未知"
-    elif float(c("cap_ideal_low", 50)) <= cap <= float(c("cap_ideal_high", 300)):
-        s4, d4 = 2, f"{cap:.0f}亿 属 50~300亿（黄金区间）"
-    elif float(c("cap_mid_low", 30)) <= cap < float(c("cap_ideal_low", 50)) or \
-            float(c("cap_ideal_high", 300)) < cap <= float(c("cap_mid_high", 500)):
-        s4, d4 = 1, f"{cap:.0f}亿 属 30~50亿 / 300~500亿"
-    elif cap < float(c("cap_small_zero_below", 30)):
-        s4, d4 = 0, f"{cap:.0f}亿 <30亿（过小）"
+    elif lo_ideal <= cap <= hi_ideal:
+        s4, d4 = 2, f"市值 {cap:.1f}亿（{lo_ideal:.0f}~{hi_ideal:.0f}亿 黄金区间）"
+    elif lo_mid <= cap < lo_ideal or hi_ideal < cap <= hi_mid:
+        s4, d4 = 1, f"市值 {cap:.1f}亿（{lo_mid:.0f}~{lo_ideal:.0f}亿 / {hi_ideal:.0f}~{hi_mid:.0f}亿）"
+    elif cap < small:
+        s4, d4 = 0, f"市值 {cap:.1f}亿（<{small:.0f}亿 过小）"
     else:
-        s4, d4 = int(c("cap_huge_score", 1)), f"{cap:.0f}亿 >500亿（大盘股）"
+        s4, d4 = int(c("cap_huge_score", 1)), f"市值 {cap:.1f}亿（>{hi_mid:.0f}亿 大盘股）"
     dims.append({"no": 4, "name": "市值区间", "max": 2, "score": s4, "detail": d4})
 
     # ⑤ 量价结构（2）
@@ -229,17 +233,18 @@ def score_nine(quote: dict, ind: dict, sector: dict, sent: Optional[dict],
     if ind_stale:
         s5, d5 = 0, "技术指标为昨日数据（日K最后一根非今日），不参与共振分"
     elif chg is not None and vr is not None and chg > 0 and vr >= strong and bull:
-        s5, d5 = 2, f"放量上涨（量比 {vr:.2f}）+ 均线多头"
+        s5, d5 = 2, f"放量上涨（涨幅 {chg:+.2f}%>0 且 量比 {vr:.2f}≥{strong:.1f} 且 均线多头）"
     elif chg is not None and vr is not None and chg <= 0 and vr <= shrink and above20:
-        s5, d5 = 2, f"缩量回调（量比 {vr:.2f}）+ MA20 支撑"
+        s5, d5 = 2, f"缩量回调（涨幅 {chg:+.2f}%≤0 且 量比 {vr:.2f}≤{shrink:.1f} 且 MA20 上方）"
     elif chg is not None and vr is not None and ((chg > 0 and vr >= 1.0) or (chg <= 0 and vr < 1.0)):
-        s5, d5 = 1, f"量价基本配合（涨幅 {chg:+.2f}%，量比 {vr:.2f}）"
+        cond = "涨幅>0 且 量比≥1.0" if chg > 0 else "涨幅≤0 且 量比<1.0"
+        s5, d5 = 1, f"量价基本配合（{cond}；涨幅 {chg:+.2f}% 量比 {vr:.2f}）"
     elif chg is not None and vr is not None and chg < 0 and vr >= strong:
-        s5, d5 = 0, f"放量下跌（量比 {vr:.2f}）"
+        s5, d5 = 0, f"放量下跌（涨幅 {chg:+.2f}%<0 且 量比 {vr:.2f}≥{strong:.1f}）"
     elif not above20 and not bull:
         s5, d5 = 0, "均线全失（MA20 下方且非多头）"
     else:
-        s5, d5 = 1, f"量价一般（涨幅 {utils.pct(chg)}，量比 {utils.num(vr)}）"
+        s5, d5 = 1, f"量价一般（涨幅 {utils.pct(chg)} 量比 {utils.num(vr)}）"
     if not ind_stale:
         amt, to = quote.get("amount_yi"), quote.get("turnover")
         bias = (ind or {}).get("bias_ma20")
