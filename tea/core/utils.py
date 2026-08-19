@@ -62,6 +62,18 @@ def prev_trading_day(d: Optional[_dt.date] = None) -> _dt.date:
     return cur
 
 
+def latest_trading_day_str(d: Optional[_dt.date] = None) -> str:
+    """最近一个交易日（今天本身若是交易日即今天），返回 YYYY-MM-DD。
+
+    用于判断日K最后一根是否为「今日最近数据」：盘前 / 非交易日时最后一根落在
+    上一交易日，技术指标据此标记 stale，共振评分相关维度弃用该指标。
+    """
+    cur = d or now().date()
+    while not is_trading_day(cur):
+        cur -= _dt.timedelta(days=1)
+    return cur.strftime("%Y-%m-%d")
+
+
 def days_between(a: str, b: str) -> Optional[int]:
     da, db = parse_date(a), parse_date(b)
     if not da or not db:

@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import contextlib
+import datetime as _dt
 import io as io_mod
 import os
 import sys
@@ -73,14 +74,26 @@ class Suite:
 
 # ==================================================================== 假行情
 
+def _end_dates(n: int) -> List[str]:
+    """生成 n 根日K的日期，最后一根落在最近一个交易日（交易日即今天）。
+
+    日期只是 kline 的标签（指标只用 OHLC），不要求每根都是真实交易日；这里用
+    「从最近交易日往前数 n 天」，保证最后一根是「今日最近数据」，让
+    compute_indicators 的 kline_stale 判定为 False（与真实盘中/盘后一致）。
+    """
+    end = utils.parse_date(utils.latest_trading_day_str())
+    return [(end - _dt.timedelta(days=n - 1 - i)).strftime("%Y-%m-%d") for i in range(n)]
+
+
 def _klines(n: int = 30, start: float = 10.0, step: float = 0.06,
             half_range: float = 0.008) -> List[dict]:
     """构造温和上行的日 K：MA5≥MA10≥MA20，且 ATR 可算。"""
+    dates = _end_dates(n)
     out = []
     for i in range(n):
         close = round(start + step * i, 4)
         out.append({
-            "date": f"2026-{(i // 28) + 6:02d}-{(i % 28) + 1:02d}",
+            "date": dates[i],
             "open": round(close * (1 - half_range / 2), 4),
             "close": close,
             "high": round(close * (1 + half_range), 4),
@@ -92,7 +105,8 @@ def _klines(n: int = 30, start: float = 10.0, step: float = 0.06,
 
 
 def _flat_klines(n: int = 30, level: float = 20.0) -> List[dict]:
-    return [{"date": f"2026-07-{(i % 28) + 1:02d}", "open": level, "close": level,
+    dates = _end_dates(n)
+    return [{"date": dates[i], "open": level, "close": level,
              "high": level * 1.005, "low": level * 0.995,
              "volume": 100000, "amount": 1000000.0} for i in range(n)]
 
@@ -1318,6 +1332,13 @@ def check_levels(t: Suite, cfg: Config, mk: FakeMarket) -> dict:
     t.eq("ATR%", round(ind["atr_pct"], 6), round(want_atr_pct, 6), tol=1e-6)
     t.ok("均线多头 MA5≥MA10≥MA20", bool(ind["ma_bull"]),
          f"{utils.num(ind['ma5'])}/{utils.num(ind['ma10'])}/{utils.num(ind['ma20'])}")
+    t.ok("日K最后一根为今日最近数据（kline_stale=False）",
+         ind.get("kline_stale") is False, f"kline_date={ind.get('kline_date')}")
+
+    # 日K最后一根落在旧日期 → 技术指标标记 stale，供共振评分弃用
+    old = indicators.compute_indicators([{**k, "date": "2020-01-02"} for k in kl], price)
+    t.ok("日K最后一根为旧日期时 kline_stale=True",
+         old.get("kline_stale") is True, f"kline_date={old.get('kline_date')}")
 
     lv = preflight.compute_levels(price, ind["atr_pct"], cfg)
     want_sl = min(utils.clamp(want_atr_pct * 1.5, 2.0, 8.0), 6.0)
@@ -1389,6 +1410,18 @@ def check_scoring(t: Suite, cfg: Config, mk: FakeMarket, sent: dict, lv: dict) -
     t.eq("stale 时共振总分扣掉板块强度（9→7）", sc_stale["total"], 7)
     t.ok("stale 提示出现在板块强度明细里",
          "不参与共振分" in by_no_stale[1]["detail"], by_no_stale[1]["detail"])
+
+    # 技术指标 stale（日K最后一根非今日）：量价结构、止损结构两维弃用该指标。
+    ind_stale = dict(ind, kline_stale=True)
+    sc_kline_stale = preflight.score_nine(q, ind_stale, sec, sent, lv, has_news=True, cfg=cfg)
+    by_kline_stale = {d["no"]: d for d in sc_kline_stale["dims"]}
+    t.eq("K线 stale 时⑤量价结构归零", by_kline_stale[5]["score"], 0)
+    t.eq("K线 stale 时⑥止损结构归零", by_kline_stale[6]["score"], 0)
+    t.eq("K线 stale 时共振总分（9→6）", sc_kline_stale["total"], 6)
+    t.ok("K线 stale 提示出现在⑤量价结构明细里",
+         "不参与共振分" in by_kline_stale[5]["detail"], by_kline_stale[5]["detail"])
+    t.ok("K线 stale 提示出现在⑥止损结构明细里",
+         "不参与共振分" in by_kline_stale[6]["detail"], by_kline_stale[6]["detail"])
     return sc
 
 

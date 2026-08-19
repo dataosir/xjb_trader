@@ -152,6 +152,9 @@ def score_nine(quote: dict, ind: dict, sector: dict, sent: Optional[dict],
     cfg = cfg or load_config()
     c = lambda k, d=None: cfg.get(f"scoring.{k}", d)
     dims: List[dict] = []
+    # 技术指标（均线/乖离/ATR）的日K是否非「今日最近数据」。stale 时量价结构、
+    # 止损结构两维弃用该指标，不拿昨日/更早的均线与 ATR 给今天选股打假分。
+    ind_stale = bool((ind or {}).get("kline_stale"))
 
     # ① 板块强度（2）
     # 板块排名是这一维的唯一数据源。实时取数失败回退磁盘兜底时，排名可能是
@@ -222,7 +225,10 @@ def score_nine(quote: dict, ind: dict, sector: dict, sent: Optional[dict],
     bull = bool((ind or {}).get("ma_bull"))
     above20 = bool((ind or {}).get("above_ma20"))
     strong, shrink = float(c("vp_vol_ratio_strong", 1.2)), float(c("vp_vol_ratio_shrink", 0.8))
-    if chg is not None and vr is not None and chg > 0 and vr >= strong and bull:
+    penalties: List[str] = []
+    if ind_stale:
+        s5, d5 = 0, "技术指标为昨日数据（日K最后一根非今日），不参与共振分"
+    elif chg is not None and vr is not None and chg > 0 and vr >= strong and bull:
         s5, d5 = 2, f"放量上涨（量比 {vr:.2f}）+ 均线多头"
     elif chg is not None and vr is not None and chg <= 0 and vr <= shrink and above20:
         s5, d5 = 2, f"缩量回调（量比 {vr:.2f}）+ MA20 支撑"
@@ -234,23 +240,23 @@ def score_nine(quote: dict, ind: dict, sector: dict, sent: Optional[dict],
         s5, d5 = 0, "均线全失（MA20 下方且非多头）"
     else:
         s5, d5 = 1, f"量价一般（涨幅 {utils.pct(chg)}，量比 {utils.num(vr)}）"
-    penalties: List[str] = []
-    amt, to = quote.get("amount_yi"), quote.get("turnover")
-    bias = (ind or {}).get("bias_ma20")
-    each = int(c("vp_penalty_each", 1))
-    if amt is not None and amt < float(c("amount_min_yi", 2.0)):
-        penalties.append(f"成交额 {amt:.2f}亿 <2亿")
-    if amt is not None and amt > float(c("amount_max_yi", 80.0)):
-        penalties.append(f"成交额 {amt:.2f}亿 >80亿")
-    if to is not None and to < float(c("turnover_min_pct", 2.0)):
-        penalties.append(f"换手 {to:.2f}% <2%")
-    if to is not None and to > float(c("turnover_max_pct", 20.0)):
-        penalties.append(f"换手 {to:.2f}% >20%")
-    if bias is not None and bias > float(c("bias_penalty_pct", 8.0)):
-        penalties.append(f"乖离 {bias:.2f}% >8%")
-    if penalties:
-        s5 -= each * len(penalties)
-        d5 += "；扣分：" + "、".join(penalties)
+    if not ind_stale:
+        amt, to = quote.get("amount_yi"), quote.get("turnover")
+        bias = (ind or {}).get("bias_ma20")
+        each = int(c("vp_penalty_each", 1))
+        if amt is not None and amt < float(c("amount_min_yi", 2.0)):
+            penalties.append(f"成交额 {amt:.2f}亿 <2亿")
+        if amt is not None and amt > float(c("amount_max_yi", 80.0)):
+            penalties.append(f"成交额 {amt:.2f}亿 >80亿")
+        if to is not None and to < float(c("turnover_min_pct", 2.0)):
+            penalties.append(f"换手 {to:.2f}% <2%")
+        if to is not None and to > float(c("turnover_max_pct", 20.0)):
+            penalties.append(f"换手 {to:.2f}% >20%")
+        if bias is not None and bias > float(c("bias_penalty_pct", 8.0)):
+            penalties.append(f"乖离 {bias:.2f}% >8%")
+        if penalties:
+            s5 -= each * len(penalties)
+            d5 += "；扣分：" + "、".join(penalties)
     s5 = int(utils.clamp(s5, 0, int(c("vp_dim_max", 2))))
     dims.append({"no": 5, "name": "量价结构", "max": 2, "score": s5, "detail": d5})
 
@@ -258,12 +264,15 @@ def score_nine(quote: dict, ind: dict, sector: dict, sent: Optional[dict],
     lv = levels or {}
     sl_pct, odds = lv.get("sl_pct"), lv.get("odds")
     atr_ratio = lv.get("sl_atr_mult")
-    ok = (sl_pct is not None and sl_pct <= float(c("sl_struct_max_pct", 8.0))
-          and (atr_ratio is None or atr_ratio <= float(c("sl_struct_atr_mult", 2.5)))
-          and odds is not None and odds >= float(c("sl_struct_min_odds", 3.0)))
-    s6 = 1 if ok else 0
-    d6 = (f"止损 {utils.pct(sl_pct)}（/ATR {utils.num(atr_ratio)}）R:R {utils.num(odds)}"
-          + ("" if ok else " → 不达标"))
+    if ind_stale:
+        s6, d6 = 0, "止损结构依赖昨日 ATR（日K最后一根非今日），不参与共振分"
+    else:
+        ok = (sl_pct is not None and sl_pct <= float(c("sl_struct_max_pct", 8.0))
+              and (atr_ratio is None or atr_ratio <= float(c("sl_struct_atr_mult", 2.5)))
+              and odds is not None and odds >= float(c("sl_struct_min_odds", 3.0)))
+        s6 = 1 if ok else 0
+        d6 = (f"止损 {utils.pct(sl_pct)}（/ATR {utils.num(atr_ratio)}）R:R {utils.num(odds)}"
+              + ("" if ok else " → 不达标"))
     dims.append({"no": 6, "name": "止损结构", "max": 1, "score": s6, "detail": d6})
 
     total = sum(d["score"] for d in dims)
@@ -346,7 +355,11 @@ def evaluate(code: str, market: Optional[Market] = None, cfg: Optional[Config] =
                        "odds_ok": (levels.get("odds") or 0) >= float(cfg.s("min_odds", 3)),
                        "notes": ["手动输入止损止盈"]})
     elif price:
-        levels = compute_levels(price, ind.get("atr_pct"), cfg)
+        # 日K最后一根非今日时，ATR 基于昨日/更早收盘，不能拿旧波动当今天的风险。
+        # 传 None 走固定止损回退；止损结构维度在 score_nine 里据此归零，这里的
+        # levels 仅作计划/报告上的保守兜底，不把 stale ATR 带入止损止盈。
+        atr_pct = None if ind.get("kline_stale") else ind.get("atr_pct")
+        levels = compute_levels(price, atr_pct, cfg)
     else:
         levels = {}
 
