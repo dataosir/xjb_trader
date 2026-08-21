@@ -216,6 +216,8 @@ class ChainedProvider(IDataProvider):
         self.last_source: Dict[str, str] = {}
         #: 源名 → 供数次数；降级链到底有没有干活，看这个最直接
         self.source_hit_count: Dict[str, int] = {}
+        #: 已经报过「改用谁」的 (源, 方法)，避免同一家连挂时每条记录刷一遍
+        self._fallback_notified: set = set()
 
     # -------------------------------------------------- 降级
     def _supports(self, provider: IDataProvider, method: str) -> bool:
@@ -233,6 +235,12 @@ class ChainedProvider(IDataProvider):
         """
         if not getattr(self.fetcher, "show_progress", False):
             return
+        # 同一家源同一方法已经报过一次：回填/扫描每条记录都再刷「东财K线失败→腾讯」
+        # 是无信息重复。降级链还在干活，源命中统计收尾会报总账，这里静默即可。
+        key = (failed.name, method)
+        if key in self._fallback_notified:
+            return
+        self._fallback_notified.add(key)
         nxt = next((p for p in rest if self._supports(p, method)), None)
         what = METHOD_LABELS.get(method, method)
         head = f"  ⏳ {source_label(failed.name)}{what}失败（{_brief(exc)}）"

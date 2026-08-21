@@ -58,6 +58,9 @@ class Fetcher:
         self._dead_hosts: set = set()  # 本次会话里连接刚敲不开的 CDN 节点，下次排到最后试
         # pool_key → 上次成功的 host：同 URL 高频请求少走弯路（节点死亡时清掉偏好）
         self._preferred_host: dict = {}
+        # 已经刷过「网络抖动」兜底提示的 host_pool：回填/扫描动辄几十条记录，
+        # 同一池连挂时只报第一次，后面静默（降级链会各自报「改用谁」，也做了节流）。
+        self._retry_noticed_pools: set = set()
         self._sess = requests.Session() if requests else None
         # 东财是国内站。shell 里为翻墙配的 http_proxy/https_proxy 会被 requests 默认
         # 读走，把域名请求硬塞进代理——代理一连不上就 ProxyError 全崩。除非用户显式
@@ -237,8 +240,11 @@ class Fetcher:
         # 试了几次；同时兜住「只配了单源、没有降级链」时无人报信的场景。
         if self.show_progress:
             now = time.time()
-            if now - self._last_retry_notice >= self.retry_notice_gap:
+            pool_key = host_pool or url  # 无节点池时按 URL 去重
+            if (pool_key not in self._retry_noticed_pools
+                    and now - self._last_retry_notice >= self.retry_notice_gap):
                 self._last_retry_notice = now
+                self._retry_noticed_pools.add(pool_key)
                 print(f"  ⏳ {self._host_hint(url, hosts)} 网络抖动"
                       f"（{attempts} 次尝试均失败），即将切换...", flush=True)
         raise MarketError(f"请求失败({attempts}次): {url} -> {last_err}")

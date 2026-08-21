@@ -1118,6 +1118,17 @@ def check_providers(t: Suite, cfg: Config) -> None:
     t.ok("下家只数真有这个能力的源",
          "网易" not in notice and "改用 新浪" in notice, notice)
 
+    # 同一家源连挂多条记录（回填/扫描几十条 K 线）：切源提示只报第一次，不逐条刷
+    mock = _MockSources(fail=("em_kline",))
+    mock.show_progress = True
+    chain = build_provider(cfg, mock, ALL)
+    buf = io_mod.StringIO()
+    with contextlib.redirect_stdout(buf):
+        chain.fetch_klines("600519")
+        chain.fetch_klines("600519")
+    notice = buf.getvalue()
+    t.eq("同一源连挂只报一次「改用谁」", notice.count("改用 腾讯"), 1)
+
     # ---- 抓取层的「网络抖动」只在重试全部用尽时兜底一句：逐次重试都报是无信息
     # 重复（上层紧接着就说清了「谁挂了、改用谁」）。用户抄回来的日志里连刷 5 条
     # 「网络抖动，正在重试」就是这么来的，所以节流关掉也不得超过一条。
