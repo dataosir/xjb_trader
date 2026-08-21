@@ -214,9 +214,41 @@ def cmd_watch(args, cfg: Config) -> int:
 
 def cmd_pos(args, cfg: Config) -> int:
     io = _io()
-    io.say(portfolio.format_positions(cfg))
+    runner.holdings_review(cfg=cfg, io=io)
     io.say(f"  总资金 {utils.money(portfolio.get_capital(cfg))}"
            f"　可用 {utils.money(portfolio.available_cash(cfg))}")
+    return 0
+
+
+def cmd_pos_add(args, cfg: Config) -> int:
+    io = _io()
+    code = utils.norm_code(args.code)
+    name = args.name or ""
+    if not name:
+        try:
+            name = (_market(cfg).get_quote(code) or {}).get("name") or code
+        except Exception:
+            name = code
+    pos = portfolio.add_manual_position(code, name, args.shares, args.price, cfg,
+                                        sl_pct=args.sl, tp_pct=args.tp,
+                                        opened_date=args.date)
+    if not pos:
+        io.say(f"  {code} 已在持仓中：先 `tea pos-rm {code}` 再重录，或直接 `tea close {code}` 平仓")
+        return 1
+    io.say(f"  ✓ 已录入 {code} {name}：{args.shares} 股 @ {utils.num(args.price)}"
+           f"（成本 {utils.money(args.shares * args.price)}"
+           + (f"，建仓日 {args.date}" if args.date else "") + "）")
+    return 0
+
+
+def cmd_pos_rm(args, cfg: Config) -> int:
+    io = _io()
+    code = utils.norm_code(args.code)
+    removed = portfolio.remove_position(code, cfg)
+    if not removed:
+        io.say(f"  持仓中无 {code}")
+        return 1
+    io.say(f"  ✓ 已删除持仓 {code} {removed.get('name')}")
     return 0
 
 
@@ -385,6 +417,8 @@ MENU = [
     ("20", "离线自测", ["selftest"]),
     ("21", "配置向导（重新配置）", ["setup"]),
     ("22", "清除过期计划", ["plan-clear"]),
+    ("23", "手动录入持仓", ["__pos_add__"]),
+    ("24", "删除持仓", ["__pos_rm__"]),
 ]
 
 # 展开视图按场景分组：全部平铺时无从下手，分成 6 组后每组只有 2–4 条。
@@ -393,7 +427,7 @@ MENU_GROUPS = [
     ("道法 · 先看天气", ["1", "2"]),
     ("准入 · 买之前", ["3", "4"]),
     ("计划 · 次日", ["5", "6", "7", "22"]),
-    ("持仓 · 买之后", ["10", "11", "12"]),
+    ("持仓 · 买之后", ["10", "11", "12", "23", "24"]),
     ("复盘 · 收盘后", ["9", "8", "16", "17", "18", "13", "14", "15"]),
     ("工具", ["19", "21", "20"]),
 ]
@@ -513,6 +547,20 @@ def menu_loop(cfg: Config) -> int:
                     main(["close", code, price])
                 else:
                     io.say("  已取消：平仓需同时输入股票代码与平仓价")
+            elif argv[0] == "__pos_add__":
+                code = input("股票代码> ").strip()
+                shares = input("股数> ").strip()
+                price = input("成本价> ").strip()
+                if code and shares and price:
+                    main(["pos-add", code, shares, price])
+                else:
+                    io.say("  已取消：需同时输入代码、股数、成本价")
+            elif argv[0] == "__pos_rm__":
+                code = input("股票代码> ").strip()
+                if code:
+                    main(["pos-rm", code])
+                else:
+                    io.say("  已取消：未输入股票代码")
             else:
                 main(argv)
         except KeyboardInterrupt:
@@ -587,8 +635,22 @@ def build_parser() -> argparse.ArgumentParser:
     wp.add_argument("--no-prune", action="store_true")
     wp.set_defaults(func=cmd_watch)
 
-    po = sub.add_parser("pos", help="持仓与资金")
+    po = sub.add_parser("pos", help="持仓与资金（含盈亏与种子对照）")
     po.set_defaults(func=cmd_pos)
+
+    pa = sub.add_parser("pos-add", help="手动录入持仓（实盘买入补登）")
+    pa.add_argument("code")
+    pa.add_argument("shares", type=int)
+    pa.add_argument("price", type=float)
+    pa.add_argument("--name", help="股票名（默认自动取行情）")
+    pa.add_argument("--date", help="建仓日 YYYY-MM-DD（默认今天）")
+    pa.add_argument("--sl", type=float, help="止损百分比")
+    pa.add_argument("--tp", type=float, help="止盈百分比")
+    pa.set_defaults(func=cmd_pos_add)
+
+    pr = sub.add_parser("pos-rm", help="删除一条持仓记录")
+    pr.add_argument("code")
+    pr.set_defaults(func=cmd_pos_rm)
 
     cp = sub.add_parser("capital", help="查看 / 设置总资金")
     cp.add_argument("amount", nargs="?", type=float)

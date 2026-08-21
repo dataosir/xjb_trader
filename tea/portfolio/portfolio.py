@@ -163,6 +163,46 @@ def open_position(code: str, name: str, price: float, sizing: dict, ev: Optional
     return pos
 
 
+def add_manual_position(code: str, name: str, shares: int, entry: float,
+                        cfg: Optional[Config] = None, sl_pct: Optional[float] = None,
+                        tp_pct: Optional[float] = None,
+                        opened_date: Optional[str] = None) -> Optional[dict]:
+    """手动录入持仓（不走 run 流程，供已在券商实盘买入的票补登）。
+
+    与 open_position 的区别：股数/成本由用户直接给定，没有 sizing 计算，
+    也没有 9 分共振/身份快照；阶段直接记为满仓，来源标 manual 便于区分。
+    已存在同代码持仓时返回 None（先 pos-rm 或直接 close 平仓）。
+    """
+    cfg = cfg or load_config()
+    code = utils.norm_code(code)
+    if find_position(code, cfg):
+        return None
+    st = load_state(cfg)
+    shares = int(shares)
+    entry = float(entry)
+    pos = {
+        "id": f"{code}-{utils.stamp()}",
+        "code": code, "name": name or code,
+        "entry": round(entry, 4), "shares": shares,
+        "gray_shares": shares, "confirm_shares": 0, "full_shares": shares,
+        "stage": STAGE_FULL,
+        "sl_pct": sl_pct, "tp_pct": tp_pct,
+        "stop": round(entry * (1 - sl_pct / 100.0), 4) if sl_pct else None,
+        "target": round(entry * (1 + tp_pct / 100.0), 4) if tp_pct else None,
+        "odds": None,
+        "half_pos_mult": None,
+        "total_score": None, "identity_tier": None, "stage_label": None, "sector_name": None,
+        "opened_at": utils.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "opened_date": opened_date or utils.today_str(),
+        "cost": round(shares * entry, 2),
+        "fee": fees(shares * entry, "buy", cfg),
+        "source": "manual",
+    }
+    st["positions"].append(pos)
+    save_state(st, cfg)
+    return pos
+
+
 def add_confirm(code: str, price: float, cfg: Optional[Config] = None) -> Optional[dict]:
     """确认仓补足 70%。"""
     cfg = cfg or load_config()

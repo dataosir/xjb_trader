@@ -1510,6 +1510,33 @@ def check_position(t: Suite, cfg: Config) -> None:
     t.ok("低赔率 → 非正期望", not e_neg["positive"], f"E[R]={e_neg['er']}")
 
 
+def check_manual_position(t: Suite, cfg: Config, mk: FakeMarket) -> None:
+    """手动录入持仓 + 盈亏与种子对照。"""
+    from .phases import IO
+    from .runtime import runner
+
+    t.head("持仓 · 手动录入与盈亏对照")
+    portfolio.remove_position(TARGET, cfg)
+    pos = portfolio.add_manual_position(TARGET, TARGET_NAME, 1000, 10.0, cfg,
+                                        sl_pct=6.0, tp_pct=15.0)
+    t.ok("手动录入成功", pos is not None)
+    t.eq("股数按输入", pos["shares"], 1000)
+    t.eq("阶段为满仓", pos["stage"], portfolio.STAGE_FULL)
+    t.eq("来源标 manual", pos.get("source"), "manual")
+    t.eq("止损价按 -6% 计算", pos["stop"], round(10.0 * 0.94, 4))
+    t.ok("重复录入被拒",
+         portfolio.add_manual_position(TARGET, TARGET_NAME, 100, 10.0, cfg) is None)
+
+    io = IO(interactive=False, quiet=True)
+    res = runner.holdings_review(cfg=cfg, market=mk, io=io)
+    t.eq("手动持仓浮动盈亏（现价12-成本10）×1000", res["total_pnl"], 2000.0, tol=0.01)
+    t.eq("持仓成本合计", res["total_cost"], 10000.0, tol=0.01)
+    t.ok("持仓出现在结果里", any(r["code"] == TARGET for r in res["positions"]))
+
+    portfolio.remove_position(TARGET, cfg)
+    t.eq("删除后持仓清空", portfolio.positions(cfg), [])
+
+
 def check_gates(t: Suite, cfg: Config, mk: FakeMarket, sent: dict) -> None:
     t.head("法 · 门禁（§8.1 / §8.2 / §8.3）")
     gates.reset_state(cfg)
@@ -2468,6 +2495,7 @@ def main(verbose: bool = True, cfg: Optional[Config] = None) -> int:
         check_scoring(t, c, mk, sent, lv)
         check_veto(t, c, mk, idn)
         check_position(t, c)
+        check_manual_position(t, c, mk)
         check_gates(t, c, mk, sent)
         check_seed(t, c, mk, sent)
         check_plan_labels(t, c, mk, sent)

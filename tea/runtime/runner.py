@@ -433,3 +433,80 @@ def close_trade(code: str, price: Optional[float] = None, reason: str = "手动�
     if cl >= limit:
         io.say(f"  ! 连亏 {cl} 笔 ≥ {limit} → 进入冷却，下次新开需先复盘并 --force")
     return rec
+
+
+def holdings_review(cfg: Optional[Config] = None, market: Optional[Market] = None,
+                    io: Optional[IO] = None) -> dict:
+    """持仓盈亏 + 种子历史对照：逐只拉现价算浮动盈亏，并回溯是否被种子选过。
+
+    手动录入的实盘持仓往往没有共振/身份快照，这里把它们和历史 seed_records
+    按代码对上，让「我手里的票 vs 程序选过的票」一目了然。
+    """
+    cfg = cfg or load_config()
+    io = io or IO()
+    mk = market or Market(cfg)
+    pos = portfolio.positions(cfg)
+    io.say("=" * 56)
+    io.say(f"XJB_TRADE · 持仓盈亏与种子对照　{utils.now().strftime('%Y-%m-%d %H:%M')}")
+    io.say("=" * 56)
+    if not pos:
+        io.say("  当前无持仓。手动录入：`tea pos-add <代码> <股数> <成本价>`")
+        return {"positions": [], "total_pnl": 0.0, "total_cost": 0.0, "matched": 0}
+
+    seed_by_code: Dict[str, List[dict]] = {}
+    for r in ft_mod.load_records(cfg):
+        seed_by_code.setdefault(r.get("code"), []).append(r)
+    for recs in seed_by_code.values():
+        recs.sort(key=lambda x: x.get("date") or "")
+
+    rows: List[dict] = []
+    total_pnl = 0.0
+    total_cost = 0.0
+    matched = 0
+    for p in pos:
+        code = p.get("code")
+        entry = float(p.get("entry") or 0.0)
+        shares = int(p.get("shares") or 0)
+        cost = round(entry * shares, 2)
+        total_cost += cost
+        cur = chg = None
+        try:
+            q = mk.get_quote(code) or {}
+            cur = q.get("price")
+            chg = q.get("chg_pct")
+        except Exception:
+            q = {}
+        io.say(f"  {code} {p.get('name')}  {shares} 股 @ {utils.num(entry)}"
+               + (f"（{p.get('opened_date')}）" if p.get('opened_date') else ""))
+        pnl = pnl_pct = None
+        if cur is not None and entry:
+            pnl = round((float(cur) - entry) * shares, 2)
+            pnl_pct = round((float(cur) - entry) / entry * 100.0, 2)
+            total_pnl += pnl
+            io.say(f"    现价 {utils.num(cur)}（{utils.pct(chg)}）  浮动盈亏 "
+                   f"{utils.money(pnl)}（{utils.pct(pnl_pct)}，未含卖出手续费）")
+        else:
+            io.say("    现价获取失败，无法计算浮动盈亏")
+        recs = seed_by_code.get(code, [])
+        if not recs:
+            io.say("    · 种子对照：历史种子记录未出现")
+        else:
+            matched += 1
+            buyable = [r for r in recs if r.get("track") == "可买"]
+            show = (buyable or recs)[-3:]
+            for r in show:
+                t1 = r.get("next_chg")
+                t1txt = f"T+1 {t1:+.2f}%" if t1 is not None else "T+1 未回填"
+                mark = "★" if r.get("track") == "可买" else " "
+                io.say(f"    {mark} {r.get('date')} {r.get('track')}（{r.get('tier')}）"
+                       f"共振 {r.get('total_score')} {r.get('identity_tier')}"
+                       f"{r.get('identity_score')} {r.get('sector_name')} → {t1txt}")
+        rows.append({"code": code, "name": p.get("name"), "shares": shares,
+                     "entry": entry, "current": cur, "chg": chg,
+                     "pnl": pnl, "pnl_pct": pnl_pct, "seed": recs})
+
+    io.say(f"  合计：成本 {utils.money(total_cost)}，浮动盈亏 "
+           f"{utils.money(round(total_pnl, 2))}（未含卖出手续费）"
+           f"　种子命中 {matched}/{len(pos)}")
+    return {"positions": rows, "total_pnl": round(total_pnl, 2),
+            "total_cost": round(total_cost, 2), "matched": matched}
