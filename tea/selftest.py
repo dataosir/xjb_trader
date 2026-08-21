@@ -1513,9 +1513,12 @@ def check_position(t: Suite, cfg: Config) -> None:
 def check_manual_position(t: Suite, cfg: Config, mk: FakeMarket) -> None:
     """手动录入持仓 + 盈亏与种子对照。"""
     from .phases import IO
-    from .runtime import runner
+    from .runtime import cli, runner
 
     t.head("持仓 · 手动录入与盈亏对照")
+    t.eq("成本价空格容错 1 .109 → 1.109", cli._clean_number("1   .109"), "1.109")
+    t.eq("全角空格容错", cli._clean_number("1\u3000.109"), "1.109")
+    t.eq("全角数字容错", cli._clean_number("１２３.４"), "123.4")
     portfolio.remove_position(TARGET, cfg)
     pos = portfolio.add_manual_position(TARGET, TARGET_NAME, 1000, 10.0, cfg,
                                         sl_pct=6.0, tp_pct=15.0)

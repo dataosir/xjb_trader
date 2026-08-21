@@ -56,6 +56,16 @@ def _parse_value(raw: str):
         return raw
 
 
+def _clean_number(raw: str) -> str:
+    """数字输入容错：全角数字转半角 + 去掉半角/全角空格。
+
+    交互录入成本价时，输入法/终端有时会插入一个删不掉的全角空格（如「1 .109」），
+    直接 float() 会失败或把「1」弄丢。这里先把空格清掉再解析。
+    """
+    return (utils.normalize_digits(raw or "")
+            .replace(" ", "").replace("\u3000", "").replace("\t", "").replace("\u00a0", ""))
+
+
 def _flatten(node, prefix: str = "") -> List[tuple]:
     out: List[tuple] = []
     if isinstance(node, dict):
@@ -548,13 +558,32 @@ def menu_loop(cfg: Config) -> int:
                 else:
                     io.say("  已取消：平仓需同时输入股票代码与平仓价")
             elif argv[0] == "__pos_add__":
-                code = input("股票代码> ").strip()
-                shares = input("股数> ").strip()
-                price = input("成本价> ").strip()
-                if code and shares and price:
-                    main(["pos-add", code, shares, price])
-                else:
-                    io.say("  已取消：需同时输入代码、股数、成本价")
+                io.say("  批量录入持仓：逐只输入，代码留空回车保存退出")
+                n = 0
+                while True:
+                    raw_code = utils.normalize_digits(input("  股票代码> ").strip())
+                    if not raw_code:
+                        break
+                    shares_raw = _clean_number(input("  股数> ").strip())
+                    price_raw = _clean_number(input("  成本价> ").strip())
+                    if not (len(raw_code) == 6 and raw_code.isdigit()):
+                        io.say(f"  ! 代码「{raw_code}」不是 6 位数字，跳过")
+                        continue
+                    try:
+                        shares = int(shares_raw)
+                        price = float(price_raw)
+                    except (ValueError, TypeError):
+                        io.say(f"  ! 股数「{shares_raw}」或成本价「{price_raw}」格式不对，跳过")
+                        continue
+                    if shares <= 0 or price <= 0:
+                        io.say("  ! 股数与成本价需 >0，跳过")
+                        continue
+                    rc = cmd_pos_add(argparse.Namespace(
+                        code=raw_code, name=None, shares=shares, price=price,
+                        sl=None, tp=None, date=None), cfg)
+                    if rc == 0:
+                        n += 1
+                io.say(f"  批量录入结束，本次新增 {n} 只")
             elif argv[0] == "__pos_rm__":
                 code = input("股票代码> ").strip()
                 if code:
