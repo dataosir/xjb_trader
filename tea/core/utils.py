@@ -277,6 +277,25 @@ def num(v: Optional[float], nd: int = 2) -> str:
     return "—" if v is None else f"{v:.{nd}f}"
 
 
+def hl(text: str, color: str = "yellow") -> str:
+    """ANSI 终端高亮（粗体 + 前景色），供控制台摘要标红/标绿用。
+
+    颜色：red / green / yellow / blue / magenta / cyan / white。
+    Windows 控制台自动尝试开启 ANSI 支持；Markdown 存档走 render_md，不经本函数。
+    """
+    if os.name == 'nt':
+        try:
+            import ctypes
+            kernel32 = ctypes.windll.kernel32
+            kernel32.SetConsoleMode(kernel32.GetStdHandle(-11), 7)
+        except Exception:
+            pass
+    colors = {"red": "31", "green": "32", "yellow": "33", "blue": "34",
+              "magenta": "35", "cyan": "36", "white": "37"}
+    code = colors.get(color, "33")
+    return f"\033[1;{code}m{text}\033[0m"
+
+
 def jitter(base: float, spread: float) -> float:
     """带抖动的延时秒数（防封用）。"""
     lo = max(0.0, base - spread)

@@ -16,25 +16,8 @@ from .screener import (VERDICT_EMPTY, VERDICT_PENDING, VERDICT_TRADEABLE,
 
 
 def _hl(text: str, color: str = "yellow") -> str:
-    """ANSI 高亮，支持颜色参数。"""
-    if os.name == 'nt':
-        try:
-            import ctypes
-            kernel32 = ctypes.windll.kernel32
-            kernel32.SetConsoleMode(kernel32.GetStdHandle(-11), 7)
-        except Exception:
-            pass
-    colors = {
-        "red": "31",
-        "yellow": "33",
-        "blue": "34",
-        "green": "32",
-        "cyan": "36",
-        "magenta": "35",
-        "white": "37",
-    }
-    code = colors.get(color, "33")
-    return f"\033[1;{code}m{text}\033[0m"
+    """ANSI 高亮（复用 utils.hl）。"""
+    return utils.hl(text, color)
 
 VERDICT_LABEL = {
     VERDICT_TRADEABLE: "HAS_TRADEABLE（有可买标的，已写次日计划）",
