@@ -319,7 +319,7 @@ def cmd_followthrough(args, cfg: Config) -> int:
     if args.update:
         io.say("  ⏳ 回填跟涨样本 T+1 结果...")
         with utils.timed("跟涨样本回填", io, threshold=0.5):
-            upd = ft_mod.update_results(_market(cfg), cfg)
+            upd = ft_mod.update_results(_market(cfg), cfg, io=io)
         io.say(f"回填 {upd.get('updated')} 条，待回填 {upd.get('pending')} 条")
     io.say(ft_mod.format_followthrough(cfg))
     return 0

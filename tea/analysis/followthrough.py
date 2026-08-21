@@ -6,7 +6,7 @@
 from __future__ import annotations
 
 import json
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 from tea.config.config_store import Config, load_config
 from tea.core import utils
@@ -129,11 +129,15 @@ def dedupe_records(cfg: Optional[Config] = None) -> dict:
 
 # ------------------------------------------------------------------ T+1 回填
 
-def update_results(market: Optional[Market] = None, cfg: Optional[Config] = None) -> dict:
+def update_results(market: Optional[Market] = None, cfg: Optional[Config] = None,
+                   io: Any = None) -> dict:
     """回填 T+1/T+2/T+3/T+5 多周期结果：用日 K 找记录日之后的第 N 个交易日涨幅。
 
     「选了 3 天全跌」这类复盘只靠 T+1 看不出来，所以一次把 T+1~T+5 都算好落盘。
     result（win/loss）仍按 T+1 ≥ win_chg_pct 判定，保持既有跟涨胜率口径不变。
+
+    io 传入时每约 10% 报一次进度：几十条 K 线逐条抓会沉默很久，屏上像卡死，
+    报个数让人知道还在跑。
     """
     cfg = cfg or load_config()
     recs = load_records(cfg)
@@ -143,16 +147,14 @@ def update_results(market: Optional[Market] = None, cfg: Optional[Config] = None
     win_th = float(cfg.get("followthrough.win_chg_pct", 3.0))
     today = utils.today_str()
     horizons = ((1, "next_chg"), (2, "chg_t2"), (3, "chg_t3"), (5, "chg_t5"))
-    updated = pending = 0
-    for r in recs:
-        if not r.get("code"):
-            continue
-        if r.get("date") == today:
-            pending += 1
-            continue
-        # 已回填过 result 且 T+5 也齐了 → 跳过；否则补缺（兼容旧记录只有 T+1）
-        if r.get("result") is not None and r.get("chg_t5") is not None:
-            continue
+
+    pending = sum(1 for r in recs if r.get("code") and r.get("date") == today)
+    needs = [r for r in recs if r.get("code") and r.get("date") != today
+             and (r.get("result") is None or r.get("chg_t5") is None)]
+    total = len(needs)
+    step = max(1, total // 10) if total else 1
+    updated = 0
+    for done, r in enumerate(needs, 1):
         try:
             kl = mk.get_klines(r["code"], limit=30)
         except Exception:
@@ -172,6 +174,8 @@ def update_results(market: Optional[Market] = None, cfg: Optional[Config] = None
         if r.get("next_chg") is not None:
             r["result"] = "win" if r["next_chg"] >= win_th else "loss"
         updated += 1
+        if io is not None and (done % step == 0 or done == total):
+            io.say(f"  ⏳ 回填 {done}/{total} 条...")
     if updated:
         save_records(recs, cfg)
     return {"updated": updated, "pending": pending, "total": len(recs)}

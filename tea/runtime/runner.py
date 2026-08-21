@@ -340,7 +340,7 @@ def close_review(cfg: Optional[Config] = None, market: Optional[Market] = None,
     # 1. 跟涨经验回填
     io.say("  ⏳ 回填跟涨样本 T+1 结果...")
     with utils.timed("跟涨样本回填", io, threshold=0.5):
-        upd = ft_mod.update_results(mk, cfg)
+        upd = ft_mod.update_results(mk, cfg, io=io)
     out["followthrough"] = upd
     io.say(f"===== 跟涨样本回填 =====\n  回填 {upd.get('updated')} 条，"
            f"待回填 {upd.get('pending')} 条，样本累计 {upd.get('total') or 0} 条")
