@@ -783,6 +783,27 @@ class Screener:
         tracer = seed_trace.Tracer(cfg)
         sent = sent if sent is not None else get_sentiment(self.mk, cfg, io=io)
 
+        # 大盘趋势硬闸：上证不在「涨 + 站上 MA20」时禁止新开，避免逆势选股。
+        # 提前到板块排名之前，弱市里顺便省下 40 个板块的网络取数。
+        if cfg.get("seed.require_market_uptrend", True):
+            idx = (sent or {}).get("index") or {}
+            if not (idx.get("chg_pct") is not None and idx.get("chg_pct") > 0
+                    and idx.get("ma20_above")):
+                note = "大盘趋势=0（上证未在 MA20 上方上涨）→ 禁止新开，宁缺毋滥"
+                tracer.note(note)
+                result = {
+                    "at": utils.now().strftime("%Y-%m-%d %H:%M"), "scan_id": tracer.scan_id,
+                    "sentiment": sent, "sectors": [], "sector_pool": [],
+                    "max_sector_chg": None, "strongest_sector_chg": None,
+                    "dyn_window": None, "eve_window": None,
+                    "tier": None, "buyable": [], "watch": [], "near_miss": [], "eve": [],
+                    "candidates": [], "candidates_n": 0, "veto_passed_n": 0, "soft_n": 0,
+                    "notes": [note], "verdict": VERDICT_EMPTY,
+                }
+                if write_trace:
+                    result["trace"] = tracer.flush()
+                return result
+
         step1 = self.rank_sectors(tracer, io=io)
         sectors = step1["top"]
         strongest = step1.get("strongest_sector_chg")

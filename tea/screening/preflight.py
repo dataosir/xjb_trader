@@ -296,10 +296,13 @@ def score_nine(quote: dict, ind: dict, sector: dict, sent: Optional[dict],
 def effective_threshold(identity: Optional[dict] = None, sent: Optional[dict] = None,
                         insufficient_samples: bool = False,
                         cfg: Optional[Config] = None) -> dict:
-    """动态通过门槛：base 6 + 杂毛warn +1 + 样本不足 +1 + 防守姿态 +1，龙头 -1（下限 6）。
+    """动态通过门槛：base 6 + 杂毛warn +1 + 样本不足 +1，龙头 -1（下限 6），防守 +1。
 
     龙头 -1 是门槛公式的一部分，不设调用方开关：种子扫描、计划复核、run 执行、
     eval/watch 全走同一套口径，避免「选票按 6 分、复核按 7 分」这类分叉。
+
+    顺序有意为之：龙头 -1 先于防守 +1，所以防守市里龙头也要按 7 分卡——
+    防守 +1 不被龙头 -1 抵消（否则防守等于没收紧，逆势选票）。
     """
     cfg = cfg or load_config()
     base = int(cfg.s("pass_threshold", 6))
@@ -314,10 +317,6 @@ def effective_threshold(identity: Optional[dict] = None, sent: Optional[dict] = 
         inc = int(cfg.get("expectancy.insufficient_pass_bump", 1))
         th += inc
         notes.append(f"历史样本不足 +{inc}")
-    if sent and sent.get("stance") == "防守":
-        bump_defend = int(cfg.s("defend_stance_bump", 1))
-        th += bump_defend
-        notes.append(f"防守姿态 +{bump_defend}")
     if ident_mod.is_leader(identity or {}):
         floor = int(cfg.get("seed.leader_pass_floor", 6))
         relax = int(cfg.get("seed.leader_pass_bonus", 1))
@@ -325,6 +324,10 @@ def effective_threshold(identity: Optional[dict] = None, sent: Optional[dict] = 
         if new_th != th:
             notes.append(f"龙头 -{th - new_th}（下限 {floor}）")
         th = new_th
+    if sent and sent.get("stance") == "防守":
+        bump_defend = int(cfg.s("defend_stance_bump", 1))
+        th += bump_defend
+        notes.append(f"防守姿态 +{bump_defend}")
     return {"threshold": int(th), "base": base, "notes": notes}
 
 

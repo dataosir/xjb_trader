@@ -502,6 +502,10 @@ DEFAULTS: Dict[str, Any] = {
         "turnover_max": 20.0,
         "leader_pass_bonus": 1,
         "leader_pass_floor": 6,
+        # 大盘趋势硬闸：上证不在「涨 + 站上 MA20」时禁止新开（避免逆势选股）。
+        # 近一周实证：可买票的大盘趋势维全是 0 分，选中后三天内普跌——根因是
+        # 大盘不配合，共振分再高也扛不住 β。默认开，弱平衡市可临时关。
+        "require_market_uptrend": True,
         "near_miss_gap": 1,
         "max_watch_output": 3,
         "max_near_miss_output": 6,

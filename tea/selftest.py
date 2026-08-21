@@ -1609,6 +1609,29 @@ def check_gates(t: Suite, cfg: Config, mk: FakeMarket, sent: dict) -> None:
     gates.reset_state(cfg)
 
 
+def check_market_uptrend_gate(t: Suite, cfg: Config, mk: FakeMarket) -> None:
+    """大盘趋势硬闸：上证不在 MA20 上方上涨时，种子扫描直接 EMPTY。"""
+    t.head("扫描 · 大盘趋势硬闸")
+    sc = screener_mod.Screener(cfg, mk)
+    down = {"index": {"chg_pct": -1.5, "ma20_above": False},
+            "stance": sent_mod.STANCE_DEFEND, "allow_new": True,
+            "score": 45.0, "cycle": "修复"}
+    res = sc.seed_scan(sent=down, include_eve=False, write_trace=False)
+    t.eq("大盘趋势=0 → EMPTY", res.get("verdict"), screener_mod.VERDICT_EMPTY)
+    t.eq("可买为空", res.get("buyable"), [])
+    t.ok("留痕大盘趋势=0",
+         any("大盘趋势=0" in n for n in res.get("notes", [])), str(res.get("notes")))
+
+    old = cfg.get("seed.require_market_uptrend")
+    cfg.set("seed.require_market_uptrend", False)
+    try:
+        res2 = sc.seed_scan(sent=down, include_eve=False, write_trace=False)
+        t.ok("关闭硬闸后无大盘趋势=0 提示",
+             "大盘趋势=0" not in (res2.get("notes") or []), str(res2.get("notes")))
+    finally:
+        cfg.set("seed.require_market_uptrend", old)
+
+
 def check_seed(t: Suite, cfg: Config, mk: FakeMarket, sent: dict) -> dict:
     t.head("扫描 · 种子四步流（§9）")
     sc = screener_mod.Screener(cfg, mk)
@@ -2010,31 +2033,30 @@ def check_plan_buy_remove(t: Suite, cfg: Config, mk: FakeMarket) -> None:
 
 
 def check_leader_relax(t: Suite, cfg: Config) -> None:
-    """龙头 -1 是门槛公式的一部分，任何评估入口同口径生效。
+    """龙头 -1 是门槛公式的一部分，但防守 +1 不被龙头 -1 抵消。
 
-    陕西黑猫实例：种子扫描按 6 分放行龙头，plan-check 却按 7 分卡掉（漏传龙头
-    放宽），导致 6/6 通过后仍被「共振分不足」作废。修法是让龙头 -1 内建在
-    effective_threshold 里，不设调用方开关，扫描/复核/执行/eval 一处不漏。
+    陕西黑猫实例：防守市（情绪 47）里龙头 6/6 仍被选为可买——因为防守 +1 被龙头
+    -1 抵消，门槛回到 6，防守等于没收紧。修法是龙头 -1 先算、防守 +1 后算，
+    防守市里龙头也要 7 分卡。
     """
-    t.head("门槛 · 龙头 -1 统一生效")
+    t.head("门槛 · 龙头 -1 不抵消防守 +1")
     leader = {"tier": ident_mod.TIER_LEADER, "score": 70.0}
     follower = {"tier": ident_mod.TIER_FOLLOW, "score": 50.0}
     defend = {"stance": sent_mod.STANCE_DEFEND}
 
     th = preflight.effective_threshold(leader, defend, cfg=cfg)
-    t.eq("防守姿态下龙头门槛 6（-1）", th["threshold"], 6)
-    t.ok("龙头 -1 留痕在 notes", any("龙头 -1" in n for n in th["notes"]), str(th["notes"]))
+    t.eq("防守姿态下龙头门槛 7（防守不抵消）", th["threshold"], 7)
+    t.ok("防守 +1 留痕在 notes", any("防守姿态 +1" in n for n in th["notes"]), str(th["notes"]))
 
     th2 = preflight.effective_threshold(follower, defend, cfg=cfg)
     t.eq("防守姿态下跟风门槛 7（不 -1）", th2["threshold"], 7)
 
     th3 = preflight.effective_threshold(leader, None, cfg=cfg)
-    t.eq("无加成时龙头门槛不破地板 → 6", th3["threshold"], 6)
+    t.eq("无防守时龙头门槛不破地板 → 6", th3["threshold"], 6)
 
-    # 全链路：evaluate → effective_threshold 不再需要调用方传开关，龙头在防守
-    # 姿态下门槛就是 6，而不是漏传开关导致的 7。
+    # 全链路：evaluate 对龙头在防守姿态的门槛为 7（龙头 -1 不抵消防守 +1）
     ev = preflight.evaluate(TARGET, FakeMarket(cfg), cfg, sent=defend)
-    t.eq("evaluate 对龙头在防守姿态的门槛为 6", ev["pass_threshold"], 6)
+    t.eq("evaluate 对龙头在防守姿态的门槛为 7", ev["pass_threshold"], 7)
 
 
 def check_menu(t: Suite, cfg: Config) -> None:
@@ -2575,6 +2597,7 @@ def main(verbose: bool = True, cfg: Optional[Config] = None) -> int:
         check_colors(t)
         check_gates(t, c, mk, sent)
         check_seed(t, c, mk, sent)
+        check_market_uptrend_gate(t, c, mk)
         check_plan_labels(t, c, mk, sent)
         check_plan_clear(t, c)
         check_plan_check_clear_prompt(t, c)
