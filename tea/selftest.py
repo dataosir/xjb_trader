@@ -1520,21 +1520,28 @@ def check_manual_position(t: Suite, cfg: Config, mk: FakeMarket) -> None:
     t.eq("全角空格容错", cli._clean_number("1\u3000.109"), "1.109")
     t.eq("全角数字容错", cli._clean_number("１２３.４"), "123.4")
     portfolio.remove_position(TARGET, cfg)
-    pos = portfolio.add_manual_position(TARGET, TARGET_NAME, 1000, 10.0, cfg,
+    res = portfolio.add_manual_position(TARGET, TARGET_NAME, 1000, 10.0, cfg,
                                         sl_pct=6.0, tp_pct=15.0)
-    t.ok("手动录入成功", pos is not None)
+    t.ok("手动录入成功", res.get("pos") is not None)
+    t.eq("新增标记 updated=False", res.get("updated"), False)
+    pos = res["pos"]
     t.eq("股数按输入", pos["shares"], 1000)
     t.eq("阶段为满仓", pos["stage"], portfolio.STAGE_FULL)
     t.eq("来源标 manual", pos.get("source"), "manual")
     t.eq("止损价按 -6% 计算", pos["stop"], round(10.0 * 0.94, 4))
-    t.ok("重复录入被拒",
-         portfolio.add_manual_position(TARGET, TARGET_NAME, 100, 10.0, cfg) is None)
 
     io = IO(interactive=False, quiet=True)
-    res = runner.holdings_review(cfg=cfg, market=mk, io=io)
-    t.eq("手动持仓浮动盈亏（现价12-成本10）×1000", res["total_pnl"], 2000.0, tol=0.01)
-    t.eq("持仓成本合计", res["total_cost"], 10000.0, tol=0.01)
-    t.ok("持仓出现在结果里", any(r["code"] == TARGET for r in res["positions"]))
+    r = runner.holdings_review(cfg=cfg, market=mk, io=io)
+    t.eq("手动持仓浮动盈亏（现价12-成本10）×1000", r["total_pnl"], 2000.0, tol=0.01)
+    t.eq("持仓成本合计", r["total_cost"], 10000.0, tol=0.01)
+    t.ok("持仓出现在结果里", any(x["code"] == TARGET for x in r["positions"]))
+
+    # 幂等：同代码重复录入 → 覆盖更新，不新增
+    res2 = portfolio.add_manual_position(TARGET, TARGET_NAME, 500, 11.0, cfg)
+    t.eq("重复录入覆盖更新 updated=True", res2.get("updated"), True)
+    t.eq("覆盖后股数", res2["pos"]["shares"], 500)
+    t.eq("覆盖后成本价", res2["pos"]["entry"], 11.0)
+    t.eq("持仓数仍为 1（代码维度幂等）", len(portfolio.positions(cfg)), 1)
 
     portfolio.remove_position(TARGET, cfg)
     t.eq("删除后持仓清空", portfolio.positions(cfg), [])

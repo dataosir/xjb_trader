@@ -239,15 +239,14 @@ def cmd_pos_add(args, cfg: Config) -> int:
             name = (_market(cfg).get_quote(code) or {}).get("name") or code
         except Exception:
             name = code
-    pos = portfolio.add_manual_position(code, name, args.shares, args.price, cfg,
+    res = portfolio.add_manual_position(code, name, args.shares, args.price, cfg,
                                         sl_pct=args.sl, tp_pct=args.tp,
                                         opened_date=args.date)
-    if not pos:
-        io.say(f"  {code} 已在持仓中：先 `tea pos-rm {code}` 再重录，或直接 `tea close {code}` 平仓")
-        return 1
-    io.say(f"  ✓ 已录入 {code} {name}：{args.shares} 股 @ {utils.num(args.price)}"
+    pos = res["pos"]
+    verb = "已更新" if res["updated"] else "已录入"
+    io.say(f"  ✓ {verb} {code} {name}：{args.shares} 股 @ {utils.num(args.price)}"
            f"（成本 {utils.money(args.shares * args.price)}"
-           + (f"，建仓日 {args.date}" if args.date else "") + "）")
+           + (f"，建仓日 {pos.get('opened_date')}" if pos.get('opened_date') else "") + "）")
     return 0
 
 
@@ -566,13 +565,21 @@ def _run_argv(argv: List[str], io: IO, cfg: Config) -> None:
                 sl=None, tp=None, date=None), cfg)
             if rc == 0:
                 n += 1
-        io.say(f"  批量录入结束，本次新增 {n} 只")
+        io.say(f"  批量录入结束，本次处理 {n} 只")
     elif argv[0] == "__pos_rm__":
-        code = input("股票代码> ").strip()
-        if code:
-            main(["pos-rm", code])
+        positions = portfolio.positions(cfg)
+        if not positions:
+            io.say("  当前无持仓")
         else:
-            io.say("  已取消：未输入股票代码")
+            for i, p in enumerate(positions, 1):
+                io.say(f"  {i}. {p['code']} {p.get('name')} {p.get('shares')} 股 @ {utils.num(p.get('entry'))}")
+            sel = input("  删除编号（回车取消）> ").strip()
+            if not sel:
+                io.say("  已取消")
+            elif sel.isdigit() and 1 <= int(sel) <= len(positions):
+                main(["pos-rm", positions[int(sel) - 1]["code"]])
+            else:
+                io.say(f"  ! 无效编号「{sel}」")
     else:
         main(argv)
 
