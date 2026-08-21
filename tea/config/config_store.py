@@ -55,6 +55,7 @@ DEFAULTS: Dict[str, Any] = {
         "watch_pool_file": "watch_pool.json",
         "trades_file": "trades.json",
         "seed_records_file": "seed_records.jsonl",
+        "price_track_file": "price_track.json",
         "seed_trace_jsonl": "seed_trace.jsonl",
         "seed_trace_md": "SEED_TRACE.md",
         "accumulator_file": "accumulator.jsonl",

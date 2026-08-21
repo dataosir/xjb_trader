@@ -15,7 +15,7 @@ from __future__ import annotations
 import time
 from typing import Any, Dict, List, Optional
 
-from tea.analysis import followthrough as ft_mod, stats
+from tea.analysis import followthrough as ft_mod, pricetrack, stats
 from tea.analysis.sentiment import format_weather, get_sentiment
 from tea.config.config_store import Config, load_config
 from tea.core import logger as logger_mod, utils
@@ -241,6 +241,15 @@ def seed_plan(cfg: Optional[Config] = None, market: Optional[Market] = None,
         io.say(f"  ⏳ 仍有 {pending_ft} 条历史跟涨样本未回填 T+1，"
                f"跑 `tea review` 补齐后跟涨胜率才有数据")
 
+    # ---------------------------------------------------------- 每日价格跟踪
+    codes = [e.get("code") for e in entries if e.get("code")]
+    names = {e.get("code"): e.get("name") for e in entries if e.get("code")}
+    added_track = pricetrack.ensure_tracked(codes, names, cfg)
+    pr_res = pricetrack.record_daily(mk, cfg)
+    if added_track or pr_res.get("recorded"):
+        io.say(f"  价格跟踪：新纳入 {added_track} 只，记当日价 {pr_res['recorded']} 只"
+               f"（跟踪中 {pr_res['tracking']} 只）")
+
     path = seed_report.write_report(result, cfg)
     result["report_path"] = path
     if path:
@@ -445,6 +454,7 @@ def close_trade(code: str, price: Optional[float] = None, reason: str = "手动�
            f"盈亏 {utils.money(rec.get('pnl'))}（{utils.pct(rec.get('pnl_pct'))}，"
            f"R {utils.num(rec.get('r_multiple'))}）")
     accumulator.record_trade(rec, "close", cfg)
+    pricetrack.mark_sold(code, cfg)
     cl = trades_mod.consec_losses(cfg)
     limit = int(cfg.s("consec_loss_limit", 2))
     if cl >= limit:

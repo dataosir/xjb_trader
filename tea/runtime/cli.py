@@ -22,7 +22,7 @@ import sys
 from typing import List, Optional
 
 from tea import __version__
-from tea.analysis import followthrough as ft_mod
+from tea.analysis import followthrough as ft_mod, pricetrack
 from tea.analysis.sentiment import clear_cache, format_weather
 from tea.config import config_store, onboarding
 from tea.config.config_store import Config, load_config
@@ -257,6 +257,7 @@ def cmd_pos_rm(args, cfg: Config) -> int:
     if not removed:
         io.say(f"  持仓中无 {code}")
         return 1
+    pricetrack.mark_removed(code, cfg)
     io.say(f"  ✓ 已删除持仓 {code} {removed.get('name')}")
     return 0
 
@@ -634,6 +635,7 @@ def _run_argv(argv: List[str], io: IO, cfg: Config) -> None:
                     io.say(f"  ! {code} 当前状态 {item.get('status')}，无需删除")
                     continue
                 plan_mod.remove_item(code, cfg)
+                pricetrack.mark_removed(code, cfg)
                 io.say(f"  ✓ 已删除计划项 {code} {item.get('name')}")
             else:
                 io.say("  ! 命令仅支持 b（买入）/ d（删除）")

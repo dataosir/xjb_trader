@@ -60,6 +60,7 @@ HIDDEN = [
     "tea.analysis.expectancy",
     "tea.analysis.followthrough",
     "tea.analysis.identity",
+    "tea.analysis.pricetrack",
     "tea.analysis.sentiment",
     "tea.analysis.stats",
     # 配置层

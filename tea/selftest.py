@@ -2247,6 +2247,29 @@ def check_followthrough(t: Suite, cfg: Config) -> None:
          f"t1={rec.get('next_chg')} t3={rec.get('chg_t3')} t5={rec.get('chg_t5')}")
 
 
+def check_pricetrack(t: Suite, cfg: Config, mk: FakeMarket) -> None:
+    """价格跟踪：进入种子文档 → 每日记价 → 卖出/删除停止。"""
+    from .analysis import pricetrack
+
+    t.head("跟踪 · 种子标的价格跟踪")
+    pricetrack.save({}, cfg)
+    added = pricetrack.ensure_tracked([TARGET, "601015"],
+                                      {TARGET: TARGET_NAME, "601015": "陕西黑猫"}, cfg)
+    t.eq("新纳入 2 只", added, 2)
+
+    res = pricetrack.record_daily(mk, cfg)
+    t.eq("记录 2 只当日价", res["recorded"], 2)
+    res2 = pricetrack.record_daily(mk, cfg)
+    t.eq("同日幂等（跳过 2 只）", (res2["recorded"], res2["skipped"]), (0, 2))
+
+    pricetrack.mark_sold(TARGET, cfg)
+    t.eq("卖出后标记 sold", pricetrack.load(cfg)[TARGET]["status"], pricetrack.STATUS_SOLD)
+    t.eq("仍在跟踪 1 只", pricetrack.tracking_codes(cfg), ["601015"])
+
+    pricetrack.mark_removed("601015", cfg)
+    t.eq("删除后跟踪清空", pricetrack.tracking_codes(cfg), [])
+
+
 def check_config_migration(t: Suite, home: str) -> None:
     """单源→多源的一次性配置迁移。
 
@@ -2639,6 +2662,7 @@ def main(verbose: bool = True, cfg: Optional[Config] = None) -> int:
         check_packaging(t)
         check_end_to_end(t, c, mk, sent)
         check_followthrough(t, c)
+        check_pricetrack(t, c, mk)
         return t.report()
     finally:
         sent_mod.clear_cache()
