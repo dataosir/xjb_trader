@@ -588,14 +588,14 @@ def _run_argv(argv: List[str], io: IO, cfg: Config) -> None:
             if not plan_mod.active_items(plan):
                 io.say("  无待执行计划项（仅 pending/ready 可买入或删除）")
                 break
-            act = input("  操作：`b 1` 买入 / `d 2` 删除 / 回车返回 > ").strip().lower()
+            act = input("  操作：买入 `b <编号>`，删除 `d <编号>`，回车返回 > ").strip().lower()
             if not act:
                 break
-            parts = act.split()
-            if len(parts) != 2 or not parts[1].isdigit():
-                io.say("  ! 格式：b 1 或 d 2")
+            cmd, num = act[0], act[1:].strip()
+            if cmd not in ("b", "d") or not num.isdigit():
+                io.say("  ! 格式：`b 1` 买入第 1 项 / `d 1` 删除第 1 项")
                 continue
-            cmd, idx = parts[0], int(parts[1])
+            idx = int(num)
             if not (1 <= idx <= len(items)):
                 io.say(f"  ! 编号 {idx} 越界（共 {len(items)} 项）")
                 continue
