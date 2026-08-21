@@ -407,39 +407,50 @@ def _normalize_choice(raw: str) -> str:
 MENU = [
     ("1", "市场天气（道）", ["weather"]),
     ("2", "今日状态（法）", ["status"]),
-    ("3", "单标的准入评估（Phase1→4）", ["run"]),
-    ("4", "只算不买（单标的评估）", ["__eval__"]),
-    ("5", "种子扫描 + 写次日计划（14:30）", ["seed-plan"]),
-    ("6", "计划复核（09:35 / 14:35）", ["plan-check"]),
-    ("7", "查看交易计划", ["plan"]),
-    ("8", "观察池", ["watch"]),
-    ("9", "盘后复核（跟涨回填 + 观察池）", ["review"]),
-    ("10", "持仓 / 资金", ["pos"]),
-    ("11", "补足确认仓（3/7 的 7）", ["__confirm__"]),
-    ("12", "平仓登记", ["__close__"]),
-    ("13", "交易流水", ["trades"]),
-    ("14", "统计与归因", ["stats"]),
-    ("15", "周复盘报告", ["weekly"]),
-    ("16", "当日累积（为什么没交易）", ["accum"]),
-    ("17", "落选追溯", ["trace"]),
-    ("18", "跟涨经验", ["followthrough"]),
-    ("19", "配置一览", ["config", "list"]),
-    ("20", "离线自测", ["selftest"]),
-    ("21", "配置向导（重新配置）", ["setup"]),
-    ("22", "清除过期计划", ["plan-clear"]),
-    ("23", "手动录入持仓", ["__pos_add__"]),
-    ("24", "删除持仓", ["__pos_rm__"]),
+    ("3", "种子扫描 + 写计划（14:30）", ["seed-plan"]),
+    ("4", "计划复核（09:35 / 14:35）", ["plan-check"]),
+    ("5", "查看交易计划", ["plan"]),
+    ("6", "单标的准入评估", ["run"]),
+    ("7", "持仓 / 资金", ["pos"]),
+    ("8", "平仓登记", ["__close__"]),
+    ("9", "观察池", ["watch"]),
+    ("10", "盘后复核（跟涨回填+观察池）", ["review"]),
+    ("11", "复盘工具 ▸", ["__submenu__", "复盘工具"]),
+    ("12", "持仓管理 ▸", ["__submenu__", "持仓管理"]),
+    ("13", "配置与维护 ▸", ["__submenu__", "配置与维护"]),
 ]
 
-# 展开视图按场景分组：全部平铺时无从下手，分成 6 组后每组只有 2–4 条。
-# 编号沿用 MENU，不重排——文档、README、肌肉记忆都指着这些数字。
+# 二级子菜单：常用功能留在顶层一键直达，低频功能收进来，顶层从 24 项压到 13 项。
+SUBMENUS = {
+    "复盘工具": [
+        ("1", "当日累积（为什么没交易）", ["accum"]),
+        ("2", "落选追溯", ["trace"]),
+        ("3", "跟涨经验", ["followthrough"]),
+        ("4", "交易流水", ["trades"]),
+        ("5", "统计与归因", ["stats"]),
+        ("6", "周复盘报告", ["weekly"]),
+    ],
+    "持仓管理": [
+        ("1", "手动录入持仓", ["__pos_add__"]),
+        ("2", "删除持仓", ["__pos_rm__"]),
+        ("3", "补足确认仓（3/7 的 7）", ["__confirm__"]),
+        ("4", "只算不买（单标的评估）", ["__eval__"]),
+    ],
+    "配置与维护": [
+        ("1", "配置一览", ["config", "list"]),
+        ("2", "配置向导（重新配置）", ["setup"]),
+        ("3", "离线自测", ["selftest"]),
+        ("4", "清除过期计划", ["plan-clear"]),
+    ],
+}
+
+# 顶层展开视图的分组（子菜单只占一项）。
 MENU_GROUPS = [
     ("道法 · 先看天气", ["1", "2"]),
-    ("准入 · 买之前", ["3", "4"]),
-    ("计划 · 次日", ["5", "6", "7", "22"]),
-    ("持仓 · 买之后", ["10", "11", "12", "23", "24"]),
-    ("复盘 · 收盘后", ["9", "8", "16", "17", "18", "13", "14", "15"]),
-    ("工具", ["19", "21", "20"]),
+    ("计划 · 次日", ["3", "4", "5"]),
+    ("交易 · 买与卖", ["6", "7", "8"]),
+    ("观察 · 盘中与盘后", ["9", "10"]),
+    ("更多功能", ["11", "12", "13"]),
 ]
 
 
@@ -461,23 +472,23 @@ def suggest_keys(tm: Timing, cfg: Optional[Config] = None) -> list:
     再怎么评估也会被门禁挡回来。默认视图只印这几条，其余的按 m 展开。
     """
     if not tm.is_trading_day():
-        keys = ["9", "5", "2", "1"]
+        keys = ["10", "3", "2", "1"]
     else:
         keys = []
         if tm.is_buy_window():
-            keys += ["3", "7"]                      # 唯一新开窗口，先看计划再评估
+            keys += ["6", "5"]                      # 唯一新开窗口，先看计划再评估
         if tm.is_seed_window():
-            keys += ["5"]                            # 14:30 扫种子、写次日计划
+            keys += ["3"]                            # 14:30 扫种子、写次日计划
         if tm.is_plan_recheck_window() or tm.is_overnight_review_window():
-            keys += ["6", "7"]
+            keys += ["4", "5"]
         if tm.is_after_close():
-            keys += ["9", "5"]
+            keys += ["10", "3"]
         if not keys:
-            keys = ["1", "8"] if tm.in_session() else ["1", "7"]  # 盘中盯观察池，盘前看计划
-        keys += ["10", "2"]                          # 持仓和今日状态任何时候都想看
+            keys = ["1", "9"] if tm.in_session() else ["1", "5"]  # 盘中盯观察池，盘前看计划
+        keys += ["7", "2"]                          # 持仓和今日状态任何时候都想看
 
     if _has_stale_plan(cfg):
-        keys.insert(0, "22")                         # 旧计划没清干净，先收尾再谈别的
+        keys.insert(0, "13")                         # 旧计划没清干净 → 配置与维护里清除
 
     out = []
     for k in keys:
@@ -506,6 +517,64 @@ def print_menu(io: IO, cfg: Config, full: bool = False) -> None:
             io.say(f"  {k:>2}. {labels[k]}")
         io.say(f"   m. 展开全部 {len(MENU)} 项（或直接输入 1-{len(MENU)}）")
     io.say(f"   q. 退出 │ 1-{len(MENU)} 任意编号 │ 回车刷新菜单")
+
+
+def _run_argv(argv: List[str], io: IO, cfg: Config) -> None:
+    """执行一条菜单动作（含需要交互输入的特殊动作）。"""
+    if argv[0] == "__eval__":
+        code = input("股票代码> ").strip()
+        if code:
+            main(["eval", code])
+        else:
+            io.say("  已取消：未输入股票代码")
+    elif argv[0] == "__confirm__":
+        code = input("股票代码> ").strip()
+        if code:
+            main(["add-confirm", code])
+        else:
+            io.say("  已取消：未输入股票代码")
+    elif argv[0] == "__close__":
+        code = input("股票代码> ").strip()
+        price = input("平仓价> ").strip()
+        if code and price:
+            main(["close", code, price])
+        else:
+            io.say("  已取消：平仓需同时输入股票代码与平仓价")
+    elif argv[0] == "__pos_add__":
+        io.say("  批量录入持仓：逐只输入，代码留空回车保存退出")
+        n = 0
+        while True:
+            raw_code = utils.normalize_digits(input("  股票代码> ").strip())
+            if not raw_code:
+                break
+            shares_raw = _clean_number(input("  股数> ").strip())
+            price_raw = _clean_number(input("  成本价> ").strip())
+            if not (len(raw_code) == 6 and raw_code.isdigit()):
+                io.say(f"  ! 代码「{raw_code}」不是 6 位数字，跳过")
+                continue
+            try:
+                shares = int(shares_raw)
+                price = float(price_raw)
+            except (ValueError, TypeError):
+                io.say(f"  ! 股数「{shares_raw}」或成本价「{price_raw}」格式不对，跳过")
+                continue
+            if shares <= 0 or price <= 0:
+                io.say("  ! 股数与成本价需 >0，跳过")
+                continue
+            rc = cmd_pos_add(argparse.Namespace(
+                code=raw_code, name=None, shares=shares, price=price,
+                sl=None, tp=None, date=None), cfg)
+            if rc == 0:
+                n += 1
+        io.say(f"  批量录入结束，本次新增 {n} 只")
+    elif argv[0] == "__pos_rm__":
+        code = input("股票代码> ").strip()
+        if code:
+            main(["pos-rm", code])
+        else:
+            io.say("  已取消：未输入股票代码")
+    else:
+        main(argv)
 
 
 def menu_loop(cfg: Config) -> int:
@@ -537,61 +606,41 @@ def menu_loop(cfg: Config) -> int:
         if not argv:
             io.say("  无此选项")
             continue
+        # 子菜单：进入二级选择，b/回车返回主菜单
+        if argv[0] == "__submenu__":
+            name = argv[1]
+            sub = SUBMENUS.get(name, [])
+            subtable = {k: av for k, _, av in sub}
+            while True:
+                io.say("")
+                io.say(f"  ── {name} ──")
+                for k, label, _ in sub:
+                    io.say(f"  {k:>2}. {label}")
+                io.say("   b. 返回主菜单 │ q. 退出")
+                try:
+                    subchoice = _normalize_choice(input("\n请选择> ").strip())
+                except (EOFError, KeyboardInterrupt):
+                    io.say("")
+                    return 0
+                if subchoice in ("q", "Q", "quit", "exit"):
+                    return 0
+                if subchoice in ("b", "B") or not subchoice:
+                    break
+                subargv = subtable.get(subchoice)
+                if not subargv:
+                    io.say("  无此选项")
+                    continue
+                try:
+                    _run_argv(subargv, io, cfg)
+                except KeyboardInterrupt:
+                    io.say("\n  已中断")
+                except Exception as exc:  # 子菜单里同样不让单条命令崩掉会话
+                    io.say(f"  执行出错：{exc}")
+                if io.pause() in ("q", "quit", "exit"):
+                    return 0
+            continue
         try:
-            if argv[0] == "__eval__":
-                code = input("股票代码> ").strip()
-                if code:
-                    main(["eval", code])
-                else:
-                    io.say("  已取消：未输入股票代码")
-            elif argv[0] == "__confirm__":
-                code = input("股票代码> ").strip()
-                if code:
-                    main(["add-confirm", code])
-                else:
-                    io.say("  已取消：未输入股票代码")
-            elif argv[0] == "__close__":
-                code = input("股票代码> ").strip()
-                price = input("平仓价> ").strip()
-                if code and price:
-                    main(["close", code, price])
-                else:
-                    io.say("  已取消：平仓需同时输入股票代码与平仓价")
-            elif argv[0] == "__pos_add__":
-                io.say("  批量录入持仓：逐只输入，代码留空回车保存退出")
-                n = 0
-                while True:
-                    raw_code = utils.normalize_digits(input("  股票代码> ").strip())
-                    if not raw_code:
-                        break
-                    shares_raw = _clean_number(input("  股数> ").strip())
-                    price_raw = _clean_number(input("  成本价> ").strip())
-                    if not (len(raw_code) == 6 and raw_code.isdigit()):
-                        io.say(f"  ! 代码「{raw_code}」不是 6 位数字，跳过")
-                        continue
-                    try:
-                        shares = int(shares_raw)
-                        price = float(price_raw)
-                    except (ValueError, TypeError):
-                        io.say(f"  ! 股数「{shares_raw}」或成本价「{price_raw}」格式不对，跳过")
-                        continue
-                    if shares <= 0 or price <= 0:
-                        io.say("  ! 股数与成本价需 >0，跳过")
-                        continue
-                    rc = cmd_pos_add(argparse.Namespace(
-                        code=raw_code, name=None, shares=shares, price=price,
-                        sl=None, tp=None, date=None), cfg)
-                    if rc == 0:
-                        n += 1
-                io.say(f"  批量录入结束，本次新增 {n} 只")
-            elif argv[0] == "__pos_rm__":
-                code = input("股票代码> ").strip()
-                if code:
-                    main(["pos-rm", code])
-                else:
-                    io.say("  已取消：未输入股票代码")
-            else:
-                main(argv)
+            _run_argv(argv, io, cfg)
         except KeyboardInterrupt:
             io.say("\n  已中断")
         except Exception as exc:  # 菜单里不让单条命令崩掉整个会话

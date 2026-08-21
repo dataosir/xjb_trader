@@ -1978,10 +1978,10 @@ def check_leader_relax(t: Suite, cfg: Config) -> None:
 
 
 def check_menu(t: Suite, cfg: Config) -> None:
-    """菜单：默认只印四条建议，展开视图必须不多不少地盖住 20 项。
+    """菜单：默认只印四条建议；顶层展开视图压到 13 项，其余收进子菜单。
 
-    分组表是手工维护的，日后加一个菜单项很容易忘了归组——那个功能就从
-    界面上消失了，而且不报错。这里把两边对齐当成硬约束。
+    分组表与子菜单都是手工维护的，日后加/挪一个菜单项很容易忘了归组或漏掉
+    功能——那个功能就从界面上消失，而且不报错。这里把两边对齐当成硬约束。
     """
     import datetime as _dt
 
@@ -1992,10 +1992,23 @@ def check_menu(t: Suite, cfg: Config) -> None:
 
     keys = [k for k, _, _ in cli.MENU]
     grouped = [k for _, ks in cli.MENU_GROUPS for k in ks]
-    t.eq("分组总数等于菜单项数", len(grouped), len(keys))
-    t.ok("分组无重复", len(set(grouped)) == len(grouped))
-    t.ok("分组无遗漏", set(grouped) == set(keys),
+    t.eq("顶层分组总数等于菜单项数", len(grouped), len(keys))
+    t.ok("顶层分组无重复", len(set(grouped)) == len(grouped))
+    t.ok("顶层分组无遗漏", set(grouped) == set(keys),
          f"缺 {sorted(set(keys) - set(grouped))} 多 {sorted(set(grouped) - set(keys))}")
+
+    # 子菜单引用必须都真实存在，且 24 项功能一个不少（顶层 + 子菜单合并后）。
+    submenu_refs = [av[1] for _, _, av in cli.MENU if av[0] == "__submenu__"]
+    t.ok("子菜单引用都存在", set(submenu_refs) <= set(cli.SUBMENUS),
+         f"引用 {submenu_refs} 缺失 {sorted(set(submenu_refs) - set(cli.SUBMENUS))}")
+    all_argv = [av[0] for _, _, av in cli.MENU if av[0] != "__submenu__"]
+    for sub in cli.SUBMENUS.values():
+        all_argv += [av[0] for _, _, av in sub]
+    expect = {"weather", "status", "seed-plan", "plan-check", "plan", "run", "pos",
+              "__close__", "watch", "review", "accum", "trace", "followthrough",
+              "trades", "stats", "weekly", "__pos_add__", "__pos_rm__", "__confirm__",
+              "__eval__", "config", "setup", "selftest", "plan-clear"}
+    t.eq("24 项功能一个不少", sorted(set(all_argv)), sorted(expect))
 
     # 时段→建议：每个时段都得有东西可做，且不超过四条（否则就又回到平铺）。
     real_now = utils.now
@@ -2013,12 +2026,12 @@ def check_menu(t: Suite, cfg: Config) -> None:
         # 非交易日不能推荐新开：门禁必定拦回，推了就是领着人撞墙。
         holiday = _dt.datetime(2026, 8, 2, 16, 30)
         utils.now = lambda when=None, _f=holiday: _f
-        t.ok("非交易日不推荐准入评估", "3" not in cli.suggest_keys(Timing(cfg)))
+        t.ok("非交易日不推荐准入评估", "6" not in cli.suggest_keys(Timing(cfg)))
 
         # 买入窗口必须推荐准入评估：一天就这 45 分钟能新开。
         window = _dt.datetime(2026, 8, 3, 14, 10)
         utils.now = lambda when=None, _f=window: _f
-        t.ok("买入窗口推荐准入评估", "3" in cli.suggest_keys(Timing(cfg)))
+        t.ok("买入窗口推荐准入评估", "6" in cli.suggest_keys(Timing(cfg)))
     finally:
         utils.now = real_now
 
