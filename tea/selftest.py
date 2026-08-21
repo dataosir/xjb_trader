@@ -2218,6 +2218,34 @@ def check_followthrough(t: Suite, cfg: Config) -> None:
     up2 = next(r for r in ft_mod.load_records(cfg) if r.get("code") == "600888")
     t.eq("轨道仍为可买", up2.get("track"), "可买")
 
+    # 新字段：市场天气 + 六维共振拆解随样本落盘（供「选了3天全跌」归因）
+    r4 = ft_mod.record_seed([{
+        "code": "600787", "name": "字段票", "price": 6.0, "track": "可买",
+        "tier": "严格档", "stage": "突破", "total_score": 6, "pass_threshold": 6,
+        "scoring_dims": [{"name": "板块强度", "score": 2, "max": 2}],
+        "market_score": 47.0, "market_stance": "防守", "market_ma20_above": False,
+    }], cfg, date="2026-08-12")
+    t.eq("带市场/维度字段的样本落盘", r4, {"added": 1, "skipped": 0, "updated": 0})
+    f = next(r for r in ft_mod.load_records(cfg) if r.get("code") == "600787")
+    t.eq("六维共振随样本落盘", (f.get("scoring_dims") or [{}])[0].get("name"), "板块强度")
+    t.eq("市场姿态随样本落盘", f.get("market_stance"), "防守")
+    t.eq("大盘趋势随样本落盘", f.get("market_ma20_above"), False)
+
+    # 多周期回填：T+1/T+2/T+3/T+5 一次算好
+    d = _end_dates(30)[10]
+    ft_mod.save_records([{"date": d, "code": "600778", "name": "多周期样本",
+                          "next_chg": None, "result": None}], cfg)
+    mk = FakeMarket(cfg)
+    upd = ft_mod.update_results(mk, cfg)
+    t.ok("多周期回填了记录", upd.get("updated", 0) >= 1, str(upd))
+    rec = next(r for r in ft_mod.load_records(cfg) if r.get("code") == "600778")
+    t.ok("T+1 已回填", rec.get("next_chg") is not None, str(rec))
+    t.ok("T+3 已回填", rec.get("chg_t3") is not None, str(rec))
+    t.ok("T+5 已回填", rec.get("chg_t5") is not None, str(rec))
+    t.ok("T+1 < T+3 < T+5（构造上行K线）",
+         rec["next_chg"] < rec["chg_t3"] < rec["chg_t5"],
+         f"t1={rec.get('next_chg')} t3={rec.get('chg_t3')} t5={rec.get('chg_t5')}")
+
 
 def check_config_migration(t: Suite, home: str) -> None:
     """单源→多源的一次性配置迁移。

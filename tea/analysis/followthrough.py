@@ -66,9 +66,15 @@ def record_seed(entries: List[dict], cfg: Optional[Config] = None,
             "date": d, "code": code, "name": e.get("name"),
             "stage": e.get("stage"), "tier": e.get("tier"), "track": e.get("track"),
             "chg_pct": e.get("chg_pct"), "total_score": e.get("total_score"),
+            "pass_threshold": e.get("pass_threshold"),
             "identity_tier": e.get("identity_tier"), "identity_score": e.get("identity_score"),
             "sector_name": e.get("sector_name"), "sector_rank": e.get("sector_rank"),
+            "scoring_dims": e.get("scoring_dims"),
+            "market_score": e.get("market_score"), "market_cycle": e.get("market_cycle"),
+            "market_stance": e.get("market_stance"), "market_ma20_above": e.get("market_ma20_above"),
+            "market_idx_chg": e.get("market_idx_chg"),
             "close": e.get("price"), "next_chg": None, "result": None,
+            "chg_t2": None, "chg_t3": None, "chg_t5": None,
         }
         if key not in by_key:
             recs.append(rec)
@@ -124,19 +130,28 @@ def dedupe_records(cfg: Optional[Config] = None) -> dict:
 # ------------------------------------------------------------------ T+1 回填
 
 def update_results(market: Optional[Market] = None, cfg: Optional[Config] = None) -> dict:
-    """回填 T+1 结果：用日 K 找记录日之后第一个交易日的涨幅。"""
+    """回填 T+1/T+2/T+3/T+5 多周期结果：用日 K 找记录日之后的第 N 个交易日涨幅。
+
+    「选了 3 天全跌」这类复盘只靠 T+1 看不出来，所以一次把 T+1~T+5 都算好落盘。
+    result（win/loss）仍按 T+1 ≥ win_chg_pct 判定，保持既有跟涨胜率口径不变。
+    """
     cfg = cfg or load_config()
     recs = load_records(cfg)
     if not recs:
-        return {"updated": 0, "pending": 0}
+        return {"updated": 0, "pending": 0, "total": 0}
     mk = market or Market(cfg)
     win_th = float(cfg.get("followthrough.win_chg_pct", 3.0))
+    today = utils.today_str()
+    horizons = ((1, "next_chg"), (2, "chg_t2"), (3, "chg_t3"), (5, "chg_t5"))
     updated = pending = 0
     for r in recs:
-        if r.get("result") is not None or not r.get("code"):
+        if not r.get("code"):
             continue
-        if r.get("date") == utils.today_str():
+        if r.get("date") == today:
             pending += 1
+            continue
+        # 已回填过 result 且 T+5 也齐了 → 跳过；否则补缺（兼容旧记录只有 T+1）
+        if r.get("result") is not None and r.get("chg_t5") is not None:
             continue
         try:
             kl = mk.get_klines(r["code"], limit=30)
@@ -144,16 +159,18 @@ def update_results(market: Optional[Market] = None, cfg: Optional[Config] = None
             pending += 1
             continue
         idx = next((i for i, k in enumerate(kl) if k.get("date") == r.get("date")), None)
-        if idx is None or idx + 1 >= len(kl):
+        if idx is None:
             pending += 1
             continue
-        base, nxt = kl[idx].get("close"), kl[idx + 1].get("close")
-        if not base or not nxt:
+        base = kl[idx].get("close")
+        if not base:
             pending += 1
             continue
-        chg = (nxt - base) / base * 100.0
-        r["next_chg"] = round(chg, 2)
-        r["result"] = "win" if chg >= win_th else "loss"
+        for off, field in horizons:
+            if idx + off < len(kl) and kl[idx + off].get("close"):
+                r[field] = round((kl[idx + off]["close"] - base) / base * 100.0, 2)
+        if r.get("next_chg") is not None:
+            r["result"] = "win" if r["next_chg"] >= win_th else "loss"
         updated += 1
     if updated:
         save_records(recs, cfg)
@@ -179,7 +196,7 @@ def key_of(stage: Optional[str], tier: Optional[str], track: Optional[str]) -> s
 
 
 def aggregate(cfg: Optional[Config] = None) -> Dict[str, dict]:
-    """按 阶段×档位×轨道 聚合 T+1 胜率。"""
+    """按 阶段×档位×轨道 聚合 T+1 胜率 + T+1/T+3 平均涨幅。"""
     cfg = cfg or load_config()
     min_n = int(cfg.get("followthrough.min_samples", 8))
     out: Dict[str, dict] = {}
@@ -189,15 +206,18 @@ def aggregate(cfg: Optional[Config] = None) -> Dict[str, dict]:
         k = key_of(r.get("stage"), r.get("tier"), r.get("track"))
         slot = out.setdefault(k, {"n": 0, "wins": 0, "stage": r.get("stage"),
                                   "tier": r.get("tier"), "track": r.get("track"),
-                                  "avg_next_chg": []})
+                                  "avg_next_chg": [], "avg_chg_t3": []})
         slot["n"] += 1
         slot["wins"] += 1 if r["result"] == "win" else 0
         if r.get("next_chg") is not None:
             slot["avg_next_chg"].append(float(r["next_chg"]))
+        if r.get("chg_t3") is not None:
+            slot["avg_chg_t3"].append(float(r["chg_t3"]))
     for k, v in out.items():
         v["rate"] = v["wins"] / v["n"] if v["n"] else None
         v["valid"] = v["n"] >= min_n
         v["avg_next_chg"] = utils.mean(v["avg_next_chg"])
+        v["avg_chg_t3"] = utils.mean(v["avg_chg_t3"])
     return out
 
 
@@ -286,5 +306,6 @@ def format_followthrough(cfg: Optional[Config] = None) -> str:
         rate = f"{v['rate']:.0%}" if v.get("rate") is not None else "—"
         lines.append(f"  {k.replace(KEY_SEP, ' / ')}: {v['wins']}/{v['n']} = {rate}"
                      f"{'（有效）' if v.get('valid') else '（样本不足）'}"
-                     f" 次日均涨 {utils.pct(v.get('avg_next_chg'))}")
+                     f" 次日均涨 {utils.pct(v.get('avg_next_chg'))}"
+                     f"　T+3均涨 {utils.pct(v.get('avg_chg_t3'))}")
     return "\n".join(lines)

@@ -251,8 +251,22 @@ def seed_plan(cfg: Optional[Config] = None, market: Optional[Market] = None,
 
 
 def _ft_entries(result: dict) -> List[dict]:
-    """把三档输出摊平成跟涨样本（可买/观察/前夕都要跟踪，才知道哪一档真的有钱）。"""
+    """把三档输出摊平成跟涨样本（可买/观察/前夕都要跟踪，才知道哪一档真的有钱）。
+
+    除了个股快照，还带选中时的市场天气（情绪/周期/姿态/大盘趋势）与 9 分共振
+    六维拆解——事后复盘「选了 3 天全跌」时，才能按市场环境与维度归因，而不只是
+    看着一个总分干瞪眼。
+    """
     entries: List[dict] = []
+    sent = result.get("sentiment") or {}
+    idx = sent.get("index") or {}
+    market = {
+        "market_score": sent.get("score"),
+        "market_cycle": sent.get("cycle"),
+        "market_stance": sent.get("stance"),
+        "market_ma20_above": idx.get("ma20_above"),
+        "market_idx_chg": idx.get("chg_pct"),
+    }
     groups = [("可买", result.get("buyable")), (None, result.get("watch")),
               (None, result.get("eve"))]
     for default_track, evs in groups:
@@ -265,10 +279,13 @@ def _ft_entries(result: dict) -> List[dict]:
                 "track": ev.get("track") or default_track,
                 "chg_pct": q.get("chg_pct"), "price": q.get("price"),
                 "total_score": ev.get("total_score"),
+                "pass_threshold": ev.get("pass_threshold"),
                 "identity_tier": (ev.get("identity") or {}).get("tier"),
                 "identity_score": (ev.get("identity") or {}).get("score"),
                 "sector_name": (ev.get("sector") or {}).get("name"),
                 "sector_rank": (ev.get("sector") or {}).get("rank"),
+                "scoring_dims": (ev.get("scoring") or {}).get("dims"),
+                **market,
             })
     return entries
 
