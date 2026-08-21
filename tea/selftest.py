@@ -1547,6 +1547,24 @@ def check_manual_position(t: Suite, cfg: Config, mk: FakeMarket) -> None:
     t.eq("删除后持仓清空", portfolio.positions(cfg), [])
 
 
+def check_colors(t: Suite) -> None:
+    """统一颜色方案：sign_color 语义 + COLOR_SEED 与盈亏/警告色互斥。"""
+    t.head("颜色 · 统一方案")
+    t.eq("sign_color 正 → 盈利绿", utils.sign_color(5.0), utils.COLOR_PROFIT)
+    t.eq("sign_color 负 → 亏损红", utils.sign_color(-5.0), utils.COLOR_LOSS)
+    t.eq("sign_color 零 → 中性白", utils.sign_color(0.0), utils.COLOR_NEUTRAL)
+    t.eq("sign_color None → 警告黄", utils.sign_color(None), utils.COLOR_WARN)
+
+    others = {utils.COLOR_PROFIT, utils.COLOR_LOSS, utils.COLOR_WARN,
+              utils.COLOR_INFO, utils.COLOR_NEUTRAL}
+    t.ok("COLOR_SEED 与盈亏/警告/信息/中性均不同",
+         utils.COLOR_SEED not in others, f"seed={utils.COLOR_SEED} others={others}")
+    t.ok("语义色均能生成 ANSI 高亮",
+         all(utils.hl("x", c).startswith("\033[") for c in
+             (utils.COLOR_PROFIT, utils.COLOR_LOSS, utils.COLOR_WARN,
+              utils.COLOR_SEED, utils.COLOR_INFO, utils.COLOR_NEUTRAL)))
+
+
 def check_gates(t: Suite, cfg: Config, mk: FakeMarket, sent: dict) -> None:
     t.head("法 · 门禁（§8.1 / §8.2 / §8.3）")
     gates.reset_state(cfg)
@@ -2519,6 +2537,7 @@ def main(verbose: bool = True, cfg: Optional[Config] = None) -> int:
         check_veto(t, c, mk, idn)
         check_position(t, c)
         check_manual_position(t, c, mk)
+        check_colors(t)
         check_gates(t, c, mk, sent)
         check_seed(t, c, mk, sent)
         check_plan_labels(t, c, mk, sent)

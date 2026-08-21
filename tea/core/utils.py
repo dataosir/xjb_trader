@@ -296,6 +296,29 @@ def hl(text: str, color: str = "yellow") -> str:
     return f"\033[1;{code}m{text}\033[0m"
 
 
+# ------------------------------------------------------------------ 统一颜色方案
+# 工程规则（见 docs/CONTRIBUTING.md「颜色方案」）：业务代码里禁止散落裸颜色名，
+# 一律用这些语义常量 + utils.hl / utils.sign_color。语义由含义决定，不由位置决定。
+
+COLOR_PROFIT = "green"      # 盈利 / 上涨 / 通过
+COLOR_LOSS = "red"          # 亏损 / 下跌 / 拒绝
+COLOR_WARN = "yellow"       # 警告 / 注意 / 待定 / 数据缺失
+COLOR_SEED = "magenta"      # 种子选中 / 可买（与盈亏色区分，单独标记）
+COLOR_INFO = "cyan"         # 信息 / 强调 / 候选明细 / 复盘
+COLOR_NEUTRAL = "white"     # 中性 / 零值
+
+
+def sign_color(v: Optional[float]) -> str:
+    """按正负号取语义色：>0 盈利绿、<0 亏损红、=0 中性白、None 警告黄。"""
+    if v is None:
+        return COLOR_WARN
+    if v > 0:
+        return COLOR_PROFIT
+    if v < 0:
+        return COLOR_LOSS
+    return COLOR_NEUTRAL
+
+
 def jitter(base: float, spread: float) -> float:
     """带抖动的延时秒数（防封用）。"""
     lo = max(0.0, base - spread)

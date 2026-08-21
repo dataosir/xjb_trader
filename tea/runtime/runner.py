@@ -483,10 +483,8 @@ def holdings_review(cfg: Optional[Config] = None, market: Optional[Market] = Non
             pnl = round((float(cur) - entry) * shares, 2)
             pnl_pct = round((float(cur) - entry) / entry * 100.0, 2)
             total_pnl += pnl
-            chg_c = "green" if (chg or 0) > 0 else ("red" if (chg or 0) < 0 else "white")
-            pnl_c = "green" if pnl > 0 else ("red" if pnl < 0 else "white")
-            io.say(f"    现价 {utils.num(cur)}（{utils.hl(utils.pct(chg), chg_c)}）  浮动盈亏 "
-                   f"{utils.hl(utils.money(pnl) + '（' + utils.pct(pnl_pct) + '）', pnl_c)}"
+            io.say(f"    现价 {utils.num(cur)}（{utils.hl(utils.pct(chg), utils.sign_color(chg))}）  浮动盈亏 "
+                   f"{utils.hl(utils.money(pnl) + '（' + utils.pct(pnl_pct) + '）', utils.sign_color(pnl))}"
                    f"（未含卖出手续费）")
         else:
             io.say("    现价获取失败，无法计算浮动盈亏")
@@ -501,7 +499,7 @@ def holdings_review(cfg: Optional[Config] = None, market: Optional[Market] = Non
                 t1 = r.get("next_chg")
                 t1txt = f"T+1 {t1:+.2f}%" if t1 is not None else "T+1 未回填"
                 mark = "★" if r.get("track") == "可买" else " "
-                track = (utils.hl(r.get("track"), "green")
+                track = (utils.hl(r.get("track"), utils.COLOR_SEED)
                          if r.get("track") == "可买" else r.get("track"))
                 io.say(f"    {mark} {r.get('date')} {track}（{r.get('tier')}）"
                        f"共振 {r.get('total_score')} {r.get('identity_tier')}"
@@ -510,10 +508,9 @@ def holdings_review(cfg: Optional[Config] = None, market: Optional[Market] = Non
                      "entry": entry, "current": cur, "chg": chg,
                      "pnl": pnl, "pnl_pct": pnl_pct, "seed": recs})
 
-    total_c = "green" if total_pnl > 0 else ("red" if total_pnl < 0 else "white")
-    seed_c = "yellow" if matched == 0 else ("green" if matched == len(pos) else "cyan")
+    seed_c = utils.COLOR_WARN if matched == 0 else utils.COLOR_SEED
     io.say(f"  合计：成本 {utils.money(total_cost)}，浮动盈亏 "
-           f"{utils.hl(utils.money(round(total_pnl, 2)), total_c)}（未含卖出手续费）"
+           f"{utils.hl(utils.money(round(total_pnl, 2)), utils.sign_color(total_pnl))}（未含卖出手续费）"
            f"　种子命中 {utils.hl(f'{matched}/{len(pos)}', seed_c)}")
     return {"positions": rows, "total_pnl": round(total_pnl, 2),
             "total_cost": round(total_cost, 2), "matched": matched}

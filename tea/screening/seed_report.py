@@ -15,9 +15,9 @@ from .screener import (VERDICT_EMPTY, VERDICT_PENDING, VERDICT_TRADEABLE,
                        dyn_window_text)
 
 
-def _hl(text: str, color: str = "yellow") -> str:
-    """ANSI 高亮（复用 utils.hl）。"""
-    return utils.hl(text, color)
+def _hl(text: str, color: str = "") -> str:
+    """ANSI 高亮（复用 utils.hl，默认警告黄）。"""
+    return utils.hl(text, color or utils.COLOR_WARN)
 
 VERDICT_LABEL = {
     VERDICT_TRADEABLE: "HAS_TRADEABLE（有可买标的，已写次日计划）",
@@ -262,15 +262,15 @@ def format_result(result: dict, cfg: Optional[Config] = None) -> str:
         lines.append("    无板块达标")
 
     op_map = {
-        "buyable": ("买入", "red"),
-        "watch": ("观察", "yellow"),
-        "near_miss": ("不操作", "blue"),
-        "eve": ("观察", "green"),
+        "buyable": ("买入", utils.COLOR_SEED),     # 种子选中 → 品红（与盈亏色区分）
+        "watch": ("观察", utils.COLOR_WARN),       # 待定观察 → 黄
+        "near_miss": ("不操作", utils.COLOR_INFO),  # 只复盘 → 青
+        "eve": ("观察", utils.COLOR_INFO),          # 前夕观察 → 青
     }
     for title, key in (("可买", "buyable"), ("待启动观察", "watch"),
                        ("近失（只复盘）", "near_miss"), ("前夕观察", "eve")):
         evs = result.get(key) or []
-        op_label, color = op_map.get(key, ("", "yellow"))
+        op_label, color = op_map.get(key, ("", utils.COLOR_WARN))
         lines.append(f"  ---- {title}（{len(evs)}）----")
         if not evs:
             lines.append("    —")
@@ -298,7 +298,7 @@ def format_result(result: dict, cfg: Optional[Config] = None) -> str:
     if not cands:
         lines.append("    —")
     for c in cands:
-        lines.append(f"    [{_hl('候选', 'cyan')}] {_hl(c.get('code'), 'cyan')} {_hl(c.get('name') or '', 'cyan')} "
+        lines.append(f"    [{_hl('候选', utils.COLOR_INFO)}] {_hl(c.get('code'), utils.COLOR_INFO)} {_hl(c.get('name') or '', utils.COLOR_INFO)} "
                      f"{utils.pct(c.get('chg')):>8}  分时 {_intr(c.get('intraday')):>4}"
                      f"  共振 {_reso(c):<5}  {_ident(c, 0):<8}"
                      f"  [{c.get('verdict') or '—'}]")

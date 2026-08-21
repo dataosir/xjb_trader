@@ -34,6 +34,32 @@ python -m compileall -q tea
 - **子包从顶层引入**：写 `from .data import Market`，不要写 `from .data.market import Market`。子包的 `__init__.py` 是对外契约，只做再导出、不放实现。
 - 行宽 110。
 
+## 颜色方案（终端高亮）
+
+所有控制台高亮必须走 `tea/core/utils.py` 的 `hl()` / `sign_color()` 与语义色常量，**禁止在业务代码里散落裸颜色名**（`"red"` / `"green"` 之类）。颜色由**含义**决定，不由出现位置决定：
+
+| 语义常量 | 颜色 | 含义 |
+| --- | --- | --- |
+| `COLOR_PROFIT` | 绿 | 盈利 / 上涨 / 通过 |
+| `COLOR_LOSS` | 红 | 亏损 / 下跌 / 拒绝 |
+| `COLOR_WARN` | 黄 | 警告 / 注意 / 待定 / 数据缺失 |
+| `COLOR_SEED` | 品红 | **种子选中 / 可买**（与盈亏色区分，单独标记） |
+| `COLOR_INFO` | 青 | 信息 / 强调 / 候选明细 / 复盘 |
+| `COLOR_NEUTRAL` | 白 | 中性 / 零值 |
+
+三条硬规则：
+
+1. 正负号类数值（盈亏、涨跌幅）一律用 `sign_color(v)`：`>0` 绿、`<0` 红、`=0` 白、`None` 黄。
+2. 「种子选出来的票」——种子报告的可买桶、持仓对照里命中种子的标记——必须用 `COLOR_SEED`（品红），**不得复用**盈亏的绿/红，避免「命中种子」和「赚钱/亏钱」在视觉上混淆。
+3. 新增语义色时先在这里登记，再到 `utils.py` 加常量，不要在调用处临时造色。
+
+```python
+utils.hl(utils.money(pnl), utils.sign_color(pnl))   # 盈亏按正负标色
+utils.hl("可买", utils.COLOR_SEED)                    # 种子选中标品红
+```
+
+自测 `check_colors` 锁住 `sign_color` 的语义与 `COLOR_SEED` 的唯一性（不与盈亏/警告色重复）。
+
 ## 新增模块放哪里
 
 `tea/` 下是九个分层子包，依赖方向严格单向向下：
