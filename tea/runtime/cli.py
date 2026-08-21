@@ -408,7 +408,7 @@ MENU = [
     ("2", "今日状态（法）", ["status"]),
     ("3", "种子扫描 + 写计划（14:30）", ["seed-plan"]),
     ("4", "计划复核（09:35 / 14:35）", ["plan-check"]),
-    ("5", "查看交易计划", ["plan"]),
+    ("5", "查看交易计划", ["__plan__"]),
     ("6", "单标的准入评估", ["run"]),
     ("7", "持仓 / 资金", ["pos"]),
     ("8", "平仓登记", ["__close__"]),
@@ -580,6 +580,63 @@ def _run_argv(argv: List[str], io: IO, cfg: Config) -> None:
                 main(["pos-rm", positions[int(sel) - 1]["code"]])
             else:
                 io.say(f"  ! 无效编号「{sel}」")
+    elif argv[0] == "__plan__":
+        while True:
+            plan = plan_mod.load_plan(cfg)
+            io.say(plan_mod.format_plan(plan))
+            items = plan.get("items") or []
+            if not plan_mod.active_items(plan):
+                io.say("  无待执行计划项（仅 pending/ready 可买入或删除）")
+                break
+            act = input("  操作：`b 1` 买入 / `d 2` 删除 / 回车返回 > ").strip().lower()
+            if not act:
+                break
+            parts = act.split()
+            if len(parts) != 2 or not parts[1].isdigit():
+                io.say("  ! 格式：b 1 或 d 2")
+                continue
+            cmd, idx = parts[0], int(parts[1])
+            if not (1 <= idx <= len(items)):
+                io.say(f"  ! 编号 {idx} 越界（共 {len(items)} 项）")
+                continue
+            item = items[idx - 1]
+            code = item.get("code")
+            if cmd == "b":
+                if item.get("status") not in (plan_mod.STATUS_PENDING, plan_mod.STATUS_READY):
+                    io.say(f"  ! {code} 当前状态 {item.get('status')}，不可买入")
+                    continue
+                try:
+                    cur = (_market(cfg).get_quote(code) or {}).get("price")
+                except Exception:
+                    cur = None
+                if cur is None:
+                    io.say(f"  ! 取不到 {code} 现价")
+                    continue
+                io.say(f"  买入 {code} {item.get('name')}，现价 {utils.num(cur)}")
+                shares_raw = _clean_number(input("  买入数量> ").strip())
+                try:
+                    shares = int(shares_raw)
+                except (ValueError, TypeError):
+                    io.say(f"  ! 数量「{shares_raw}」格式不对")
+                    continue
+                if shares <= 0:
+                    io.say("  ! 数量需 >0")
+                    continue
+                entry_raw = _clean_number(input(f"  成本价（回车=现价 {utils.num(cur)}）> ").strip())
+                try:
+                    entry = float(entry_raw) if entry_raw else float(cur)
+                except (ValueError, TypeError):
+                    io.say(f"  ! 成本价「{entry_raw}」格式不对")
+                    continue
+                runner.buy_plan_item(code, shares, entry, cfg=cfg, io=io)
+            elif cmd == "d":
+                if item.get("status") not in (plan_mod.STATUS_PENDING, plan_mod.STATUS_READY):
+                    io.say(f"  ! {code} 当前状态 {item.get('status')}，无需删除")
+                    continue
+                plan_mod.remove_item(code, cfg)
+                io.say(f"  ✓ 已删除计划项 {code} {item.get('name')}")
+            else:
+                io.say("  ! 命令仅支持 b（买入）/ d（删除）")
     else:
         main(argv)
 

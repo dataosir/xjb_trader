@@ -1974,6 +1974,41 @@ def check_plan_recheck(t: Suite, cfg: Config) -> None:
     t.ok("详情含门槛变化（6→7）", "门槛 6→7" in detail, detail)
 
 
+def check_plan_buy_remove(t: Suite, cfg: Config, mk: FakeMarket) -> None:
+    """计划买入（走持仓逻辑）+ 单条删除计划项。"""
+    from .phases import IO
+    from .runtime import runner
+
+    t.head("计划 · 买入与单条删除")
+    plan_mod.clear_plan(cfg)
+    portfolio.remove_position(TARGET, cfg)
+    plan_mod.save_plan({
+        "version": plan_mod.PLAN_VERSION, "planned_date": utils.today_str(),
+        "execute_date": utils.today_str(), "status": plan_mod.STATUS_PENDING,
+        "items": [{"code": TARGET, "name": TARGET_NAME, "ref_price": 10.0,
+                   "sl_pct": 6.0, "tp_pct": 15.0, "status": plan_mod.STATUS_PENDING},
+                  {"code": "600999", "name": "待删票", "ref_price": 5.0,
+                   "status": plan_mod.STATUS_PENDING}],
+        "notes": [],
+    }, cfg)
+
+    io = IO(interactive=False, quiet=True)
+    pos = runner.buy_plan_item(TARGET, 500, 10.0, cfg=cfg, market=mk, io=io)
+    t.ok("计划买入生成持仓", pos is not None)
+    t.eq("持仓股数按输入", pos["shares"], 500)
+    t.eq("止损止盈沿用计划", (pos["sl_pct"], pos["tp_pct"]), (6.0, 15.0))
+    item = plan_mod.find_item(plan_mod.load_plan(cfg), TARGET)
+    t.eq("计划项标记 executed", item["status"], plan_mod.STATUS_EXECUTED)
+
+    plan_mod.remove_item("600999", cfg)
+    item2 = plan_mod.find_item(plan_mod.load_plan(cfg), "600999")
+    t.eq("单条删除标记 removed", item2["status"], plan_mod.STATUS_REMOVED)
+    t.eq("删除后不再 active", plan_mod.active_items(plan_mod.load_plan(cfg)), [])
+
+    portfolio.remove_position(TARGET, cfg)
+    plan_mod.clear_plan(cfg)
+
+
 def check_leader_relax(t: Suite, cfg: Config) -> None:
     """龙头 -1 是门槛公式的一部分，任何评估入口同口径生效。
 
@@ -2029,7 +2064,7 @@ def check_menu(t: Suite, cfg: Config) -> None:
     all_argv = [av[0] for _, _, av in cli.MENU if av[0] != "__submenu__"]
     for sub in cli.SUBMENUS.values():
         all_argv += [av[0] for _, _, av in sub]
-    expect = {"weather", "status", "seed-plan", "plan-check", "plan", "run", "pos",
+    expect = {"weather", "status", "seed-plan", "plan-check", "__plan__", "run", "pos",
               "__close__", "watch", "review", "accum", "trace", "followthrough",
               "trades", "stats", "weekly", "__pos_add__", "__pos_rm__", "__confirm__",
               "__eval__", "config", "setup", "selftest", "plan-clear"}
@@ -2544,6 +2579,7 @@ def main(verbose: bool = True, cfg: Optional[Config] = None) -> int:
         check_plan_clear(t, c)
         check_plan_check_clear_prompt(t, c)
         check_plan_recheck(t, c)
+        check_plan_buy_remove(t, c, mk)
         check_leader_relax(t, c)
         check_menu(t, c)
         check_config_migration(t, tmp)

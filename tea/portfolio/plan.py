@@ -18,6 +18,7 @@ STATUS_READY = "ready_exec"
 STATUS_INVALID = "invalid"
 STATUS_EXECUTED = "executed"
 STATUS_CLEARED = "cleared"
+STATUS_REMOVED = "removed"
 
 PLAN_VERSION = 1
 
@@ -210,6 +211,22 @@ def clear_plan(cfg: Optional[Config] = None, reason: str = "") -> dict:
     return plan
 
 
+def remove_item(code: str, cfg: Optional[Config] = None, reason: str = "手动删除") -> dict:
+    """删除单条计划项（手动：不交易这只了），标记 removed 不再参与执行。"""
+    cfg = cfg or load_config()
+    plan = load_plan(cfg)
+    code = utils.norm_code(code)
+    item = find_item(plan, code)
+    if item and item.get("status") in (STATUS_PENDING, STATUS_READY):
+        item["status"] = STATUS_REMOVED
+        item["removed_at"] = utils.now().strftime("%Y-%m-%d %H:%M:%S")
+        item["removed_reason"] = reason
+        if not active_items(plan):
+            plan["status"] = STATUS_REMOVED
+        save_plan(plan, cfg)
+    return plan
+
+
 # ------------------------------------------------------------------ 11.2 变动检测
 
 def _resonance_dim_diff(old_dims: Optional[List[dict]],
@@ -351,9 +368,9 @@ def format_plan(plan: dict) -> str:
         return "交易计划：空（无次日计划）"
     lines = [f"===== 交易计划 {plan.get('planned_date')} → 执行 {plan.get('execute_date')}"
              f"（状态 {plan.get('status')}）====="]
-    for i in plan["items"]:
+    for idx, i in enumerate(plan["items"], 1):
         lines.append(
-            f"  {i.get('code')} {i.get('name')} 参考价 {utils.num(i.get('ref_price'))} "
+            f"  {idx}. {i.get('code')} {i.get('name')} 参考价 {utils.num(i.get('ref_price'))} "
             f"止损 {utils.pct(i.get('sl_pct'))} 止盈 {utils.pct(i.get('tp_pct'))} "
             f"R:R {utils.num(i.get('odds'))} 共振 {i.get('total_score')}/{i.get('pass_th')} "
             f"{i.get('identity_tier')} [{i.get('status')}]")

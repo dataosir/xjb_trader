@@ -435,6 +435,44 @@ def close_trade(code: str, price: Optional[float] = None, reason: str = "手动�
     return rec
 
 
+def buy_plan_item(code: str, shares: int, entry: Optional[float] = None,
+                  cfg: Optional[Config] = None, market: Optional[Market] = None,
+                  io: Optional[IO] = None) -> Optional[dict]:
+    """按计划买入：录入持仓（复用手动录入逻辑）+ 标记计划项 executed。
+
+    现价/成本价默认自动取现价，也可由调用方显式传 entry（用户在交互里改过价）。
+    """
+    cfg = cfg or load_config()
+    io = io or IO()
+    mk = market or Market(cfg)
+    code = utils.norm_code(code)
+    plan = plan_mod.load_plan(cfg)
+    item = plan_mod.find_item(plan, code)
+    if not item:
+        io.say(f"  计划中无 {code}")
+        return None
+    if item.get("status") not in (plan_mod.STATUS_PENDING, plan_mod.STATUS_READY):
+        io.say(f"  {code} 当前状态 {item.get('status')}，不可买入")
+        return None
+    if entry is None:
+        try:
+            entry = (mk.get_quote(code) or {}).get("price")
+        except Exception:
+            entry = None
+    if entry is None:
+        io.say(f"  取不到 {code} 现价，请手动指定成本价")
+        return None
+    shares = int(shares)
+    name = item.get("name") or code
+    res = portfolio.add_manual_position(code, name, shares, float(entry), cfg,
+                                        sl_pct=item.get("sl_pct"), tp_pct=item.get("tp_pct"))
+    plan_mod.mark_executed(code, cfg, detail={"shares": shares, "entry": float(entry),
+                                              "source": "plan_buy"})
+    accumulator.note(f"{code} 按计划买入 {shares} 股 @ {utils.num(entry)}", cfg)
+    io.say(f"  ✓ 已买入 {code} {name}：{shares} 股 @ {utils.num(entry)}，计划项标记 executed")
+    return res["pos"]
+
+
 def holdings_review(cfg: Optional[Config] = None, market: Optional[Market] = None,
                     io: Optional[IO] = None) -> dict:
     """持仓盈亏 + 种子历史对照：逐只拉现价算浮动盈亏，并回溯是否被种子选过。
