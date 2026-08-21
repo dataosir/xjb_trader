@@ -23,35 +23,73 @@ def load_records(cfg: Optional[Config] = None) -> List[dict]:
     return utils.read_jsonl(records_path(cfg))
 
 
+# 轨道优先级：同一天同一只票按「更接近可成交」的轨道保留。早盘先以观察/启动待定
+# 落盘、午后升级为「可买」时，若仍按 (date, code) 只记首条，会把「可买」样本漏掉，
+# 导致可买轨道的跟涨胜率被系统性低估。
+_TRACK_PRIORITY = {
+    "可买": 5,
+    "启动待定轨": 4,
+    "萌芽观察轨": 3,
+    "观察轨": 2,
+    "前夕观察轨": 1,
+    "趋势轨": 0,
+}
+
+
+def _track_rank(track: Optional[str]) -> int:
+    return _TRACK_PRIORITY.get(track, -1)
+
+
 def record_seed(entries: List[dict], cfg: Optional[Config] = None,
                 date: Optional[str] = None) -> dict:
     """落盘当日种子记录（供次日回填 T+1 结果），按 (date, code) 去重。
 
     seed-plan 一天可能跑多次，同一标的会被重复 append，导致 T+1 样本翻倍、胜率
-    失真。这里以 (date, code) 去重，只落首条；返回 {"added": n, "skipped": m}。
+    失真。这里以 (date, code) 去重，但同一天内同一标的的轨道可能升级（观察→启动
+    待定→可买），只记首条会把「可买」漏掉——所以按轨道优先级升级保留更高者。
+    返回 {"added": n, "skipped": m, "updated": k}。
     """
     cfg = cfg or load_config()
-    path = records_path(cfg)
     d = date or utils.today_str()
-    existing = {(r.get("date"), r.get("code"))
-                for r in load_records(cfg) if r.get("date") and r.get("code")}
-    added = skipped = 0
+    recs = load_records(cfg)
+    by_key = {(r.get("date"), r.get("code")): i
+              for i, r in enumerate(recs) if r.get("date") and r.get("code")}
+    added = skipped = updated = 0
+    changed = False
     for e in entries:
-        key = (d, e.get("code"))
-        if not e.get("code") or key in existing:
+        code = e.get("code")
+        if not code:
             skipped += 1
             continue
-        utils.append_jsonl(path, {
-            "date": d, "code": e.get("code"), "name": e.get("name"),
+        key = (d, code)
+        rec = {
+            "date": d, "code": code, "name": e.get("name"),
             "stage": e.get("stage"), "tier": e.get("tier"), "track": e.get("track"),
             "chg_pct": e.get("chg_pct"), "total_score": e.get("total_score"),
             "identity_tier": e.get("identity_tier"), "identity_score": e.get("identity_score"),
             "sector_name": e.get("sector_name"), "sector_rank": e.get("sector_rank"),
             "close": e.get("price"), "next_chg": None, "result": None,
-        })
-        existing.add(key)
-        added += 1
-    return {"added": added, "skipped": skipped}
+        }
+        if key not in by_key:
+            recs.append(rec)
+            by_key[key] = len(recs) - 1
+            added += 1
+            changed = True
+            continue
+        idx = by_key[key]
+        old = recs[idx]
+        if _track_rank(rec.get("track")) > _track_rank(old.get("track")):
+            # 用更高优先级轨道的新快照覆盖，但保留已回填的 T+1 结果（若有）。
+            rec["next_chg"] = old.get("next_chg")
+            rec["result"] = old.get("result")
+            recs[idx] = rec
+            updated += 1
+            changed = True
+        else:
+            skipped += 1
+    if changed:
+        save_records(recs, cfg)
+    return {"added": added, "skipped": skipped, "updated": updated}
 
 
 def save_records(records: List[dict], cfg: Optional[Config] = None) -> str:

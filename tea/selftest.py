@@ -2049,7 +2049,7 @@ def check_end_to_end(t: Suite, cfg: Config, mk: FakeMarket, sent: dict) -> None:
 
 
 def check_followthrough(t: Suite, cfg: Config) -> None:
-    """跟涨样本：T+1 未回填计数 + 按 (date, code) 去重。"""
+    """跟涨样本：T+1 未回填计数 + (date, code) 去重 + 轨道升级保留。"""
     t.head("跟涨样本 · T+1 回填提示与去重")
     recs = [
         {"date": "2026-08-08", "code": "600001", "name": "历史未回填",
@@ -2064,12 +2064,34 @@ def check_followthrough(t: Suite, cfg: Config) -> None:
 
     r_dup = ft_mod.record_seed([{"code": "600001", "name": "历史未回填", "price": 10.0}],
                                cfg, date="2026-08-08")
-    t.eq("record_seed 对已存在 (date,code) 去重跳过", r_dup, {"added": 0, "skipped": 1})
+    t.eq("record_seed 对已存在 (date,code) 去重跳过",
+         r_dup, {"added": 0, "skipped": 1, "updated": 0})
 
     r_new = ft_mod.record_seed([{"code": "600999", "name": "新样本", "price": 20.0}],
                                cfg, date="2026-08-10")
-    t.eq("record_seed 新 (date,code) 正常落盘", r_new, {"added": 1, "skipped": 0})
+    t.eq("record_seed 新 (date,code) 正常落盘",
+         r_new, {"added": 1, "skipped": 0, "updated": 0})
     t.eq("新增后未回填历史数 +1", ft_mod.pending_backfill(cfg), 2)
+
+    # 轨道升级：同一 (date, code) 先落低优先级轨道、午后升级为「可买」，应保留「可买」。
+    r1 = ft_mod.record_seed([{"code": "600888", "name": "升级票", "price": 5.0,
+                              "track": "观察轨", "tier": "热点降级档", "stage": "突破"}],
+                            cfg, date="2026-08-11")
+    t.eq("先落观察轨", r1, {"added": 1, "skipped": 0, "updated": 0})
+    r2 = ft_mod.record_seed([{"code": "600888", "name": "升级票", "price": 5.1,
+                              "track": "可买", "tier": "热点降级档", "stage": "突破"}],
+                            cfg, date="2026-08-11")
+    t.eq("后升级为可买", r2, {"added": 0, "skipped": 0, "updated": 1})
+    up = next(r for r in ft_mod.load_records(cfg) if r.get("code") == "600888")
+    t.eq("轨道升级为可买", up.get("track"), "可买")
+    t.eq("升级后价格更新", up.get("close"), 5.1)
+
+    # 反向：可买 → 观察轨 不应降级
+    r3 = ft_mod.record_seed([{"code": "600888", "name": "升级票", "price": 5.0,
+                              "track": "观察轨"}], cfg, date="2026-08-11")
+    t.eq("可买不降级回观察轨", r3, {"added": 0, "skipped": 1, "updated": 0})
+    up2 = next(r for r in ft_mod.load_records(cfg) if r.get("code") == "600888")
+    t.eq("轨道仍为可买", up2.get("track"), "可买")
 
 
 def check_config_migration(t: Suite, home: str) -> None:

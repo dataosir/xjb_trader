@@ -221,12 +221,18 @@ def seed_plan(cfg: Optional[Config] = None, market: Optional[Market] = None,
 
     # ---------------------------------------------------------- 跟涨样本 + 报告
     entries = _ft_entries(result)
-    ft_res = ft_mod.record_seed(entries, cfg) if entries else {"added": 0, "skipped": 0}
-    logger_mod.get_logger("scan").info("跟涨样本落盘 %s | 新增 %d | 去重跳过 %d",
+    ft_res = ft_mod.record_seed(entries, cfg) if entries else {"added": 0, "skipped": 0, "updated": 0}
+    logger_mod.get_logger("scan").info("跟涨样本落盘 %s | 新增 %d | 升级 %d | 去重跳过 %d",
                                        result.get("scan_id"),
-                                       ft_res.get("added"), ft_res.get("skipped"))
-    if ft_res.get("added"):
-        io.say(f"  已落 {ft_res['added']} 条跟涨样本（去重跳过 {ft_res['skipped']} 条），"
+                                       ft_res.get("added"), ft_res.get("updated"),
+                                       ft_res.get("skipped"))
+    if ft_res.get("added") or ft_res.get("updated"):
+        parts = []
+        if ft_res.get("added"):
+            parts.append(f"已落 {ft_res['added']} 条")
+        if ft_res.get("updated"):
+            parts.append(f"升级 {ft_res['updated']} 条")
+        io.say(f"  跟涨样本 {'、'.join(parts)}（去重跳过 {ft_res.get('skipped', 0)} 条），"
                f"次日 close-review 自动回填 T+1 结果")
     elif ft_res.get("skipped"):
         io.say(f"  跟涨样本全部与历史重复（{ft_res['skipped']} 条），未新增落盘")
