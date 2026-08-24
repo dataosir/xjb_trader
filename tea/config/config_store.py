@@ -261,9 +261,10 @@ DEFAULTS: Dict[str, Any] = {
         # ① 板块强度 2
         # 板块排名门槛收紧 8→3：实证排名 1-3 板块 T+1 胜率 50%、T+5 均 +3.3%，
         # 而排名 6~15 板块 T+1 胜率仅 0~17%、T+5 均 -7%。2 分只给最强前三。
+        # 1 分档同步收紧 15→5：与「只做前 5 板块」一致，不给中游板块（6~15）留口子。
         "sector_rank_full": 3,
         "sector_limit_up_full": 2,
-        "sector_rank_half": 15,
+        "sector_rank_half": 5,
         "sector_limit_up_half": 1,
         "sector_inner_top_pct": 0.10,
         "sector_inner_bonus": 1,
@@ -325,7 +326,7 @@ DEFAULTS: Dict[str, Any] = {
         "inner_mid_delta": 8.0,
         "inner_tail_pct": 0.50,
         "inner_tail_delta": -25.0,
-        "sector_rank_strong": 10,
+        "sector_rank_strong": 5,
         "sector_rank_strong_delta": 15.0,
         "sector_rank_mid": 20,
         "sector_rank_mid_delta": 8.0,

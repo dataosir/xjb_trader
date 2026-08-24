@@ -165,10 +165,12 @@ def score_nine(quote: dict, ind: dict, sector: dict, sent: Optional[dict],
         rank = (sector or {}).get("rank")
         zt = int((sector or {}).get("limit_up_count") or 0)
         rank_pct = (sector or {}).get("stock_rank_pct")
-        if rank is not None and rank <= int(c("sector_rank_full", 8)) and zt >= int(c("sector_limit_up_full", 2)):
-            s1, d1 = 2, f"板块第 {rank} 名（≤8）且涨停 {zt} 家（≥2）"
-        elif rank is not None and rank <= int(c("sector_rank_half", 15)) and zt >= int(c("sector_limit_up_half", 1)):
-            s1, d1 = 1, f"板块第 {rank} 名（≤15）且涨停 {zt} 家（≥1）"
+        full_rank, full_zt = int(c("sector_rank_full", 8)), int(c("sector_limit_up_full", 2))
+        half_rank, half_zt = int(c("sector_rank_half", 15)), int(c("sector_limit_up_half", 1))
+        if rank is not None and rank <= full_rank and zt >= full_zt:
+            s1, d1 = 2, f"板块第 {rank} 名（≤{full_rank}）且涨停 {zt} 家（≥{full_zt}）"
+        elif rank is not None and rank <= half_rank and zt >= half_zt:
+            s1, d1 = 1, f"板块第 {rank} 名（≤{half_rank}）且涨停 {zt} 家（≥{half_zt}）"
         else:
             s1 = 0
             d1 = (f"板块第 {rank} 名 / 涨停 {zt} 家（不达标）" if rank else "板块未识别")
@@ -272,7 +274,6 @@ def score_nine(quote: dict, ind: dict, sector: dict, sent: Optional[dict],
         s5, d5 = 1, f"量价一般（涨幅 {utils.pct(chg)} 量比 {utils.num(vr)}）"
     if not ind_stale:
         amt, to = quote.get("amount_yi"), quote.get("turnover")
-        bias = (ind or {}).get("bias_ma20")
         each = int(c("vp_penalty_each", 1))
         if amt is not None and amt < float(c("amount_min_yi", 2.0)):
             penalties.append(f"成交额 {amt:.2f}亿 <2亿")
@@ -282,8 +283,9 @@ def score_nine(quote: dict, ind: dict, sector: dict, sent: Optional[dict],
             penalties.append(f"换手 {to:.2f}% <2%")
         if to is not None and to > float(c("turnover_max_pct", 20.0)):
             penalties.append(f"换手 {to:.2f}% >20%")
-        if bias is not None and bias > float(c("bias_penalty_pct", 8.0)):
-            penalties.append(f"乖离 {bias:.2f}% >8%")
+        # 「乖离>8%」扣分已移除：乖离是追高/回踩风险信号，应交由 veto 的
+        # bias_soft/bias_hard（普通 15% / 龙头 25% / 硬 30%）统一把关，而不是在
+        # 量价结构里再用更严的 8% 罚一遍——实证这是在反向惩罚强势票（高乖离反而赢）。
         if penalties:
             s5 -= each * len(penalties)
             d5 += "；扣分：" + "、".join(penalties)
@@ -405,6 +407,8 @@ def evaluate(code: str, market: Optional[Market] = None, cfg: Optional[Config] =
     total, threshold = scored["total"], th["threshold"]
 
     reasons: List[str] = []
+    # 门槛用绝对分（total >= threshold），刻意不用 total/max 归一化：满分 max 会随
+    # 消息面中性化在 8~9 之间浮动，绝对门槛 6 是一条固定保守线，避免 max 变化让门槛漂移。
     if vt["rejected"]:
         verdict = VERDICT_REJECT
         reasons.append("硬否决：" + "；".join(i["label"] for i in vt["hard"]))

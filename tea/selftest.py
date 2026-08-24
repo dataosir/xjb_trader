@@ -1318,12 +1318,12 @@ def check_identity(t: Suite, cfg: Config, mk: FakeMarket) -> dict:
     t.eq("身份层级", idn["tier"], ident_mod.TIER_LEADER)
     t.ok("热点板块判定", bool(idn["hot_sector"]), f"板块涨 {sec['chg']}% ≥6%")
 
-    # 杂毛：后 50% -25、市值 -10、均线 -10、板块排名 +15
+    # 杂毛：后 50% -25、市值 -10、均线 -10、板块排名 +8（银行排名 7，>5 落入中档）
     q2 = mk.get_quote("600999")
     sec2 = mk.sector_context(q2)
     ind2 = mk.get_indicators("600999", q2["price"])
     idn2 = ident_mod.judge(q2, sec2, ind2, cfg)
-    t.eq("杂毛身份分", idn2["score"], 50 - 25 + 15 - 10 - 10, tol=0.05)
+    t.eq("杂毛身份分", idn2["score"], 50 - 25 + 8 - 10 - 10, tol=0.05)
     t.eq("杂毛层级", idn2["tier"], ident_mod.TIER_ZAMAO)
     t.ok("杂毛 flags ≥2", len(idn2["flags"]) >= 2, f"flags={idn2['flags']}")
 
@@ -1424,6 +1424,14 @@ def check_scoring(t: Suite, cfg: Config, mk: FakeMarket, sent: dict, lv: dict) -
     q_hi = dict(q, turnover=22.0)
     sc2 = preflight.score_nine(q_hi, ind, sec, sent, lv, has_news=True, cfg=cfg)
     t.eq("换手 22% 触发量价扣分", sc2["total"], 8)
+
+    # 「乖离>8%」量价扣分已移除：乖离交由 veto 统一把关（普通 15% / 龙头 25%），
+    # 不再在量价结构里用更严的 8% 罚强势票（高乖离反而赢）。
+    ind_hi_bias = dict(ind, bias_ma20=24.0)
+    sc_hibias = preflight.score_nine(q, ind_hi_bias, sec, sent, lv, has_news=True, cfg=cfg)
+    t.ok("乖离 24% 不再触发量价扣分",
+         not any("乖离" in p for p in sc_hibias["penalties"]),
+         f"penalties={sc_hibias['penalties']}")
 
     # 板块排名磁盘兜底（stale）：板块强度整维归零，不拿昨日排名给假分。
     sec_stale = dict(sec, stale=True)
