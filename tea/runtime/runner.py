@@ -240,6 +240,14 @@ def seed_plan(cfg: Optional[Config] = None, market: Optional[Market] = None,
     if pending_ft:
         io.say(f"  ⏳ 仍有 {pending_ft} 条历史跟涨样本未回填 T+1，"
                f"跑 `tea review` 补齐后跟涨胜率才有数据")
+    # 归档提醒进 SEED 报告：控制台消息转瞬即逝，写进 notes 才能随 MD 存档复盘。
+    # 「宁缺毋滥」与「回填提醒」是积累数据闭环的关键，不该只在控制台一闪而过。
+    if not buyable:
+        result.setdefault("notes", []).append("宁缺毋滥：今日无可买标的，不写计划")
+    if pending_ft:
+        result.setdefault("notes", []).append(
+            f"⏳ 仍有 {pending_ft} 条历史跟涨样本未回填 T+1，"
+            f"跑 `tea review` 补齐后跟涨胜率才有数据")
 
     # ---------------------------------------------------------- 每日价格跟踪
     codes = [e.get("code") for e in entries if e.get("code")]
