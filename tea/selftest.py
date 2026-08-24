@@ -1399,7 +1399,7 @@ def check_scoring(t: Suite, cfg: Config, mk: FakeMarket, sent: dict, lv: dict) -
     sc = preflight.score_nine(q, ind, sec, sent, lv, has_news=True, cfg=cfg)
     by_no = {d["no"]: d for d in sc["dims"]}
 
-    t.eq("①板块强度（排名1≤8 且涨停2≥2，内前10% +1 封顶2）", by_no[1]["score"], 2)
+    t.eq("①板块强度（排名1≤3 且涨停2≥2，内前10% +1 封顶2）", by_no[1]["score"], 2)
     t.eq("②大盘趋势（强趋势：上方 + 上行）", by_no[2]["score"], 1)
     t.eq("③消息面（有催化）", by_no[3]["score"], 1)
     t.eq("④市值区间（120亿 ∈ 50~300）", by_no[4]["score"], 2)
@@ -2265,12 +2265,19 @@ def check_followthrough(t: Suite, cfg: Config) -> None:
         "tier": "严格档", "stage": "突破", "total_score": 6, "pass_threshold": 6,
         "scoring_dims": [{"name": "板块强度", "score": 2, "max": 2}],
         "market_score": 47.0, "market_stance": "防守", "market_ma20_above": False,
+        "bias_ma20": 12.5, "atr_pct": 5.2, "vol_ratio": 1.8,
+        "turnover": 9.5, "intraday": 0.72,
     }], cfg, date="2026-08-12")
     t.eq("带市场/维度字段的样本落盘", r4, {"added": 1, "skipped": 0, "updated": 0})
     f = next(r for r in ft_mod.load_records(cfg) if r.get("code") == "600787")
     t.eq("六维共振随样本落盘", (f.get("scoring_dims") or [{}])[0].get("name"), "板块强度")
     t.eq("市场姿态随样本落盘", f.get("market_stance"), "防守")
     t.eq("大盘趋势随样本落盘", f.get("market_ma20_above"), False)
+    t.eq("乖离随样本落盘", f.get("bias_ma20"), 12.5)
+    t.eq("ATR%随样本落盘", f.get("atr_pct"), 5.2)
+    t.eq("量比随样本落盘", f.get("vol_ratio"), 1.8)
+    t.eq("换手随样本落盘", f.get("turnover"), 9.5)
+    t.eq("分时位随样本落盘", f.get("intraday"), 0.72)
 
     # 多周期回填：T+1/T+2/T+3/T+5 一次算好
     d = _end_dates(30)[10]

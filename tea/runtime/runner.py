@@ -281,6 +281,7 @@ def _ft_entries(result: dict) -> List[dict]:
     for default_track, evs in groups:
         for ev in (evs or []):
             q = ev.get("quote") or {}
+            ind = ev.get("ind") or {}
             entries.append({
                 "code": ev.get("code"), "name": ev.get("name"),
                 "stage": (ev.get("stage") or {}).get("stage"),
@@ -294,6 +295,12 @@ def _ft_entries(result: dict) -> List[dict]:
                 "sector_name": (ev.get("sector") or {}).get("name"),
                 "sector_rank": (ev.get("sector") or {}).get("rank"),
                 "scoring_dims": (ev.get("scoring") or {}).get("dims"),
+                # 技术指标（T+N 回填后做逐因子胜率归因）：乖离/波动/量比/换手/分时位
+                "bias_ma20": ind.get("bias_ma20"),
+                "atr_pct": ind.get("atr_pct"),
+                "vol_ratio": q.get("vol_ratio"),
+                "turnover": q.get("turnover"),
+                "intraday": ev.get("intraday"),
                 **market,
             })
     return entries

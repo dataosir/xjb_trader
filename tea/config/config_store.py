@@ -259,7 +259,9 @@ DEFAULTS: Dict[str, Any] = {
     "scoring": {
         "max_total": 9,
         # ① 板块强度 2
-        "sector_rank_full": 8,
+        # 板块排名门槛收紧 8→3：实证排名 1-3 板块 T+1 胜率 50%、T+5 均 +3.3%，
+        # 而排名 6~15 板块 T+1 胜率仅 0~17%、T+5 均 -7%。2 分只给最强前三。
+        "sector_rank_full": 3,
         "sector_limit_up_full": 2,
         "sector_rank_half": 15,
         "sector_limit_up_half": 1,
@@ -399,9 +401,9 @@ DEFAULTS: Dict[str, Any] = {
         "seed_max_output": 2,
         "seed_min_identity": 70,
         "seed_min_pick_score": 60,
-        # 板块硬门槛排名上限，适度放宽以捕获排名稍靠后但强度仍够的板块，
-        # 避免在弱平衡市中漏掉候选。原值 8→10（需结合实盘验证）。
-        "seed_min_sector_rank": 10,
+        # 板块硬门槛排名上限，收紧 10→5：排名 6~15 的板块 T+1 胜率 0~17%，
+        # 是当前 19% 总胜率的最大拖累，只做最强前 5 板块。
+        "seed_min_sector_rank": 5,
         "seed_min_sector_limit_up": 2,
         "seed_cap_max": 300,
         "seed_rank_pct": 0.35,
@@ -469,8 +471,9 @@ DEFAULTS: Dict[str, Any] = {
         "mild_score_max": 100.0,
         "sector_relax_score": 60.0,
         # 无涨停通道：弱市好板块常无涨停，阈值从 70 下调到 65 扩容
+        # 排名上限收紧 12→6：无涨停板块本就更弱，再放排名 7~12 的中游板块只会拉低胜率。
         "sector_relax_score_nozt": 65.0,
-        "sector_relax_rank_nozt": 12,
+        "sector_relax_rank_nozt": 6,
         "diversify_replace_last": True,
         "shadow_bonus": 18.0,
         "shadow_near_rank": 6,
