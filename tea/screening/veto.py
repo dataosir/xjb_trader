@@ -133,6 +133,7 @@ def check(quote: dict, ind: Optional[dict] = None, identity: Optional[dict] = No
                  f"MA20 乖离 {bias:.2f}% > {soft:.0f}%（过热，等回踩）", bias, soft)
 
     # ⑥ 分时高位（仅盘中生效；非盘中且开启跳过时被静默略过并留痕）
+    strong_exempt = False
     if intraday_active and intraday is not None:
         hard = float(cfg.s("veto_intraday_hard_pct", 0.95))
         soft = intraday_limit(identity, cfg)
@@ -140,8 +141,18 @@ def check(quote: dict, ind: Optional[dict] = None, identity: Optional[dict] = No
             veto("intraday_hard", "分时封顶", KIND_HARD,
                  f"分时位置 {intraday:.0%} ≥ {hard:.0%}（硬否决）", intraday, hard)
         elif intraday > soft:
-            veto("intraday_high", "分时高位", KIND_SOFT,
-                 f"分时位置 {intraday:.0%} > {soft:.0%}（追高风险，等回踩）", intraday, soft)
+            # 强势豁免：放量上涨 + 均线多头的强势票贴日内高是强势确认，不按「追高」否决；
+            # 弱势票（缩量/均线失守）贴高才是真追高，才软否决。
+            # 依据：招金黄金 08-21 分时 91%（龙头）被误杀，T+1 +7.56%。
+            strong = (cfg.get("veto.intraday_strong_exempt", True)
+                      and chg is not None and chg > 0
+                      and (quote.get("vol_ratio") or 0) >= float(cfg.get("scoring.vp_vol_ratio_strong", 1.2))
+                      and bool(ind.get("ma_bull")))
+            if strong:
+                strong_exempt = True
+            else:
+                veto("intraday_high", "分时高位", KIND_SOFT,
+                     f"分时位置 {intraday:.0%} > {soft:.0%}（追高风险，等回踩）", intraday, soft)
 
     hard_items = [i for i in items if i["kind"] == KIND_HARD]
     soft_items = [i for i in items if i["kind"] == KIND_SOFT]
@@ -157,6 +168,8 @@ def check(quote: dict, ind: Optional[dict] = None, identity: Optional[dict] = No
         # 留痕：分时否决是否因非盘中而被跳过（供报告/scan_details/观察池快照追溯）
         "intraday_skipped": intraday_skipped,
         "intraday_note": intraday_note,
+        # 留痕：分时高位是否因强势（放量+多头）被豁免，未按追高软否决
+        "strong_exempt": strong_exempt,
     }
 
 

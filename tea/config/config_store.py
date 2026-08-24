@@ -369,6 +369,9 @@ DEFAULTS: Dict[str, Any] = {
         # 常态，分时位置≈1.0 会把龙头误判成「追高/封顶」。盘前/午间/盘后跳过该否决
         # 并留痕（veto.intraday_skipped）。T+1 真实买入在 14:00–14:45 盘中会重新评估。
         "skip_intraday_check_off_session": True,
+        # 分时高位软否决的强势豁免：放量上涨(chg>0 且 量比≥1.2 且 均线多头)的强势票
+        # 贴日内高是强势确认，不按「追高」否决。招金黄金 08-21 分时 91% 被误杀 T+1 +7.56%。
+        "intraday_strong_exempt": True,
         "limit_up_pct_base": 10.0,
         "soft_items": ["intraday_high", "bias_ma20", "near_limit_up", "chase_high"],
     },

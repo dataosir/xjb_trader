@@ -1484,10 +1484,21 @@ def check_veto(t: Suite, cfg: Config, mk: FakeMarket, idn: dict) -> None:
     t.ok("普通乖离 16% >15% → 软否决", "bias_ma20" in names(r, "soft"))
     r = veto_mod.check(base, ind, idn, 0.96, cfg)
     t.ok("分时 96% ≥95% → 硬否决", "intraday_hard" in names(r, "hard"))
-    r = veto_mod.check(base, ind, {"tier": ident_mod.TIER_FOLLOW, "score": 50}, 0.80, cfg)
-    t.ok("普通分时 80% >75% → 软否决", "intraday_high" in names(r, "soft"))
+    # 强势豁免：TARGET 是放量上涨+多头，改涨幅为负使其变「弱势」，才应被分时高位否决
+    r = veto_mod.check(dict(base, chg_pct=-1.0), ind,
+                       {"tier": ident_mod.TIER_FOLLOW, "score": 50}, 0.80, cfg)
+    t.ok("弱势跟风分时 80% >75% → 软否决", "intraday_high" in names(r, "soft"))
     r = veto_mod.check(base, ind, idn, 0.80, cfg)
     t.ok("龙头分时 80% ≤85% → 放行", not r["has_veto"])
+    r = veto_mod.check(base, ind, {"tier": ident_mod.TIER_FOLLOW, "score": 50}, 0.90, cfg)
+    t.ok("强势票分时 90% 豁免（放量+多头）", not r["has_veto"] and r.get("strong_exempt"))
+    old_exempt = cfg.get("veto.intraday_strong_exempt")
+    cfg.set("veto.intraday_strong_exempt", False)
+    try:
+        r = veto_mod.check(base, ind, {"tier": ident_mod.TIER_FOLLOW, "score": 50}, 0.90, cfg)
+        t.ok("关闭强势豁免后分时 90% → 软否决", "intraday_high" in names(r, "soft"))
+    finally:
+        cfg.set("veto.intraday_strong_exempt", old_exempt)
 
     # 20cm 板阈值等比放大：创业板涨停区 = 9.5×2 = 19%
     gem = _quote("300123", "创业测试", 30.0, 15.0, HOT_NAME)
