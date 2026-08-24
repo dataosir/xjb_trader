@@ -269,7 +269,8 @@ def finalize_candidates(details: List[dict], evaluations: List[dict],
                            + ("（超单日输出上限，未写计划）" if ev.get("code") in dropped else ""))
         elif ev.get("track") == watch_pool.TRACK_PENDING:
             d["verdict"] = CAND_WATCH
-            d["reason"] = f"共振 {ev.get('total_score')}/{ev.get('pass_threshold')} 差 {ev.get('gap')} 分 → 待启动"
+            d["reason"] = (ev.get("winrate_gate")
+                           or f"共振 {ev.get('total_score')}/{ev.get('pass_threshold')} 差 {ev.get('gap')} 分 → 待启动")
         else:
             d["verdict"] = CAND_NEAR
             d["reason"] = "；".join(ev.get("reasons") or []) or "共振分不足"
@@ -423,18 +424,20 @@ class Screener:
         min_rank = int(cfg.s("seed_min_sector_rank", 8))
         min_zt = int(cfg.s("seed_min_sector_limit_up", 2))
         relax_score = float(c("sector_relax_score", 60.0))
+        relax_rank = int(c("sector_relax_rank", 5))
         relax_score_nozt = float(c("sector_relax_score_nozt", 65.0))
         relax_rank_nozt = int(c("sector_relax_rank_nozt", 12))
         qualified = []
         for e in scored:
             ok_hard = e["rank"] <= min_rank and e["limit_up_count"] >= min_zt
-            ok_relax = e["limit_up_count"] >= 1 and e["total_score"] >= relax_score
+            ok_relax = (e["limit_up_count"] >= 1 and e["total_score"] >= relax_score
+                        and e["rank"] <= relax_rank)
             ok_nozt = e["limit_up_count"] == 0 and e["total_score"] >= relax_score_nozt and e["rank"] <= relax_rank_nozt
             if ok_hard or ok_relax or ok_nozt:
                 if ok_hard:
                     e["gate"] = "硬门槛"
                 elif ok_relax:
-                    e["gate"] = f"放宽（涨停1家+综合分≥{relax_score:.0f}）"
+                    e["gate"] = f"放宽（涨停1家+综合分≥{relax_score:.0f} 且排名≤{relax_rank}）"
                 else:
                     e["gate"] = f"放宽（综合分≥{relax_score_nozt:.0f} 无涨停）"
                 qualified.append(e)
@@ -677,6 +680,28 @@ class Screener:
                                          reason=f"超出单次预审上限 {cap} 只"))
         return {"passed": passed, "soft": soft, "candidates": details}
 
+    # ============================================================== 胜率因子门槛（阶段 A）
+    def _winrate_gate(self, ev: dict) -> Optional[str]:
+        """把历史胜率低的特征从「可买」降级为观察。
+
+        依据 62 条回填样本（跨 T+1/T+3/T+5 单调）：板块排名 1-3 胜率 50%、
+        6~15 仅 0~17%；突破阶段仅 6%（T+3 -5.2%）。返回降级原因，放行返回 None。
+        """
+        cfg = self.cfg
+        if not cfg.s("winrate_gate_enabled", True):
+            return None
+        sec_rank = (ev.get("sector") or {}).get("rank")
+        if sec_rank is None:
+            return None  # 排名缺失不误杀
+        buyable_max = int(cfg.s("winrate_sector_rank_buyable_max", 5))
+        break_max = int(cfg.s("winrate_breakout_sector_rank_max", 3))
+        if sec_rank > buyable_max:
+            return f"板块排名 {sec_rank} > {buyable_max}（历史胜率 0~17%）→ 降级观察"
+        stage = (ev.get("stage") or {}).get("stage")
+        if stage == preflight.STAGE_BREAK and sec_rank > break_max:
+            return f"突破 + 板块排名 {sec_rank} > {break_max}（历史胜率 6%）→ 降级观察"
+        return None
+
     # ============================================================== 第 4 步
     def preflight_outputs(self, evaluations: List[dict], tracer: Optional[seed_trace.Tracer] = None) -> dict:
         """预审三档输出：可买 / 待启动观察 / 近失。"""
@@ -692,6 +717,13 @@ class Screener:
             ft = followthrough.evaluate((ev.get("stage") or {}).get("stage"),
                                         ev.get("tier_label"), ev.get("track"), cfg)
             ev["followthrough"] = ft
+            # 胜率因子门槛（阶段 A）：历史低胜率特征从「可买」降级观察。PASS 的 gap≤0，
+            # 降级为 WATCH 后自然落入下面的「差1分→观察轨」分支（gap≤1 恒成立）。
+            if ev.get("verdict") == preflight.VERDICT_PASS:
+                wr_note = self._winrate_gate(ev)
+                if wr_note:
+                    ev["verdict"] = preflight.VERDICT_WATCH
+                    ev["winrate_gate"] = wr_note
             if ev.get("verdict") == preflight.VERDICT_PASS:
                 buyable.append(ev)
             elif gap <= gap_watch:
@@ -699,8 +731,9 @@ class Screener:
                 ev["triggers"] = followthrough.trigger_conditions(ev, cfg)
                 watch.append(ev)
                 if tracer:
-                    tracer.add(seed_trace.STEP_PREFLIGHT, ev["code"], ev["name"], "差1分→启动待定轨",
-                               f"共振 {ev.get('total_score')}/{ev.get('pass_threshold')}")
+                    tracer.add(seed_trace.STEP_PREFLIGHT, ev["code"], ev["name"],
+                               "胜率因子→观察轨" if ev.get("winrate_gate") else "差1分→启动待定轨",
+                               ev.get("winrate_gate") or f"共振 {ev.get('total_score')}/{ev.get('pass_threshold')}")
             else:
                 near.append(ev)
                 if tracer:

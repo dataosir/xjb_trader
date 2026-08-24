@@ -1681,6 +1681,30 @@ def check_market_trend_deduction(t: Suite, cfg: Config, mk: FakeMarket) -> None:
          f"sectors_n={len(res.get('sectors') or [])}")
 
 
+def check_winrate_gate(t: Suite, cfg: Config, mk: FakeMarket) -> None:
+    """胜率因子门槛：历史低胜率特征从「可买」降级观察。"""
+    t.head("扫描 · 胜率因子门槛（阶段 A）")
+    sc = screener_mod.Screener(cfg, mk)
+
+    def gate(rank, stage):
+        ev = {"sector": {"rank": rank}, "stage": {"stage": stage}}
+        return sc._winrate_gate(ev)
+
+    t.ok("板块排名 6 > 5 → 降级", bool(gate(6, "过热")))
+    t.ok("板块排名 5 ≤ 5 → 放行", gate(5, "过热") is None)
+    t.ok("突破 + 排名 4 > 3 → 降级", bool(gate(4, "突破")))
+    t.ok("突破 + 排名 3 ≤ 3 → 放行", gate(3, "突破") is None)
+    t.ok("排名缺失不误杀", gate(None, "突破") is None)
+
+    # 总开关关闭 → 全部放行
+    old = cfg.get("strategy.winrate_gate_enabled")
+    cfg.set("strategy.winrate_gate_enabled", False)
+    try:
+        t.ok("关闭开关后排名 6 放行", gate(6, "过热") is None)
+    finally:
+        cfg.set("strategy.winrate_gate_enabled", old)
+
+
 def check_seed(t: Suite, cfg: Config, mk: FakeMarket, sent: dict) -> dict:
     t.head("扫描 · 种子四步流（§9）")
     sc = screener_mod.Screener(cfg, mk)
@@ -2712,6 +2736,7 @@ def main(verbose: bool = True, cfg: Optional[Config] = None) -> int:
         check_gates(t, c, mk, sent)
         check_seed(t, c, mk, sent)
         check_market_trend_deduction(t, c, mk)
+        check_winrate_gate(t, c, mk)
         check_plan_labels(t, c, mk, sent)
         check_plan_clear(t, c)
         check_plan_check_clear_prompt(t, c)

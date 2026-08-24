@@ -386,6 +386,11 @@ DEFAULTS: Dict[str, Any] = {
         "gray_ratio": 0.30,
         "confirm_ratio": 0.70,
         "pass_threshold": 6,
+        # 胜率因子门槛（阶段 A 硬规则）：历史胜率低的特征强制降级观察，不参与可买。
+        # 依据 62 条回填样本：板块排名 1-3 胜率 50%、6~15 仅 0~17%；突破阶段仅 6%。
+        "winrate_gate_enabled": True,
+        "winrate_sector_rank_buyable_max": 5,
+        "winrate_breakout_sector_rank_max": 3,
         # R:R 门槛 3 → 2：止损硬顶 6%（atr_sl_hard_max_pct）+ 止盈上限 15%
         # （atr_tp_cap_pct）+ 双边滑点 0.5% 的结构下，含滑点最大盈亏比 ≈2.1，
         # 3 恒不可达 → 引擎结构性地出不了「可买」。降到 2 后 R:R 由「止盈抬升」
@@ -471,6 +476,8 @@ DEFAULTS: Dict[str, Any] = {
         "mild_chg_below_limit_up": 0.2,
         "mild_score_max": 100.0,
         "sector_relax_score": 60.0,
+        # 涨停1家放宽通道的排名上限（原无上限，会放排名 9~15 的中游板块进池）。
+        "sector_relax_rank": 5,
         # 无涨停通道：弱市好板块常无涨停，阈值从 70 下调到 65 扩容
         # 排名上限收紧 12→6：无涨停板块本就更弱，再放排名 7~12 的中游板块只会拉低胜率。
         "sector_relax_score_nozt": 65.0,
