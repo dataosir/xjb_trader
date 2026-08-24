@@ -16,7 +16,7 @@ from typing import Any, Callable, Dict, Iterator, List, Optional, Tuple
 from tea.config.config_store import Config
 from tea.core import utils
 from ..errors import MarketError
-from ..indicators import ma
+from ..indicators import ma, ma_slope_pct
 
 
 def resolve_symbol(code: str = "", secid: Optional[str] = None) -> Tuple[str, str]:
@@ -63,11 +63,19 @@ def index_double_route(point_chg: Callable[[], Tuple[Optional[float], Optional[f
             chg = round((closes[-1] / closes[-2] - 1) * 100, 2)
     if point is None:
         raise quote_err or MarketError("指数点位取数失败")
+    # 更稳的趋势定义：单看「现价是否高于 MA20」在贴线处会来回翻转，于是补两个
+    # 量纲不同的信号——点位相对 MA20 的乖离（带缓冲）与 MA20 自身斜率（方向）。
+    ma20_bias = None
+    if ma20 and point:
+        ma20_bias = (point / ma20 - 1) * 100.0
+    ma20_slope = ma_slope_pct(rows, ma_window) if rows else None
     return {
         "point": point,
         "chg_pct": chg,
         "ma20": ma20,
         "ma20_above": (ma20 is not None and point > ma20),
+        "ma20_bias_pct": round(ma20_bias, 3) if ma20_bias is not None else None,
+        "ma20_slope_pct": round(ma20_slope, 3) if ma20_slope is not None else None,
     }
 
 

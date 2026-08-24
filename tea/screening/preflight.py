@@ -182,14 +182,39 @@ def score_nine(quote: dict, ind: dict, sector: dict, sent: Optional[dict],
         s1 = int(utils.clamp(s1, 0, int(c("sector_dim_cap", 2))))
     dims.append({"no": 1, "name": "板块强度", "max": 2, "score": s1, "detail": d1})
 
-    # ② 大盘趋势（1）
+    # ② 大盘趋势（分级扣分 -1~+1，扣分封顶 -1）
+    # 更稳的趋势定义：位置（点位 vs MA20，带缓冲）+ 方向（MA20 斜率）合成 -2~+2
+    # 的态势，再映射成共振分加减——弱势时扣除、强势时 +1，替代原来「涨 + MA20 上」
+    # 的二元 0/1 硬判定，也替代已被移除的大盘趋势硬闸。
+    # 扣分封顶 -1：弱势市满分 6 = 门槛 6，完美票仍有机会过，而不是被锁死。
     idx = (sent or {}).get("index") or {}
-    ichg, above = idx.get("chg_pct"), idx.get("ma20_above")
-    if ichg is not None and ichg > 0 and above:
-        s2, d2 = 1, f"上证 {ichg:+.2f}% 且在 MA20 上方"
+    point, ma20 = idx.get("point"), idx.get("ma20")
+    bias = idx.get("ma20_bias_pct")
+    if bias is None and point and ma20:
+        bias = (point / ma20 - 1) * 100.0
+    slope = idx.get("ma20_slope_pct")
+    buf = float(c("market_trend_bias_buffer", 0.3))
+    slope_th = float(c("market_trend_slope_th", 0.2))
+
+    pos = 1 if (bias is not None and bias > buf) else (-1 if (bias is not None and bias < -buf) else 0)
+    dirn = 1 if (slope is not None and slope > slope_th) else (-1 if (slope is not None and slope < -slope_th) else 0)
+    trend = pos + dirn  # -2 ~ +2
+
+    def _sig(v: Optional[float]) -> str:
+        return "—" if v is None else f"{v:+.2f}%"
+
+    if point is None and ma20 is None and slope is None:
+        s2, d2 = 0, "大盘数据缺失"
+    elif trend >= 2:
+        s2, d2 = 1, f"大盘强趋势（点位较 MA20 {_sig(bias)}、MA20 斜率 {_sig(slope)}）"
+    elif trend == 1:
+        s2, d2 = 0, f"大盘偏强未确认（点位较 MA20 {_sig(bias)}、MA20 斜率 {_sig(slope)}）"
+    elif trend == 0:
+        s2, d2 = 0, f"大盘震荡（点位较 MA20 {_sig(bias)}、MA20 斜率 {_sig(slope)}）"
+    elif trend == -1:
+        s2, d2 = -1, f"大盘偏弱 → 共振 -1（点位较 MA20 {_sig(bias)}、MA20 斜率 {_sig(slope)}）"
     else:
-        s2, d2 = 0, (f"上证 {ichg:+.2f}%，MA20 {'上' if above else '下'}方"
-                     if ichg is not None else "大盘数据缺失")
+        s2, d2 = -1, f"大盘弱势 → 共振 -1（点位较 MA20 {_sig(bias)}、MA20 斜率 {_sig(slope)}）"
     dims.append({"no": 2, "name": "大盘趋势", "max": 1, "score": s2, "detail": d2})
 
     # ③ 消息面（1）

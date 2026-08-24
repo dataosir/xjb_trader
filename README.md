@@ -189,6 +189,21 @@ python3 -m tea config set market.data_sources '["eastmoney","tencent","sina"]'
 
 境外环境如需走代理取东财，置 `market.use_env_proxy: true`。
 
+### 网络要求
+
+数据源走公开行情接口，内网 / 防火墙环境需放通以下域名（按五家数据源分列）：
+
+| 数据源 | 需放通的域名 |
+| --- | --- |
+| 东财 | `push2.eastmoney.com` |
+| 腾讯 | `qt.gtimg.cn`、`web.ifzq.gtimg.cn` |
+| 新浪 | `hq.sinajs.cn`、`money.finance.sina.com.cn` |
+| 网易 | `api.money.126.net` |
+| 凤凰 | `api.finance.ifeng.com` |
+
+- 新浪的报价 / K 线接口有 **Referer 硬要求**：请求头不带 `Referer: https://finance.sina.com.cn` 会被直接 403。放通域名时必须同时允许该 Referer，否则新浪这一级始终不可用。
+- 若内网只放通了东财，其余四家反而会拖慢降级链（每级都要等超时）。此时建议退回单源：`python3 -m tea config set market.data_sources '["eastmoney"]'`。
+
 > **风险与免责声明**：本项目仅用于个人学习与交易纪律研究，不构成任何投资建议。引擎输出的 `BUY` 只表示符合预设纪律条件，不是盈利保证。行情数据来自第三方公开接口，可能延迟、出错或随时停服。引擎不对接任何券商交易接口，不会自动下单。首次使用建议先用 `eval` 空跑至少两周。
 
 ---

@@ -268,8 +268,14 @@ DEFAULTS: Dict[str, Any] = {
         "sector_inner_tail_pct": 0.50,
         "sector_inner_penalty": 1,
         "sector_dim_cap": 2,
-        # ② 大盘趋势 1
+        # ② 大盘趋势（分级共振扣分，范围 -1~+1，扣分封顶 -1）
+        # 更稳的趋势定义：不用「现价是否高于 MA20」的单点二元，而是位置（带缓冲）
+        # + 方向（MA20 斜率）两个信号合成 -2~+2 的态势，再映射成共振分的加减。
+        # 缓冲带消掉贴线震荡的来回翻转；斜率看的是中期成本重心方向，比当日涨跌稳。
+        # 扣分封顶 -1：弱势市满分 6 = 门槛 6，完美票仍有机会过，而不是被锁死。
         "index_dim_max": 1,
+        "market_trend_bias_buffer": 0.3,
+        "market_trend_slope_th": 0.2,
         # ③ 消息面 1
         "news_dim_max": 1,
         # ④ 市值 2
@@ -435,7 +441,8 @@ DEFAULTS: Dict[str, Any] = {
         "block_off_window_eval": True,
         "require_plan_for_new_open": True,
         "require_standard_window_for_buy": True,
-        "block_new_eval_when_index_below_ma20": True,
+        # 上证 MA20 下方不再硬拦（原 block_new_eval_when_index_below_ma20）：
+        # 弱势市由共振「大盘趋势」维分级扣分表达，避免与评分重复计数。
         "cancel_high_score_min": 7,
 
         "defend_stance_bump": 1,
@@ -503,10 +510,10 @@ DEFAULTS: Dict[str, Any] = {
         "turnover_max": 20.0,
         "leader_pass_bonus": 1,
         "leader_pass_floor": 6,
-        # 大盘趋势硬闸：上证不在「涨 + 站上 MA20」时禁止新开（避免逆势选股）。
-        # 近一周实证：可买票的大盘趋势维全是 0 分，选中后三天内普跌——根因是
-        # 大盘不配合，共振分再高也扛不住 β。默认开，弱平衡市可临时关。
-        "require_market_uptrend": True,
+        # 大盘趋势不再用硬闸（原 require_market_uptrend）：硬闸在贴线处会整个
+        # 关死扫描、且与情绪/共振里的 MA20 信号重复计数。改为在 9 分共振的
+        # 「大盘趋势」维做分级扣分（见 scoring.market_trend_*），弱势市更难凑满
+        # 门槛但不至于一票否决全部候选。
         "near_miss_gap": 1,
         "max_watch_output": 3,
         "max_near_miss_output": 6,

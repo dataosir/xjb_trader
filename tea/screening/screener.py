@@ -602,7 +602,7 @@ class Screener:
             if cands:
                 notes.append(f"三档全空 → 萌芽窗口扫描，候选 {len(cands)} 只")
                 return cands, TIER_SPROUT, notes
-        notes.append("三档 + 萌芽窗口全空 → 今日无种子")
+        notes.append("三档 + 萌芽窗口全空 → 主动不开新仓（宁缺毋滥）")
         return [], TIER_STRICT, notes
 
     # ============================================================== 第 3 步
@@ -783,27 +783,9 @@ class Screener:
         tracer = seed_trace.Tracer(cfg)
         sent = sent if sent is not None else get_sentiment(self.mk, cfg, io=io)
 
-        # 大盘趋势硬闸：上证不在「涨 + 站上 MA20」时禁止新开，避免逆势选股。
-        # 提前到板块排名之前，弱市里顺便省下 40 个板块的网络取数。
-        if cfg.get("seed.require_market_uptrend", True):
-            idx = (sent or {}).get("index") or {}
-            if not (idx.get("chg_pct") is not None and idx.get("chg_pct") > 0
-                    and idx.get("ma20_above")):
-                note = "大盘趋势=0（上证未在 MA20 上方上涨）→ 禁止新开，宁缺毋滥"
-                tracer.note(note)
-                result = {
-                    "at": utils.now().strftime("%Y-%m-%d %H:%M"), "scan_id": tracer.scan_id,
-                    "sentiment": sent, "sectors": [], "sector_pool": [],
-                    "max_sector_chg": None, "strongest_sector_chg": None,
-                    "dyn_window": None, "eve_window": None,
-                    "tier": None, "buyable": [], "watch": [], "near_miss": [], "eve": [],
-                    "candidates": [], "candidates_n": 0, "veto_passed_n": 0, "soft_n": 0,
-                    "notes": [note], "verdict": VERDICT_EMPTY,
-                }
-                if write_trace:
-                    result["trace"] = tracer.flush()
-                return result
-
+        # 大盘趋势不再用硬闸提前短路（原 seed.require_market_uptrend）：弱势市不是
+        # 「一票否决」而是由 9 分共振里的「大盘趋势」维做分级扣分（见 preflight.score_nine），
+        # 让扫描照常跑完、候选照常落盘——否则拦截日不落盘，这条纪律永远无法回测证伪。
         step1 = self.rank_sectors(tracer, io=io)
         sectors = step1["top"]
         strongest = step1.get("strongest_sector_chg")

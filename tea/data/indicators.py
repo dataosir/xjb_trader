@@ -21,6 +21,23 @@ def ma(klines: List[dict], n: int) -> Optional[float]:
     return sum(closes[-n:]) / n
 
 
+def ma_slope_pct(klines: List[dict], n: int = 20, lookback: int = 5) -> Optional[float]:
+    """MA(n) 近 lookback 个交易日的涨跌斜率（%）。
+
+    更稳的趋势定义不再用「现价是否高于 MA」这种单点比较，而是看 MA 本身在
+    抬升还是下压：MA 上行意味着中期成本重心在上移，即使现价短暂跌破 MA，
+    趋势也未必转坏（反之亦然）。klines 需 ≥ n + lookback 根才够算。
+    """
+    closes = [k.get("close") for k in klines if k.get("close") is not None]
+    if len(closes) < n + lookback:
+        return None
+    now = sum(closes[-n:]) / n
+    prev = sum(closes[-(n + lookback):-lookback]) / n
+    if not prev:
+        return None
+    return (now - prev) / prev * 100.0
+
+
 def atr(klines: List[dict], n: int = 14) -> Optional[float]:
     """ATR(n) = 最近 n 日 TR 均值；TR = max(H-L, |H-昨收|, |L-昨收|)。"""
     if len(klines) < n + 1:

@@ -126,9 +126,8 @@ def check_session_start(sent: Optional[dict] = None, cfg: Optional[Config] = Non
         if (sent.get("cycle") == CYCLE_CLIMAX and avg5 is not None
                 and avg5 >= float(cfg.get("sentiment.climax_block_avg5", 7.0))):
             r.block("高潮易分歧", f"高潮期且前5板块均涨 {avg5:.2f}% ≥7% → 禁止新开")
-        # 5. 上证 MA20 下
-        if cfg.s("block_new_eval_when_index_below_ma20", True) and not sent.get("ma20_above", True):
-            r.block("上证MA20", "上证在 MA20 下方 → 禁止 run 新开（scan/seed-plan 仍可用）")
+        # 上证 MA20 下方不再硬拦（原 block_new_eval_when_index_below_ma20）：
+        # 弱势市由 9 分共振「大盘趋势」维做分级扣分表达，而不是在会话门禁里一票否决。
 
     # 3. 今日新开仓已达上限
     max_new = int(cfg.s("daily_max_new_trades", 1))
@@ -161,14 +160,11 @@ def check_session_start(sent: Optional[dict] = None, cfg: Optional[Config] = Non
 
 def check_code_gate(code: str, sent: Optional[dict] = None, cfg: Optional[Config] = None,
                     timing: Optional[Timing] = None) -> GateResult:
-    """Phase1 代码门禁：MA20 / 单日限额 / 同票复筛 / 计划绑定。"""
+    """Phase1 代码门禁：单日限额 / 同票复筛 / 计划绑定（MA20 下方不再硬拦）。"""
     cfg = cfg or load_config()
     code = utils.norm_code(code)
     r = GateResult()
     st = load_state(cfg)
-
-    if sent and cfg.s("block_new_eval_when_index_below_ma20", True) and not sent.get("ma20_above", True):
-        r.block("上证MA20", "上证在 MA20 下方 → 禁止评估新开")
 
     max_eval = int(cfg.s("daily_max_evaluations", 5))
     if int(st.get("evaluations", 0)) >= max_eval:

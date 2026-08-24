@@ -181,7 +181,8 @@ class FakeMarket(Market):
                              high=20.2, low=19.8, cap_yi=800.0, vol_ratio=0.9,
                              turnover=0.8, amount_yi=3.0),
         }
-        self.index = {"point": 3200.0, "chg_pct": 0.85, "ma20": 3150.0, "ma20_above": True}
+        self.index = {"point": 3200.0, "chg_pct": 0.85, "ma20": 3150.0, "ma20_above": True,
+                      "ma20_bias_pct": 1.59, "ma20_slope_pct": 0.5}
         self.breadth = {"rising": 3000, "falling": 1500, "total": 4800,
                         "advance_ratio": 3000 / 4500}
         self.limit_up = {"limit_up_count": 60, "max_boards": 5, "date": utils.compact_date()}
@@ -1285,6 +1286,17 @@ def check_sentiment(t: Suite, cfg: Config, mk: FakeMarket) -> dict:
     t.ok("MA20 未知不谎报退潮", gap["cycle"] != sent_mod.CYCLE_EBB, f"cycle={gap['cycle']}")
     t.ok("MA20 未知落防守", gap["stance"] == sent_mod.STANCE_DEFEND, f"stance={gap['stance']}")
     t.ok("MA20 未知仍允许新开", bool(gap.get("allow_new")))
+
+    # MA20 下方（已知）不再单独触发防守：位置已由共振「大盘趋势」维扣分表达，
+    # 这里不再对同一信号罚第二遍（否则弱势市数学上无人能过）。
+    below_raw = {"index": {"point": 3150.0, "chg_pct": 0.5, "ma20": 3200.0, "ma20_above": False},
+                 "sectors": [{"bk": f"BK{i}", "name": f"热{i}", "chg": 5.0, "rank": i,
+                              "up_n": 30, "down_n": 2} for i in range(1, 8)],
+                 "breadth": {"advance_ratio": 0.55, "rising": 2500, "falling": 2000},
+                 "limit_up": {"max_boards": 5, "limit_up_count": 60}}
+    below = sent_mod.classify(sent_mod.compute_score(below_raw, cfg), cfg)
+    t.eq("MA20 下方（已知）不再单独触发防守", below["stance"], sent_mod.STANCE_ATTACK,
+         f"stance={below['stance']} notes={below.get('notes')}")
     return sent
 
 
@@ -1388,7 +1400,7 @@ def check_scoring(t: Suite, cfg: Config, mk: FakeMarket, sent: dict, lv: dict) -
     by_no = {d["no"]: d for d in sc["dims"]}
 
     t.eq("①板块强度（排名1≤8 且涨停2≥2，内前10% +1 封顶2）", by_no[1]["score"], 2)
-    t.eq("②大盘趋势（上证涨 + MA20 上）", by_no[2]["score"], 1)
+    t.eq("②大盘趋势（强趋势：上方 + 上行）", by_no[2]["score"], 1)
     t.eq("③消息面（有催化）", by_no[3]["score"], 1)
     t.eq("④市值区间（120亿 ∈ 50~300）", by_no[4]["score"], 2)
     t.eq("⑤量价结构（放量上涨 + 多头，无扣分）", by_no[5]["score"], 2)
@@ -1593,10 +1605,11 @@ def check_gates(t: Suite, cfg: Config, mk: FakeMarket, sent: dict) -> None:
     t.ok("空仓姿态 → 禁止开会话", not g.allowed,
          "；".join(b["rule"] for b in g.blocks))
 
-    # MA20 下方 → 禁止新开评估
+    # MA20 下方 → 不再硬拦（改由共振「大盘趋势」维分级扣分表达）
     below = dict(sent, ma20_above=False)
     g = gates.check_session_start(below, cfg, force=False, require_window=False)
-    t.ok("上证 MA20 下方 → 禁止新开", any(b["rule"] == "上证MA20" for b in g.blocks))
+    t.ok("上证 MA20 下方 → 不再硬拦", not any(b["rule"] == "上证MA20" for b in g.blocks),
+         "；".join(b["rule"] for b in g.blocks))
 
     # 单日评估上限
     gates.reset_state(cfg)
@@ -1620,27 +1633,44 @@ def check_gates(t: Suite, cfg: Config, mk: FakeMarket, sent: dict) -> None:
     gates.reset_state(cfg)
 
 
-def check_market_uptrend_gate(t: Suite, cfg: Config, mk: FakeMarket) -> None:
-    """大盘趋势硬闸：上证不在 MA20 上方上涨时，种子扫描直接 EMPTY。"""
-    t.head("扫描 · 大盘趋势硬闸")
+def check_market_trend_deduction(t: Suite, cfg: Config, mk: FakeMarket) -> None:
+    """大盘趋势不再硬闸短路，改为 9 分共振里的分级扣分（-1~+1，扣分封顶 -1）。
+
+    更稳的趋势定义：位置（点位 vs MA20，带缓冲）+ 方向（MA20 斜率）合成 -2~+2，
+    弱势市共振分被扣除、但扫描照常跑完，不再一票否决。
+    """
+    t.head("扫描 · 大盘趋势分级扣分")
+    q = mk.get_quote(TARGET)
+    sec = mk.sector_context(q)
+    ind = mk.get_indicators(TARGET, q["price"])
+    lv = {"sl_pct": 6.0, "odds": 2.08, "sl_atr_mult": 0.8}
+
+    def dim2(index: dict) -> int:
+        sc = preflight.score_nine(q, ind, sec, {"index": index}, lv,
+                                  has_news=True, cfg=cfg)
+        return {d["no"]: d for d in sc["dims"]}[2]["score"]
+
+    t.eq("强趋势 +1（上方且上行）", dim2({"point": 3200.0, "ma20": 3150.0,
+                                          "ma20_bias_pct": 1.59, "ma20_slope_pct": 0.5}), 1)
+    t.eq("弱势 -1（下方且下行，扣分封顶）", dim2({"point": 3150.0, "ma20": 3200.0,
+                                        "ma20_bias_pct": -1.56, "ma20_slope_pct": -0.5}), -1)
+    t.eq("贴线震荡 0（缓冲内且走平）", dim2({"point": 3200.0, "ma20": 3198.0,
+                                             "ma20_bias_pct": 0.06, "ma20_slope_pct": 0.05}), 0)
+    t.eq("偏弱 -1（下方但走平）", dim2({"point": 3150.0, "ma20": 3200.0,
+                                        "ma20_bias_pct": -1.56, "ma20_slope_pct": 0.05}), -1)
+
+    # 硬闸移除后：弱势市下 seed_scan 照常跑完，不再被大盘趋势短路。
     sc = screener_mod.Screener(cfg, mk)
-    down = {"index": {"chg_pct": -1.5, "ma20_above": False},
+    down = {"index": {"point": 3150.0, "chg_pct": -1.5, "ma20": 3200.0,
+                      "ma20_above": False, "ma20_bias_pct": -1.56, "ma20_slope_pct": -0.5},
             "stance": sent_mod.STANCE_DEFEND, "allow_new": True,
             "score": 45.0, "cycle": "修复"}
     res = sc.seed_scan(sent=down, include_eve=False, write_trace=False)
-    t.eq("大盘趋势=0 → EMPTY", res.get("verdict"), screener_mod.VERDICT_EMPTY)
-    t.eq("可买为空", res.get("buyable"), [])
-    t.ok("留痕大盘趋势=0",
-         any("大盘趋势=0" in n for n in res.get("notes", [])), str(res.get("notes")))
-
-    old = cfg.get("seed.require_market_uptrend")
-    cfg.set("seed.require_market_uptrend", False)
-    try:
-        res2 = sc.seed_scan(sent=down, include_eve=False, write_trace=False)
-        t.ok("关闭硬闸后无大盘趋势=0 提示",
-             "大盘趋势=0" not in (res2.get("notes") or []), str(res2.get("notes")))
-    finally:
-        cfg.set("seed.require_market_uptrend", old)
+    t.ok("弱势市不再被大盘趋势硬闸短路",
+         all("大盘趋势=0" not in n for n in (res.get("notes") or [])),
+         str(res.get("notes")))
+    t.ok("弱势市下扫描照常产出板块候选", bool(res.get("sectors")),
+         f"sectors_n={len(res.get('sectors') or [])}")
 
 
 def check_seed(t: Suite, cfg: Config, mk: FakeMarket, sent: dict) -> dict:
@@ -2659,7 +2689,7 @@ def main(verbose: bool = True, cfg: Optional[Config] = None) -> int:
         check_colors(t)
         check_gates(t, c, mk, sent)
         check_seed(t, c, mk, sent)
-        check_market_uptrend_gate(t, c, mk)
+        check_market_trend_deduction(t, c, mk)
         check_plan_labels(t, c, mk, sent)
         check_plan_clear(t, c)
         check_plan_check_clear_prompt(t, c)

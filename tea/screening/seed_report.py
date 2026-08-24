@@ -1,6 +1,6 @@
 """种子扫描报告生成：SEED_*.md（Markdown 存档）+ 控制台摘要。
 
-verdict：HAS_TRADEABLE（有可买）/ PENDING（仅观察）/ EMPTY（今日无种子）。
+verdict：HAS_TRADEABLE（有可买）/ PENDING（仅观察）/ EMPTY（主动不开新仓）。
 """
 from __future__ import annotations
 
@@ -22,7 +22,7 @@ def _hl(text: str, color: str = "") -> str:
 VERDICT_LABEL = {
     VERDICT_TRADEABLE: "HAS_TRADEABLE（有可买标的，已写次日计划）",
     VERDICT_PENDING: "PENDING（无可买，仅观察轨跟踪）",
-    VERDICT_EMPTY: "EMPTY（今日无种子 — 宁缺毋滥）",
+    VERDICT_EMPTY: "EMPTY（主动不开新仓 — 宁缺毋滥）",
 }
 
 

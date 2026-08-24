@@ -219,8 +219,12 @@ def classify(scored: dict, cfg: Config) -> dict:
     defend_why = []
     if score < float(c("stance_defend_below", 55)):
         defend_why.append(f"情绪分 {score:.1f} < 55")
-    if not ma20_above:
-        defend_why.append("上证在 MA20 下方" if ma20_known else "上证位置未知（指数取数失败）")
+    # 「上证在 MA20 下方」不再单独进防守理由：MA20 位置已由共振「大盘趋势」维
+    # 分级扣分表达（见 preflight.score_nine），这里再加一次等于同一信号罚两遍，
+    # 弱势市数学上无人能过。保留「位置未知」的防守：数据缺口时不假设市场健康，
+    # 但也不谎报「在下方」。
+    if not ma20_known:
+        defend_why.append("上证位置未知（指数取数失败）")
     if cycle == CYCLE_EBB:
         defend_why.append("退潮")
 
