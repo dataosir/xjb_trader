@@ -2333,6 +2333,26 @@ def check_followthrough(t: Suite, cfg: Config) -> None:
          rec["next_chg"] < rec["chg_t3"] < rec["chg_t5"],
          f"t1={rec.get('next_chg')} t3={rec.get('chg_t3')} t5={rec.get('chg_t5')}")
 
+    # 阶段 B 样本盘点：按 板块排名桶×阶段×档位×身份分桶 聚合，找最大桶
+    ft_mod.save_records([
+        {"date": "2026-08-15", "code": "600901", "name": "桶A1", "sector_rank": 1,
+         "identity_score": 90.0, "stage": "过热", "tier": "热点降级档", "result": "win"},
+        {"date": "2026-08-16", "code": "600902", "name": "桶A2", "sector_rank": 2,
+         "identity_score": 91.0, "stage": "过热", "tier": "热点降级档", "result": "loss"},
+        {"date": "2026-08-17", "code": "600903", "name": "桶A3", "sector_rank": 3,
+         "identity_score": 88.0, "stage": "过热", "tier": "热点降级档", "result": "win"},
+        {"date": "2026-08-18", "code": "600904", "name": "桶B1", "sector_rank": 9,
+         "identity_score": 60.0, "stage": "突破", "tier": "严格档", "result": "loss"},
+    ], cfg)
+    st = ft_mod.stage_b_bucket_stats(cfg, min_samples=3)
+    t.eq("阶段B最大桶样本", st["max_n"], 3)
+    t.ok("阶段B最大桶达标（3≥3）", st["ready"])
+    t.ok("阶段B最大桶键正确", st["max_bucket"].startswith("1-3 / 过热 / 热点降级档 / 85-93"),
+         st["max_bucket"])
+    st2 = ft_mod.stage_b_bucket_stats(cfg, min_samples=5)
+    t.eq("阶段B未达标时还差条数", st2["threshold"] - st2["max_n"], 2)
+    t.ok("阶段B未达标判定", not st2["ready"])
+
 
 def check_pricetrack(t: Suite, cfg: Config, mk: FakeMarket) -> None:
     """价格跟踪：进入种子文档 → 每日记价 → 卖出/删除停止。"""

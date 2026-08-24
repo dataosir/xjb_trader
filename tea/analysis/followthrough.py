@@ -319,3 +319,54 @@ def format_followthrough(cfg: Optional[Config] = None) -> str:
                      f" 次日均涨 {utils.pct(v.get('avg_next_chg'))}"
                      f"　T+3均涨 {utils.pct(v.get('avg_chg_t3'))}")
     return "\n".join(lines)
+
+
+# ------------------------------------------------------------------ 阶段 B 样本盘点
+
+def stage_b_bucket_stats(cfg: Optional[Config] = None, min_samples: int = 30) -> dict:
+    """阶段 B 经验先验的样本盘点。
+
+    按「板块排名桶 × 阶段 × 档位 × 身份分桶」聚合已回填的 T+1 样本，返回最大桶的
+    样本数与是否达标——阶段 B（经验胜率先验）要求单个交叉桶 ≥ min_samples 才可信。
+    """
+    cfg = cfg or load_config()
+    buckets: Dict[str, dict] = {}
+    for r in load_records(cfg):
+        if r.get("result") not in ("win", "loss"):
+            continue
+        rank = r.get("sector_rank")
+        if rank is None:
+            continue
+        rank_bucket = ("1-3" if rank <= 3 else "4-5" if rank <= 5
+                       else "6-8" if rank <= 8 else ">8")
+        isc = r.get("identity_score")
+        id_bucket = ("<75" if isc is None or isc < 75 else "75-85" if isc < 85
+                     else "85-93" if isc < 93 else "93+")
+        key = " / ".join([rank_bucket, r.get("stage") or "-", r.get("tier") or "-", id_bucket])
+        slot = buckets.setdefault(key, {"n": 0, "wins": 0})
+        slot["n"] += 1
+        slot["wins"] += 1 if r["result"] == "win" else 0
+    if not buckets:
+        return {"max_n": 0, "max_bucket": None, "max_rate": None,
+                "threshold": min_samples, "ready": False, "bucket_count": 0}
+    max_key = max(buckets, key=lambda k: buckets[k]["n"])
+    slot = buckets[max_key]
+    return {
+        "max_n": slot["n"], "max_bucket": max_key,
+        "max_rate": slot["wins"] / slot["n"],
+        "threshold": min_samples, "ready": slot["n"] >= min_samples,
+        "bucket_count": len(buckets),
+    }
+
+
+def format_stage_b_status(cfg: Optional[Config] = None, min_samples: int = 30) -> str:
+    """阶段 B 触发条件提示：review 时打印最大桶样本数，判断何时能上线经验先验。"""
+    st = stage_b_bucket_stats(cfg, min_samples)
+    if st["max_n"] == 0:
+        return "阶段 B 经验先验：暂无回填样本（先跑 seed-plan 攒样本，再跑 review 回填）"
+    if st["ready"]:
+        return (f"阶段 B 经验先验：最大桶样本 {st['max_n']} ≥ {st['threshold']} 已达标，"
+                f"可开始实现（{st['max_bucket']}，胜率 {st['max_rate']:.0%}）")
+    return (f"阶段 B 经验先验：最大桶样本 {st['max_n']}/{st['threshold']}"
+            f"（{st['max_bucket']}，胜率 {st['max_rate']:.0%}），"
+            f"还差 {st['threshold'] - st['max_n']} 条达标")
