@@ -290,6 +290,7 @@ def _ft_entries(result: dict) -> List[dict]:
         for ev in (evs or []):
             q = ev.get("quote") or {}
             ind = ev.get("ind") or {}
+            sec = ev.get("sector") or {}
             entries.append({
                 "code": ev.get("code"), "name": ev.get("name"),
                 "stage": (ev.get("stage") or {}).get("stage"),
@@ -300,8 +301,8 @@ def _ft_entries(result: dict) -> List[dict]:
                 "pass_threshold": ev.get("pass_threshold"),
                 "identity_tier": (ev.get("identity") or {}).get("tier"),
                 "identity_score": (ev.get("identity") or {}).get("score"),
-                "sector_name": (ev.get("sector") or {}).get("name"),
-                "sector_rank": (ev.get("sector") or {}).get("rank"),
+                "sector_name": sec.get("name"),
+                "sector_rank": sec.get("rank"),
                 "scoring_dims": (ev.get("scoring") or {}).get("dims"),
                 # 技术指标（T+N 回填后做逐因子胜率归因）：乖离/波动/量比/换手/分时位
                 "bias_ma20": ind.get("bias_ma20"),
@@ -309,6 +310,12 @@ def _ft_entries(result: dict) -> List[dict]:
                 "vol_ratio": q.get("vol_ratio"),
                 "turnover": q.get("turnover"),
                 "intraday": ev.get("intraday"),
+                # 归因补充：成交额/市值/板块内排名占比/盈亏比/否决原因
+                "amount_yi": q.get("amount_yi"),
+                "cap_yi": q.get("cap_yi"),
+                "rank_pct": sec.get("stock_rank_pct"),
+                "odds": ev.get("odds"),
+                "veto_labels": (ev.get("veto") or {}).get("labels"),
                 **market,
             })
     return entries

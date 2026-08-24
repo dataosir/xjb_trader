@@ -15,6 +15,9 @@
 - **跟涨样本新增技术指标**（`followthrough.record_seed` + `runner._ft_entries`）：
   `bias_ma20` / `atr_pct` / `vol_ratio` / `turnover` / `intraday`，T+N 回填后即可做
   逐因子胜率归因（验证「乖离>8% 是否反向惩罚强势票」等假设），不再只靠总分干瞪眼。
+- **跟涨样本补充归因字段**：`amount_yi`（成交额）/ `cap_yi`（市值）/ `rank_pct`
+  （板块内排名占比）/ `odds`（盈亏比）/ `veto_labels`（否决原因），与上一批技术指标
+  一起构成逐因子归因的完整字段集。
 - **SEED 报告归档「宁缺毋滥」与「回填提醒」**（`runner.seed_plan`）：无可买时的
   「宁缺毋滥：今日无可买标的，不写计划」与「仍有 N 条历史跟涨样本未回填」这两条
   提示不再只留在控制台，一并写进 SEED_*.md 的扫描备注，随报告存档复盘。

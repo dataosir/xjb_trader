@@ -2267,6 +2267,8 @@ def check_followthrough(t: Suite, cfg: Config) -> None:
         "market_score": 47.0, "market_stance": "防守", "market_ma20_above": False,
         "bias_ma20": 12.5, "atr_pct": 5.2, "vol_ratio": 1.8,
         "turnover": 9.5, "intraday": 0.72,
+        "amount_yi": 12.0, "cap_yi": 150.0, "rank_pct": 0.15,
+        "odds": 2.4, "veto_labels": ["接近涨停", "分时偏高"],
     }], cfg, date="2026-08-12")
     t.eq("带市场/维度字段的样本落盘", r4, {"added": 1, "skipped": 0, "updated": 0})
     f = next(r for r in ft_mod.load_records(cfg) if r.get("code") == "600787")
@@ -2278,6 +2280,11 @@ def check_followthrough(t: Suite, cfg: Config) -> None:
     t.eq("量比随样本落盘", f.get("vol_ratio"), 1.8)
     t.eq("换手随样本落盘", f.get("turnover"), 9.5)
     t.eq("分时位随样本落盘", f.get("intraday"), 0.72)
+    t.eq("成交额随样本落盘", f.get("amount_yi"), 12.0)
+    t.eq("市值随样本落盘", f.get("cap_yi"), 150.0)
+    t.eq("板块内排名占比随样本落盘", f.get("rank_pct"), 0.15)
+    t.eq("盈亏比随样本落盘", f.get("odds"), 2.4)
+    t.eq("否决原因随样本落盘", f.get("veto_labels"), ["接近涨停", "分时偏高"])
 
     # 多周期回填：T+1/T+2/T+3/T+5 一次算好
     d = _end_dates(30)[10]

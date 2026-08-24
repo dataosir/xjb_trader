@@ -109,19 +109,18 @@
 
 `chg_pct / total_score / pass_threshold / identity_tier / identity_score / sector_name / sector_rank / stage / tier / track / scoring_dims / market_score / market_cycle / market_stance / market_ma20_above / market_idx_chg / close` + T+1/T+2/T+3/T+5 回填结果。
 
-### 5.2 本次新增
+### 5.2 已补齐（两批字段）
 
-`bias_ma20`（乖离）、`atr_pct`（波动）、`vol_ratio`（量比）、`turnover`（换手）、`intraday`（分时位）。
+第一批：`bias_ma20`（乖离）、`atr_pct`（波动）、`vol_ratio`（量比）、`turnover`（换手）、`intraday`（分时位）。
 
-### 5.3 建议下一批补齐（scan_details 里已有，还没进 seed_records）
+第二批：`amount_yi`（成交额）、`cap_yi`（市值）、`rank_pct`（板块内排名占比）、`odds`（盈亏比）、`veto_labels`（否决原因）。
+
+### 5.3 尚可再补（scan_details 里已有，未进 seed_records）
 
 | 指标 | 用途 |
 | --- | --- |
-| `amount_yi` 成交额 | 验证流动性/是否放量 |
-| `cap_yi` 市值 | 验证市值区间胜率 |
-| `rank_pct` 板块内排名占比 | 验证「板块内位置」是否负向 |
-| `odds` / `sl_pct` / `tp_pct` | 验证盈亏比结构是否与胜率互补 |
-| `veto_labels` 否决原因 | 分析「被拒的票为何反而赢」 |
+| `sl_pct` / `tp_pct` | 验证止损止盈结构（`odds` 已入，这两项可补全） |
+| `identity_flags` 杂毛/龙头标记明细 | 验证「杂毛过滤」是否误杀 |
 
 ### 5.4 尚未采集、建议新增
 
