@@ -367,3 +367,35 @@ def format_weather(s: dict) -> str:
             seen.add(e)
             lines.append(f"! 数据缺口 {e}")
     return "\n".join(lines)
+
+
+# ------------------------------------------------------------------ 数据缺口横幅
+
+_ERR_LABEL = {"index": "大盘指数", "sectors": "板块排名", "hard": "涨跌家数/涨停池"}
+
+
+def data_gap_summary(s: dict, net_line: str = "") -> List[str]:
+    """汇总数据缺口与网络异常，供扫描结果醒目提示（空列表=无缺口）。
+
+    - 指数/板块/涨跌家数 任一取数失败 → 该路数据缺失（大盘趋势、情绪分会受影响）。
+    - 网络摘要里出现「失败」→ 主源在抖、已降级，选票方向可能基于不完整数据。
+    """
+    gaps: List[str] = []
+    for e in (s or {}).get("errors") or []:
+        name, sep, rest = e.partition(":")
+        gaps.append(f"{_ERR_LABEL.get(name, name)}:{rest}" if sep else e)
+    if (s or {}).get("limit_up_error"):
+        gaps.append(f"涨停池:{s['limit_up_error']}")
+    if net_line and "失败" in net_line:
+        gaps.append(net_line)
+    return gaps
+
+
+def format_data_gap_banner(s: dict, net_line: str = "") -> str:
+    """醒目的数据缺口横幅；无缺口返回空串。"""
+    gaps = data_gap_summary(s, net_line)
+    if not gaps:
+        return ""
+    lines = ["⚠️⚠️⚠️ 数据缺口 / 网络异常（本次选票仅供参考，建议配代理或稍后重跑）⚠️⚠️⚠️"]
+    lines += [f"  · {g}" for g in gaps]
+    return "\n".join(lines)

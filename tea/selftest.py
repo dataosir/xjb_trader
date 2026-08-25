@@ -1297,6 +1297,14 @@ def check_sentiment(t: Suite, cfg: Config, mk: FakeMarket) -> dict:
     below = sent_mod.classify(sent_mod.compute_score(below_raw, cfg), cfg)
     t.eq("MA20 下方（已知）不再单独触发防守", below["stance"], sent_mod.STANCE_ATTACK,
          f"stance={below['stance']} notes={below.get('notes')}")
+
+    # 数据缺口横幅：指数超时 + 网络失败 → 醒目汇总；无缺口 → 空串
+    s_gap = {"errors": ["index: 超时 15s", "hard: 请求失败"], "limit_up_error": None}
+    gaps = sent_mod.data_gap_summary(s_gap, "网络请求 27 次｜东财 1｜失败 9")
+    t.ok("指数缺口映射为大盘指数", any(g.startswith("大盘指数: 超时") for g in gaps), str(gaps))
+    t.ok("网络失败进缺口汇总", any("失败 9" in g for g in gaps), str(gaps))
+    t.ok("缺口横幅醒目", "⚠️" in sent_mod.format_data_gap_banner(s_gap, "网络请求 27 次｜东财 1｜失败 9"))
+    t.eq("无缺口返回空串", sent_mod.format_data_gap_banner({"errors": []}, ""), "")
     return sent
 
 

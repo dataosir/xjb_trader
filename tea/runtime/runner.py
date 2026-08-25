@@ -16,7 +16,7 @@ import time
 from typing import Any, Dict, List, Optional
 
 from tea.analysis import followthrough as ft_mod, pricetrack, stats
-from tea.analysis.sentiment import format_weather, get_sentiment
+from tea.analysis.sentiment import data_gap_summary, format_data_gap_banner, format_weather, get_sentiment
 from tea.config.config_store import Config, load_config
 from tea.core import logger as logger_mod, utils
 from tea.core.timing import Timing
@@ -170,6 +170,13 @@ def seed_plan(cfg: Optional[Config] = None, market: Optional[Market] = None,
     net = mk.stats_line() if hasattr(mk, "stats_line") else (
         mk.f.stats_line() if hasattr(getattr(mk, "f", None), "stats_line") else "")
     io.say(f"  ✓ 种子扫描完成 ({time.time() - t_start:.1f}s)" + (f"，{net}" if net else ""))
+    # 数据缺口/网络异常醒目标记：指数超时、主源抖动这类事不该藏在天气屏里一闪过，
+    # 要打进扫描结果和 SEED 报告，复盘时一眼看出「今天选票基于不完整数据」。
+    gap_banner = format_data_gap_banner(sent, net)
+    if gap_banner:
+        io.say(gap_banner)
+        result.setdefault("notes", []).append(
+            "数据缺口/网络异常：" + "；".join(data_gap_summary(sent, net)))
     io.say(seed_report.format_result(result, cfg))
 
     # ---------------------------------------------------------- 写计划
