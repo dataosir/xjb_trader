@@ -263,6 +263,10 @@ def score_nine(quote: dict, ind: dict, sector: dict, sent: Optional[dict],
         s5, d5 = 2, f"放量上涨（涨幅 {chg:+.2f}%>0 且 量比 {vr:.2f}≥{strong:.1f} 且 均线多头）"
     elif chg is not None and vr is not None and chg <= 0 and vr <= shrink and above20:
         s5, d5 = 2, f"缩量回调（涨幅 {chg:+.2f}%≤0 且 量比 {vr:.2f}≤{shrink:.1f} 且 MA20 上方）"
+    elif chg is not None and vr is not None and chg > 0 and vr < strong and not bull:
+        # 缩量上涨(量比<1.2)且非多头：今日硬拉但没后劲（后继乏力），不给分。
+        # 依据：可买 0/5 全是这类弱票（永杉锂业 量比 1.1、跌破 MA20），被拒的强势票反而赢。
+        s5, d5 = 0, f"缩量上涨/趋势不足（涨幅 {chg:+.2f}% 量比 {vr:.2f}，后劲存疑）"
     elif chg is not None and vr is not None and ((chg > 0 and vr >= 1.0) or (chg <= 0 and vr < 1.0)):
         cond = "涨幅>0 且 量比≥1.0" if chg > 0 else "涨幅≤0 且 量比<1.0"
         s5, d5 = 1, f"量价基本配合（{cond}；涨幅 {chg:+.2f}% 量比 {vr:.2f}）"

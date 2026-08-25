@@ -1433,6 +1433,13 @@ def check_scoring(t: Suite, cfg: Config, mk: FakeMarket, sent: dict, lv: dict) -
     sc2 = preflight.score_nine(q_hi, ind, sec, sent, lv, has_news=True, cfg=cfg)
     t.eq("换手 22% 触发量价扣分", sc2["total"], 8)
 
+    # 缩量上涨且非多头 → 0分（后继乏力：今日硬拉但没后劲，不再给「量价基本配合」1分）
+    q_weak = dict(q, vol_ratio=1.1)
+    ind_weak = dict(ind, ma_bull=False)
+    sc_weak = preflight.score_nine(q_weak, ind_weak, sec, sent, lv, has_news=True, cfg=cfg)
+    by5_weak = {d["no"]: d for d in sc_weak["dims"]}[5]
+    t.eq("缩量上涨且非多头 → 量价 0 分", by5_weak["score"], 0)
+
     # 「乖离>8%」量价扣分已移除：乖离交由 veto 统一把关（普通 15% / 龙头 25%），
     # 不再在量价结构里用更严的 8% 罚强势票（高乖离反而赢）。
     ind_hi_bias = dict(ind, bias_ma20=24.0)
