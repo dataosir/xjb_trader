@@ -387,9 +387,13 @@ class Screener:
             utils.tell(io, f"    · [{i}/{total_n_sectors}] {s['name']} {len(members)} 只"
                            f" ({time.time() - t0:.1f}s)")
             total_n = len(members)
-            limit_ups = count_limit_ups(members)
-            ups = sum(1 for m in members if (m.get("chg") or 0) > 0)
-            mild = [m for m in members
+            # 只统计「可交易成员」的涨停/上涨/温和票：不可交易的创业板/北交所/科创板
+            # 成分股再多也不该让板块进 TOP（否则选出的板块买不了，白占板块配额）。
+            # 分母仍用 total_n，让「可交易成分股占比低」的板块结构分自然偏低。
+            tradeable = [m for m in members if veto_mod.board_allowed(m.get("code", ""), cfg)]
+            limit_ups = count_limit_ups(tradeable)
+            ups = sum(1 for m in tradeable if (m.get("chg") or 0) > 0)
+            mild = [m for m in tradeable
                     if m.get("chg") is not None and mild_low <= m["chg"] <= float(c("mild_chg_high", 5.5))
                     and m.get("cap_yi") is not None
                     and float(c("mild_cap_low", 50.0)) <= m["cap_yi"] <= float(c("mild_cap_high", 300.0))
@@ -412,6 +416,7 @@ class Screener:
 
             entry = {
                 **s, "members": members, "member_total": total_n, "limit_up_count": limit_ups,
+                "tradeable_n": len(tradeable),
                 "up_ratio": ups / total_n if total_n else None,
                 "mild_n": len(mild), "mild_ratio": round(mild_ratio, 4),
                 "heat_score": round(heat, 1), "mild_score": round(mild_score, 1),

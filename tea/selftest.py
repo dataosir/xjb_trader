@@ -1507,6 +1507,14 @@ def check_veto(t: Suite, cfg: Config, mk: FakeMarket, idn: dict) -> None:
     r = veto_mod.check(dict(gem, chg_pct=19.5), ind, idn, 0.60, cfg)
     t.ok("创业板涨 19.5% ≥19% → 硬否决", "limit_up" in names(r, "hard"))
 
+    # 涨停幅度按板区分：北交所 30%（原 bug 漏掉 bse 返回 10%，把 15% 涨幅误判涨停）
+    t.eq("北交所涨停幅度 30%", utils.limit_up_pct("920176", "维琪科技"), 30.0)
+    t.eq("北交所(8开头)涨停幅度 30%", utils.limit_up_pct("830001", "北交测试"), 30.0)
+    t.eq("创业板涨停幅度 20%", utils.limit_up_pct("300123", "创业测试"), 20.0)
+    t.eq("科创板涨停幅度 20%", utils.limit_up_pct("688001", "科创测试"), 20.0)
+    t.eq("主板涨停幅度 10%", utils.limit_up_pct("600123", "主板测试"), 10.0)
+    t.eq("ST 涨停幅度 5%", utils.limit_up_pct("600123", "ST测试"), 5.0)
+
     cfg.set("permissions.gem", False)
     r = veto_mod.check(gem, ind, idn, 0.60, cfg)
     t.ok("关闭创业板权限 → 硬否决", "board_permission" in names(r, "hard"))
@@ -1714,6 +1722,40 @@ def check_winrate_gate(t: Suite, cfg: Config, mk: FakeMarket) -> None:
         t.ok("关闭开关后排名 6 放行", gate(6, "过热") is None)
     finally:
         cfg.set("strategy.winrate_gate_enabled", old)
+
+
+def check_sector_tradeable(t: Suite, cfg: Config, mk: FakeMarket) -> None:
+    """板块排序只统计可交易成员：创业板/北交所涨停不计入涨停家数。"""
+    t.head("扫描 · 板块排序可交易性过滤")
+    # 只开主板：模拟真实散户（未开通创业板/科创板/北交所），验证不可交易成员的
+    # 涨停/温和票不计入板块结构分（否则会像 08-25 那样把买不了的板块选进 TOP）。
+    saved_perm = dict(cfg.get("permissions") or {})
+    for b in ("gem", "star", "bse"):
+        cfg.set(f"permissions.{b}", False)
+    orig_ranking = mk.get_sector_ranking
+    orig_members = mk.get_sector_members
+    mk.get_sector_ranking = lambda force=False: [
+        {"bk": "BKTEST", "name": "测试板块", "chg": 6.0, "up_n": 10, "down_n": 0, "rank": 1}]
+    mk.get_sector_members = lambda bk: [
+        {"code": "600001", "name": "主板涨停", "chg": 9.9, "turnover": 5.0, "cap_yi": 80.0},
+        {"code": "300001", "name": "创业板涨停", "chg": 19.9, "turnover": 5.0, "cap_yi": 80.0},
+        {"code": "920001", "name": "北交所涨停", "chg": 29.9, "turnover": 5.0, "cap_yi": 80.0},
+        {"code": "600002", "name": "主板温和", "chg": 4.0, "turnover": 5.0, "cap_yi": 80.0},
+    ]
+    try:
+        sc = screener_mod.Screener(cfg, mk)
+        step1 = sc.rank_sectors()
+        top = step1["top"]
+        t.ok("测试板块入池", bool(top), f"top={[(s.get('name'), s.get('gate')) for s in top]}")
+        if top:
+            t.eq("涨停只数只算可交易主板", top[0]["limit_up_count"], 1)
+            t.eq("可交易成员数", top[0]["tradeable_n"], 2)
+            t.eq("温和票只算可交易主板", top[0]["mild_n"], 1)
+    finally:
+        for k, v in saved_perm.items():
+            cfg.set(f"permissions.{k}", v)
+        mk.get_sector_ranking = orig_ranking
+        mk.get_sector_members = orig_members
 
 
 def check_seed(t: Suite, cfg: Config, mk: FakeMarket, sent: dict) -> dict:
@@ -2768,6 +2810,7 @@ def main(verbose: bool = True, cfg: Optional[Config] = None) -> int:
         check_seed(t, c, mk, sent)
         check_market_trend_deduction(t, c, mk)
         check_winrate_gate(t, c, mk)
+        check_sector_tradeable(t, c, mk)
         check_plan_labels(t, c, mk, sent)
         check_plan_clear(t, c)
         check_plan_check_clear_prompt(t, c)

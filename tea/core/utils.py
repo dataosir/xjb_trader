@@ -344,11 +344,16 @@ def board_of(code: str) -> str:
 
 
 def limit_up_pct(code: str, name: str = "") -> float:
-    """涨停幅度：ST 5%，创业板/科创板 20%，其余 10%。"""
+    """涨停幅度：ST 5%，创业板/科创板 20%，北交所 30%，主板 10%。"""
     nm = (name or "").upper()
     if "ST" in nm:
         return 5.0
-    return 20.0 if board_of(code) in ("gem", "star") else 10.0
+    b = board_of(code)
+    if b in ("gem", "star"):
+        return 20.0
+    if b == "bse":
+        return 30.0
+    return 10.0
 
 
 def is_st(name: str) -> bool:
