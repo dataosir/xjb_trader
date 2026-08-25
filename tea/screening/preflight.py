@@ -271,7 +271,7 @@ def score_nine(quote: dict, ind: dict, sector: dict, sent: Optional[dict],
         cond = "涨幅>0 且 量比≥1.0" if chg > 0 else "涨幅≤0 且 量比<1.0"
         s5, d5 = 1, f"量价基本配合（{cond}；涨幅 {chg:+.2f}% 量比 {vr:.2f}）"
     elif chg is not None and vr is not None and chg < 0 and vr >= strong:
-        s5, d5 = 0, f"放量下跌（涨幅 {chg:+.2f}%<0 且 量比 {vr:.2f}≥{strong:.1f}）"
+        s5, d5 = -1, f"放量下跌（涨幅 {chg:+.2f}%<0 且 量比 {vr:.2f}≥{strong:.1f} → 扣1分）"
     elif not above20 and not bull:
         s5, d5 = 0, "均线全失（MA20 下方且非多头）"
     else:
@@ -293,7 +293,8 @@ def score_nine(quote: dict, ind: dict, sector: dict, sent: Optional[dict],
         if penalties:
             s5 -= each * len(penalties)
             d5 += "；扣分：" + "、".join(penalties)
-    s5 = int(utils.clamp(s5, 0, int(c("vp_dim_max", 2))))
+    # 量价结构下限 -1：放量下跌是强负信号要扣分（其余负面情形给 0），不能一视同仁。
+    s5 = int(utils.clamp(s5, -1, int(c("vp_dim_max", 2))))
     dims.append({"no": 5, "name": "量价结构", "max": 2, "score": s5, "detail": d5})
 
     # ⑥ 止损结构（1）

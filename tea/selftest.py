@@ -1440,6 +1440,12 @@ def check_scoring(t: Suite, cfg: Config, mk: FakeMarket, sent: dict, lv: dict) -
     by5_weak = {d["no"]: d for d in sc_weak["dims"]}[5]
     t.eq("缩量上涨且非多头 → 量价 0 分", by5_weak["score"], 0)
 
+    # 放量下跌 → 量价 -1 分（放量=大资金出逃，是强负信号，比 0 分更重）
+    q_drop = dict(q, chg_pct=-2.0, vol_ratio=1.5)
+    sc_drop = preflight.score_nine(q_drop, ind, sec, sent, lv, has_news=True, cfg=cfg)
+    by5_drop = {d["no"]: d for d in sc_drop["dims"]}[5]
+    t.eq("放量下跌 → 量价 -1 分", by5_drop["score"], -1)
+
     # 「乖离>8%」量价扣分已移除：乖离交由 veto 统一把关（普通 15% / 龙头 25%），
     # 不再在量价结构里用更严的 8% 罚强势票（高乖离反而赢）。
     ind_hi_bias = dict(ind, bias_ma20=24.0)
