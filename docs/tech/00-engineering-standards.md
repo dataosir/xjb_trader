@@ -1,6 +1,6 @@
 # 00 · 工程规范（原 CONTRIBUTING）
 
-> 技术层硬规矩。文档总入口见 [`../README.md`](../README.md)；架构见 [`01-architecture.md`](01-architecture.md)。
+> 技术层硬规矩。文档总入口见 [`../README.md`](../README.md)；全库清单见 [`../INDEX.md`](../INDEX.md)；架构见 [`01-architecture.md`](01-architecture.md)。
 
 ## 技术迭代铁律（摘要）
 

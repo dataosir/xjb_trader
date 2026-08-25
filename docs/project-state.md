@@ -11,7 +11,7 @@
 |---|---|
 | 产品 | XJB_TRADE（TEA）— A 股交易准入引擎 |
 | 代码版本 | `1.0.0`（`tea.__version__`） |
-| 文档框架 | 一人公司全栈：`prd` / `tech` / `ops` + CHANGELOG + 本文件 |
+| 文档框架 | 一人公司全栈：`prd` / `tech` / `ops` + CHANGELOG + 本文件；**清单权威源** `docs/INDEX.md` |
 | 更新日期 | 2026-08-25 |
 
 ---
@@ -69,6 +69,8 @@
 
 | 检查项 | 状态 |
 |---|---|
+| `docs/INDEX.md` | **权威清单**（增删改 docs 内 md 必同步维护） |
+| `docs/README.md` | 入口 + 4 步闭环（明细见 INDEX） |
 | `docs/prd/` | 完整（F01–F15） |
 | `docs/tech/` | 框架已建（00–03） |
 | `docs/ops/` | 框架已建（01–02） |

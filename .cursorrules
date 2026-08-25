@@ -3,11 +3,12 @@
 
 ## 0. 文档体系与 4 步闭环（强制）
 - 知识库入口：`docs/README.md`。分层：`prd/`（做什么）/ `tech/`（怎么做）/ `ops/`（运营）/ `archive/`（只读历史）+ `CHANGELOG.md` + `project-state.md`。
+- **全库文件清单权威源**：`docs/INDEX.md`。增删改 `docs/` 下任意 `.md` 时**必须同步更新 INDEX**。
 - **实现铁律**：根目录 `RULES.md`（禁止擅自加依赖、KISS、禁空 catch、文档先行/同步、禁静默改 CHANGELOG）；细则见 `docs/tech/00-engineering-standards.md`。
 - 每次开发任务必须：
   1. **Sync**：先读 `docs/project-state.md` 与相关 `prd/`、`tech/`；
   2. **Plan**：输出 Plan，等确认后再动手；
-  3. **Code & Doc**：改代码并同步更新对应 PRD/tech；
+  3. **Code & Doc**：改代码并同步更新对应 PRD/tech；若动了 docs 文件清单 → 同步改 `docs/INDEX.md`；
   4. **Log**：追加 `docs/CHANGELOG.md`，更新 `docs/project-state.md`。
 - 工程硬规矩：`docs/tech/00-engineering-standards.md`（公式↔selftest 断言同步）。
 - 历史策略笔记只在 `docs/archive/`，现行 backlog 以 `docs/prd/05-roadmap-backlog.md` 为准。

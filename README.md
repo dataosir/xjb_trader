@@ -268,7 +268,8 @@ python3 -m tea selftest
 
 | 文档 | 说明 |
 |---|---|
-| [docs/README.md](docs/README.md) | 文档总入口：prd / tech / ops 分层 + **4 步迭代闭环** |
+| [docs/README.md](docs/README.md) | 文档总入口：分层说明 + **4 步迭代闭环** |
+| [docs/INDEX.md](docs/INDEX.md) | **全库文件清单**（增删改 docs 必维护） |
 | [docs/project-state.md](docs/project-state.md) | 当前全局状态（版本 / 进行中 / 下一步） |
 | [docs/prd/README.md](docs/prd/README.md) | 产品需求（PRD）：定位、日常流程、F01–F15 与 backlog |
 | [docs/tech/00-engineering-standards.md](docs/tech/00-engineering-standards.md) | 工程规范：公式与断言同步、代码风格、模块归属 |

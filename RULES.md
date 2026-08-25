@@ -1,6 +1,6 @@
 # 🛠️ 技术迭代铁律与规约 (Technical Rules & Constraints)
 
-> **权威源**：本文件。配套阅读：[`docs/README.md`](docs/README.md)（4 步闭环）、[`docs/tech/00-engineering-standards.md`](docs/tech/00-engineering-standards.md)（工程细节）。  
+> **权威源**：本文件。配套阅读：[`docs/README.md`](docs/README.md)（4 步闭环）、[`docs/INDEX.md`](docs/INDEX.md)（文档清单）、[`docs/tech/00-engineering-standards.md`](docs/tech/00-engineering-standards.md)（工程细节）。  
 > 本规约适用于后续所有由 AI 辅助的技术实现、代码重构及架构变更。AI 必须严格遵守以下约束，**严禁擅自扩展、猜测或引入未被明确批准的技术栈**。
 
 ---
@@ -35,5 +35,6 @@
 1. **“代码未动，文档先行（或同步）”**：
    - 在动手修改代码前，必须先在 Plan 中明确受影响的技术模块。
    - 代码实现后，若涉及接口变化或数据结构调整，**必须同步更新 `docs/tech/` 下的对应文档**。
+   - 增删改 `docs/` 下任意 `.md` 时，**必须同步更新 [`docs/INDEX.md`](docs/INDEX.md)**。
 2. **禁止静默修改**：
    - 严禁在未同步更新 `CHANGELOG.md` 的情况下完成任务提交。

@@ -1,7 +1,7 @@
 # TEA 产品需求文档（PRD）总目录
 
 > 本文档体系由代码与现有 `docs/` **反向抽取**而成，用于后续按功能号独立迭代。  
-> 文档总入口与 4 步闭环：[`../README.md`](../README.md)；工程规范：[`../tech/00-engineering-standards.md`](../tech/00-engineering-standards.md)。  
+> 文档总入口与 4 步闭环：[`../README.md`](../README.md)；全库清单：[`../INDEX.md`](../INDEX.md)；工程规范：[`../tech/00-engineering-standards.md`](../tech/00-engineering-standards.md)。  
 > 策略演进笔记在 [`../archive/`](../archive/)，不替换本 PRD。
 
 **产品**：XJB_TRADE（TEA）— A 股**交易准入引擎**（道 / 法 / 术串联否决）  

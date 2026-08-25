@@ -1,5 +1,7 @@
 # 运营层（ops）索引
 
+> 全库清单见 [`../INDEX.md`](../INDEX.md)；入口与闭环见 [`../README.md`](../README.md)。
+
 | 文档 | 职责 |
 |---|---|
 | [`01-growth-channels.md`](01-growth-channels.md) | 受众与推广渠道假设 |

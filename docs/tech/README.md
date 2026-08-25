@@ -1,5 +1,7 @@
 # 技术层（tech）索引
 
+> 全库清单见 [`../INDEX.md`](../INDEX.md)；入口与闭环见 [`../README.md`](../README.md)。
+
 | 文档 | 职责 |
 |---|---|
 | [`../../RULES.md`](../../RULES.md) | **实现铁律权威源**（依赖 / KISS / 禁空 catch / 文档同步）；本目录 `RULES.md` 仅为指针 |

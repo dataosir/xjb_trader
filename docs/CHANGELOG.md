@@ -4,6 +4,15 @@
 
 ## [Unreleased]
 
+### 文档（2026-08-25：INDEX 总索引）
+
+> 关联：`docs/INDEX.md`；`docs/README.md`；`.cursorrules`；根 `RULES.md`；`docs/project-state.md`。
+
+- **新建** `docs/INDEX.md`：全库文件清单权威源（一行一文；增删改 docs 内 md 必同步维护）。
+- **瘦身** `docs/README.md`：只保留入口 + 分层一览 + 4 步闭环；目录明细迁到 INDEX。
+- **契约**：Step 3 强制「动 docs 文件清单 → 改 INDEX」；已写入 `.cursorrules`、根 `RULES.md` 第三章。
+- **入口链**：根 `README` / `prd`/`tech`/`ops`/`archive` README / `tech/00` 均挂上 INDEX。
+
 ### 文档（2026-08-25：技术迭代铁律入库）
 
 > 关联：根目录 `RULES.md`；`docs/tech/00-engineering-standards.md`；`.cursorrules`；`docs/project-state.md`。
