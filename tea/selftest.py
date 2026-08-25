@@ -1477,6 +1477,28 @@ def check_scoring(t: Suite, cfg: Config, mk: FakeMarket, sent: dict, lv: dict) -
     return sc
 
 
+def check_winrate_score(t: Suite, cfg: Config) -> None:
+    """胜率选股评分：按实证胜率因素加权（数据启发，与 9 分共振并行）。"""
+    t.head("术 · 胜率选股评分（数据型）")
+    strong = {
+        "sector": {"rank": 1}, "stage": {"stage": "过热"},
+        "identity": {"score": 90.0},
+        "quote": {"chg_pct": 4.0, "vol_ratio": 1.5},
+        "ind": {"ma_bull": True},
+    }
+    wr = preflight.winrate_score(strong, cfg)
+    t.eq("胜率评分（强票）=7", wr["score"], 7)  # 3+1+1+1+1
+
+    weak = {
+        "sector": {"rank": 9}, "stage": {"stage": "突破"},
+        "identity": {"score": 60.0},
+        "quote": {"chg_pct": -2.0, "vol_ratio": 1.5},
+        "ind": {"ma_bull": False},
+    }
+    wr2 = preflight.winrate_score(weak, cfg)
+    t.eq("胜率评分（弱票）=-5", wr2["score"], -5)  # -2-1-1-1
+
+
 def check_veto(t: Suite, cfg: Config, mk: FakeMarket, idn: dict) -> None:
     t.head("术 · VETO 一票否决（§7 阈值边界）")
     base = mk.get_quote(TARGET)
@@ -2259,11 +2281,11 @@ def check_menu(t: Suite, cfg: Config) -> None:
     all_argv = [av[0] for _, _, av in cli.MENU if av[0] != "__submenu__"]
     for sub in cli.SUBMENUS.values():
         all_argv += [av[0] for _, _, av in sub]
-    expect = {"weather", "status", "seed-plan", "plan-check", "__plan__", "run", "pos",
-              "__close__", "watch", "review", "accum", "trace", "followthrough",
-              "trades", "stats", "weekly", "__pos_add__", "__pos_rm__", "__confirm__",
-              "__eval__", "config", "setup", "selftest", "plan-clear"}
-    t.eq("24 项功能一个不少", sorted(set(all_argv)), sorted(expect))
+    expect = {"weather", "status", "seed-plan", "winrate-scan", "plan-check", "__plan__",
+              "run", "pos", "__close__", "watch", "review", "accum", "trace",
+              "followthrough", "trades", "stats", "weekly", "__pos_add__", "__pos_rm__",
+              "__confirm__", "__eval__", "config", "setup", "selftest", "plan-clear"}
+    t.eq("25 项功能一个不少", sorted(set(all_argv)), sorted(expect))
 
     # 时段→建议：每个时段都得有东西可做，且不超过四条（否则就又回到平铺）。
     real_now = utils.now
@@ -2861,6 +2883,7 @@ def main(verbose: bool = True, cfg: Optional[Config] = None) -> int:
         idn = check_identity(t, c, mk)
         lv = check_levels(t, c, mk)
         check_scoring(t, c, mk, sent, lv)
+        check_winrate_score(t, c)
         check_veto(t, c, mk, idn)
         check_position(t, c)
         check_manual_position(t, c, mk)

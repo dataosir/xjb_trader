@@ -917,3 +917,60 @@ class Screener:
         self._write_scan_log(result)
 
         return result
+
+    # ============================================================== 胜率选股
+    def winrate_scan(self, sent: Optional[dict] = None, io: Any = None) -> dict:
+        """胜率选股扫描：复用板块排序/涨幅窗/VETO，用 winrate_score 替代 9分共振分档。
+
+        与 seed_scan 并行：seed_scan 走纪律型 9 分共振，这里走数据型胜率评分，
+        两套候选都落盘（mode 区分），攒够样本后对比谁胜率高。
+        """
+        cfg = self.cfg
+        tracer = seed_trace.Tracer(cfg)
+        sent = sent if sent is not None else get_sentiment(self.mk, cfg, io=io)
+        step1 = self.rank_sectors(tracer, io=io)
+        sectors = step1["top"]
+        strongest = step1.get("strongest_sector_chg")
+        threshold = int(cfg.get("winrate.buyable_threshold", 3))
+        result: Dict[str, Any] = {
+            "at": utils.now().strftime("%Y-%m-%d %H:%M"), "scan_id": tracer.scan_id,
+            "mode": "winrate",
+            "sentiment": sent,
+            "sectors": [{k: v for k, v in s.items() if k != "members"} for s in sectors],
+            "winrate_threshold": threshold,
+            "tier": None, "buyable": [], "watch": [], "candidates": [],
+            "notes": [], "verdict": VERDICT_EMPTY,
+        }
+        if not sectors:
+            result["notes"].append("无板块通过硬门槛")
+            return result
+
+        cands, tier, notes = self.screen_with_downgrade(sectors, step1["max_sector_chg"],
+                                                        tracer, strongest_sector_chg=strongest)
+        result["tier"], result["notes"] = tier, notes
+        vf = self.veto_filter(cands, sent, tracer, io=io)
+
+        buyable, watch = [], []
+        for ev in vf["passed"]:
+            wr = preflight.winrate_score(ev, cfg)
+            ev["winrate_score"] = wr["score"]
+            ev["winrate_detail"] = wr["detail"]
+            if wr["score"] >= threshold:
+                buyable.append(ev)
+            else:
+                ev["track"] = watch_pool.TRACK_WATCH
+                ev["triggers"] = followthrough.trigger_conditions(ev, cfg)
+                watch.append(ev)
+        buyable.sort(key=lambda e: -e.get("winrate_score", -99))
+
+        result["buyable"] = buyable
+        result["watch"] = watch[:int(cfg.get("seed.max_watch_output", 3))]
+        result["candidates"] = vf["candidates"]
+        result["candidates_n"] = len(cands)
+        result["veto_passed_n"] = len(vf["passed"])
+        if buyable:
+            result["verdict"] = VERDICT_TRADEABLE
+        elif watch:
+            result["verdict"] = VERDICT_PENDING
+        result["notes"].append(f"胜率评分门槛 {threshold} 分（数据启发，见 docs/WINRATE_ROADMAP）")
+        return result

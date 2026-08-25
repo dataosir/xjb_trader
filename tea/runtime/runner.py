@@ -274,6 +274,73 @@ def seed_plan(cfg: Optional[Config] = None, market: Optional[Market] = None,
     return result
 
 
+def winrate_plan(cfg: Optional[Config] = None, market: Optional[Market] = None,
+                 io: Optional[IO] = None, sent: Optional[dict] = None) -> dict:
+    """胜率选股扫描（数据型通道）：winrate_score 分档，落盘 mode=winrate 与纪律型对比。
+
+    只落盘观察、不写计划、不买入——数据型通道先积累样本，攒够后与 9 分共振（rule）
+    对比胜率，再决定是否替换（见 docs/WINRATE_ROADMAP_2026-08-24.md）。
+    """
+    cfg = cfg or load_config()
+    io = io or IO()
+    mk = market or Market(cfg)
+    sc = screener_mod.Screener(cfg, mk)
+    t_start = time.time()
+
+    io.say("=" * 56)
+    io.say(f"XJB_TRADE · 胜率选股　{utils.now().strftime('%Y-%m-%d %H:%M')}")
+    io.say("=" * 56)
+    io.say("  ⏳ 开始胜率选股扫描（数据型通道，与 9 分共振并行对比）...")
+
+    sent = sent if sent is not None else weather(cfg, mk, io=io)
+    io.say(format_weather(sent))
+
+    result = sc.winrate_scan(sent=sent, io=io)
+    net = mk.stats_line() if hasattr(mk, "stats_line") else ""
+    io.say(f"  ✓ 胜率选股扫描完成 ({time.time() - t_start:.1f}s)" + (f"，{net}" if net else ""))
+    gap_banner = format_data_gap_banner(sent, net)
+    if gap_banner:
+        io.say(gap_banner)
+        result.setdefault("notes", []).append(
+            "数据缺口/网络异常：" + "；".join(data_gap_summary(sent, net)))
+
+    _print_winrate_result(result, io)
+
+    # 跟涨样本落盘（mode=winrate，与 rule 通道区分）
+    entries = _ft_entries(result)
+    ft_res = ft_mod.record_seed(entries, cfg) if entries else {"added": 0, "skipped": 0, "updated": 0}
+    if ft_res.get("added") or ft_res.get("updated"):
+        io.say(f"  跟涨样本落盘 {ft_res.get('added') + ft_res.get('updated')} 条（mode=winrate），"
+               f"跑 `tea review` 回填 T+N")
+    result["plan"] = None
+    return result
+
+
+def _print_winrate_result(result: dict, io: IO) -> None:
+    """胜率选股结果的精简展示（不像 SEED 报告那么重，重点是胜率分与归因明细）。"""
+    threshold = result.get("winrate_threshold", 3)
+    io.say(f"===== 胜率选股结果 =====\n"
+           f"  时间 {result.get('at')}  胜率门槛 ≥{threshold} 分（数据启发）")
+    top = "、".join(f"{s.get('name')}(#{s.get('rank')})" for s in (result.get("sectors") or [])[:3])
+    io.say(f"  板块 TOP：{top or '无'}")
+    buyable = result.get("buyable") or []
+    watch = result.get("watch") or []
+    if buyable:
+        io.say(f"  ---- 胜率可买（{len(buyable)}）----")
+        for e in buyable:
+            io.say(f"    {e.get('code')} {e.get('name')} [{e.get('sector_name')}] "
+                   f"胜率分 {e.get('winrate_score')}")
+            io.say(f"        {e.get('winrate_detail')}")
+    else:
+        io.say("  ---- 胜率可买（0）----  无达标")
+    if watch:
+        io.say(f"  ---- 胜率观察（{len(watch)}）----")
+        for e in watch:
+            io.say(f"    {e.get('code')} {e.get('name')} [{e.get('sector_name')}] "
+                   f"胜率分 {e.get('winrate_score')} | {e.get('winrate_detail')}")
+    io.say("  注：胜率选股只落盘观察、不写计划、不买入，用于与 9 分共振（rule）对比积累数据")
+
+
 def _ft_entries(result: dict) -> List[dict]:
     """把三档输出摊平成跟涨样本（可买/观察/前夕都要跟踪，才知道哪一档真的有钱）。
 
@@ -324,6 +391,8 @@ def _ft_entries(result: dict) -> List[dict]:
                 "odds": ev.get("odds"),
                 "veto_labels": (ev.get("veto") or {}).get("labels"),
                 "lowbuy": bool(ev.get("lowbuy")),
+                "winrate_score": ev.get("winrate_score"),
+                "mode": result.get("mode", "rule"),
                 **market,
             })
     return entries

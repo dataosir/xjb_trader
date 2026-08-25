@@ -91,6 +91,11 @@ def cmd_seed_plan(args, cfg: Config) -> int:
     return 0 if res.get("buyable") else 1
 
 
+def cmd_winrate_scan(args, cfg: Config) -> int:
+    res = runner.winrate_plan(cfg=cfg, io=_io())
+    return 0 if res.get("buyable") else 1
+
+
 def _plan_expired(plan: dict, cfg: Config) -> bool:
     """计划是否已过期/作废：还挂着标的，但今日已不可执行。
 
@@ -408,17 +413,18 @@ MENU = [
     ("1", "市场天气（道）", ["weather"]),
     ("2", "今日状态（法）", ["status"]),
     ("3", "种子扫描 + 写计划（14:30）", ["seed-plan"]),
-    ("4", "计划复核（09:35 / 14:35）", ["plan-check"]),
-    ("5", "查看交易计划", ["__plan__"]),
-    ("6", "单标的准入评估", ["run"]),
-    ("7", "只算不买（单票快评）", ["__eval__"]),
-    ("8", "持仓 / 资金", ["pos"]),
-    ("9", "平仓登记", ["__close__"]),
-    ("10", "观察池", ["watch"]),
-    ("11", "盘后复核（跟涨回填+观察池）", ["review"]),
-    ("12", "复盘工具 ▸", ["__submenu__", "复盘工具"]),
-    ("13", "持仓管理 ▸", ["__submenu__", "持仓管理"]),
-    ("14", "配置与维护 ▸", ["__submenu__", "配置与维护"]),
+    ("4", "胜率选股（数据型，只落盘对比）", ["winrate-scan"]),
+    ("5", "计划复核（09:35 / 14:35）", ["plan-check"]),
+    ("6", "查看交易计划", ["__plan__"]),
+    ("7", "单标的准入评估", ["run"]),
+    ("8", "只算不买（单票快评）", ["__eval__"]),
+    ("9", "持仓 / 资金", ["pos"]),
+    ("10", "平仓登记", ["__close__"]),
+    ("11", "观察池", ["watch"]),
+    ("12", "盘后复核（跟涨回填+观察池）", ["review"]),
+    ("13", "复盘工具 ▸", ["__submenu__", "复盘工具"]),
+    ("14", "持仓管理 ▸", ["__submenu__", "持仓管理"]),
+    ("15", "配置与维护 ▸", ["__submenu__", "配置与维护"]),
 ]
 
 # 二级子菜单：常用功能留在顶层一键直达，低频功能收进来，顶层从 24 项压到 13 项。
@@ -447,10 +453,10 @@ SUBMENUS = {
 # 顶层展开视图的分组（子菜单只占一项）。
 MENU_GROUPS = [
     ("道法 · 先看天气", ["1", "2"]),
-    ("计划 · 次日", ["3", "4", "5"]),
-    ("交易 · 买与卖", ["6", "7", "8", "9"]),
-    ("观察 · 盘中与盘后", ["10", "11"]),
-    ("更多功能", ["12", "13", "14"]),
+    ("计划 · 次日", ["3", "4", "5", "6"]),
+    ("交易 · 买与卖", ["7", "8", "9", "10"]),
+    ("观察 · 盘中与盘后", ["11", "12"]),
+    ("更多功能", ["13", "14", "15"]),
 ]
 
 
@@ -744,6 +750,9 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--no-plan", action="store_true", help="只扫描不写计划")
     s.add_argument("--strict-window", action="store_true", help="非 14:30 窗口时提示")
     s.set_defaults(func=cmd_seed_plan)
+
+    wr = sub.add_parser("winrate-scan", help="胜率选股（数据型通道，只落盘对比，不写计划）")
+    wr.set_defaults(func=cmd_winrate_scan)
 
     pc = sub.add_parser("plan-check", help="计划复核（任一变动整单作废）")
     pc.add_argument("--dry", action="store_true", help="只比对不落盘")

@@ -4,6 +4,18 @@
 
 ## [Unreleased]
 
+### 策略（2026-08-25 新增「胜率选股」菜单：数据型通道）
+
+> 与 9 分共振（纪律型 rule）并行，用实证胜率因素加权选票，只落盘不买入，攒够样本
+> 再对比谁胜率高，决定是否替换现有选票（见 docs/WINRATE_ROADMAP）。
+
+- **`preflight.winrate_score`**：按已回填样本的胜率拆解加权——板块排名 1-3 +3/4-5 +1/>8 -2、
+  突破 -1、身份分 85-93 +1/<75 -1、涨幅 3-5% +1/5-7% -1、放量多头 +1、放量下跌 -1。
+- **`Screener.winrate_scan` + `runner.winrate_plan`**：复用板块排序/涨幅窗/VETO，用
+  winrate_score 替代 9 分共振分档，门槛 `winrate.buyable_threshold=3`。
+- **落盘 `mode=winrate`**：与 `mode=rule` 区分，`winrate_score` 字段进 seed_records。
+- **新菜单项「4 胜率选股」+ 命令 `tea winrate-scan`**：只落盘观察、不写计划、不买入。
+
 ### 改进（2026-08-25 低吸样本计数 + 可买/低吸标签区分）
 
 - **`review` 打印低吸样本进度**（`followthrough.lowbuy_sample_stats`）：累计条数、已回填条数、

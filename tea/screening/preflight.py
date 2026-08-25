@@ -363,6 +363,83 @@ def effective_threshold(identity: Optional[dict] = None, sent: Optional[dict] = 
     return {"threshold": int(th), "base": base, "notes": notes}
 
 
+# ------------------------------------------------------------------ 胜率选股评分
+
+def winrate_score(ev: dict, cfg: Optional[Config] = None) -> dict:
+    """胜率选股评分：按已回填样本的实证胜率因素加权（数据启发，非拍脑袋）。
+
+    权重来自 62 条回填样本的胜率拆解（跨 T+1/T+3/T+5）：
+    - 板块排名 1-3 胜 50%、4-5 胜 28%、6-8 胜 6~17%、>8 胜 0~8%（最强、单调）
+    - 突破阶段 6%（最差）、过热 26%
+    - 身份分 75-85 胜 5%、85-93 胜 33%、93+ 胜 25%（透支不加分）
+    - 涨幅 3-5% 胜 27%、5-7% 胜 14%
+    - 放量上涨+多头 赢、放量下跌 亏
+
+    与 9 分共振（纪律型启发式）并行：本函数是「数据型」通道，落盘 mode=winrate
+    后与 mode=rule 对比，攒够样本再重拟合权重（见 docs/WINRATE_ROADMAP）。
+    """
+    cfg = cfg or load_config()
+    parts: List[str] = []
+    score = 0
+
+    # 板块排名（权重最高，跨周期单调）
+    rank = (ev.get("sector") or {}).get("rank")
+    if rank is not None:
+        if rank <= 3:
+            score += 3
+            parts.append(f"板块排名{rank}≤3 +3")
+        elif rank <= 5:
+            score += 1
+            parts.append(f"板块排名{rank}∈4-5 +1")
+        elif rank <= 8:
+            parts.append(f"板块排名{rank}∈6-8 0")
+        else:
+            score -= 2
+            parts.append(f"板块排名{rank}>8 -2")
+
+    # 阶段：突破最差
+    stage = (ev.get("stage") or {}).get("stage")
+    if stage == "突破":
+        score -= 1
+        parts.append("突破阶段 -1")
+    elif stage == "过热":
+        score += 1
+        parts.append("过热阶段 +1")
+
+    # 身份分：85-93 最优，<75 最差，93+ 透支不加分
+    idn = (ev.get("identity") or {}).get("score")
+    if idn is not None:
+        if 85 <= idn <= 93:
+            score += 1
+            parts.append(f"身份分{idn:.0f}∈85-93 +1")
+        elif idn < 75:
+            score -= 1
+            parts.append(f"身份分{idn:.0f}<75 -1")
+
+    # 涨幅：3-5% 最优，5-7% 反而差
+    chg = (ev.get("quote") or {}).get("chg_pct")
+    if chg is not None:
+        if 3.0 <= chg <= 5.0:
+            score += 1
+            parts.append(f"涨幅{chg:.1f}%∈3-5 +1")
+        elif 5.0 < chg <= 7.0:
+            score -= 1
+            parts.append(f"涨幅{chg:.1f}%∈5-7 -1")
+
+    # 量价：放量+多头 加分、放量下跌 扣分
+    vr = (ev.get("quote") or {}).get("vol_ratio")
+    bull = bool((ev.get("ind") or {}).get("ma_bull"))
+    if chg is not None and vr is not None:
+        if chg > 0 and vr >= 1.2 and bull:
+            score += 1
+            parts.append("放量上涨+多头 +1")
+        elif chg < 0 and vr >= 1.2:
+            score -= 1
+            parts.append("放量下跌 -1")
+
+    return {"score": score, "parts": parts, "detail": "；".join(parts) if parts else "无胜率信号"}
+
+
 # ------------------------------------------------------------------ 预审主函数
 
 def evaluate(code: str, market: Optional[Market] = None, cfg: Optional[Config] = None,
