@@ -376,6 +376,7 @@ def close_review(cfg: Optional[Config] = None, market: Optional[Market] = None,
            f"待回填 {upd.get('pending')} 条，样本累计 {upd.get('total') or 0} 条")
     io.say(ft_mod.format_followthrough(cfg))
     io.say(ft_mod.format_stage_b_status(cfg))
+    io.say(ft_mod.format_lowbuy_status(cfg))
 
     # 2. 观察池复核
     sent = sent if sent is not None else weather(cfg, mk, io=io)

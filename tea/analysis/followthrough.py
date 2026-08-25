@@ -370,3 +370,27 @@ def format_stage_b_status(cfg: Optional[Config] = None, min_samples: int = 30) -
     return (f"阶段 B 经验先验：最大桶样本 {st['max_n']}/{st['threshold']}"
             f"（{st['max_bucket']}，胜率 {st['max_rate']:.0%}），"
             f"还差 {st['threshold'] - st['max_n']} 条达标")
+
+
+def lowbuy_sample_stats(cfg: Optional[Config] = None) -> dict:
+    """低吸（启动前夕）样本计数：seed_records 里 lowbuy=True 的样本，含回填进度。"""
+    cfg = cfg or load_config()
+    records = load_records(cfg)
+    lowbuy = [r for r in records if r.get("lowbuy")]
+    backfilled = [r for r in lowbuy if r.get("result") in ("win", "loss")]
+    return {
+        "total": len(lowbuy),
+        "backfilled": len(backfilled),
+        "wins": sum(1 for r in backfilled if r["result"] == "win"),
+    }
+
+
+def format_lowbuy_status(cfg: Optional[Config] = None) -> str:
+    """低吸样本进度提示：review 时打印，判断何时能进入低吸验证（≥30 条）。"""
+    st = lowbuy_sample_stats(cfg)
+    if st["total"] == 0:
+        return "低吸样本：0 条（跑 seed-plan 积累启动前夕候选，再跑 review 回填）"
+    if st["backfilled"] == 0:
+        return f"低吸样本：累计 {st['total']} 条，尚无回填（跑 review 回填 T+N）"
+    return (f"低吸样本：累计 {st['total']} 条，已回填 {st['backfilled']} 条"
+            f"（胜 {st['wins']}/{st['backfilled']}），目标 ≥30 条进入验证")

@@ -150,7 +150,7 @@ def render_md(result: dict, cfg: Optional[Config] = None) -> str:
 
     # ---- 三档输出
     for title, key, note in (
-        ("## 输出一 · 可买（写次日计划，T+1 14:00 执行）", "buyable", "无可买标的。"),
+        ("## 输出一 · 可买（追高，写次日计划，T+1 14:00 执行）", "buyable", "无可买标的。"),
         ("## 输出二 · 待启动观察（盯触发条件，不自动买入）", "watch", "观察轨为空。"),
         ("## 输出三 · 近失（只复盘，不盯盘）", "near_miss", "无近失记录。"),
     ):
@@ -267,8 +267,8 @@ def format_result(result: dict, cfg: Optional[Config] = None) -> str:
         "near_miss": ("不操作", utils.COLOR_INFO),  # 只复盘 → 青
         "eve": ("观察", utils.COLOR_INFO),          # 前夕观察 → 青
     }
-    for title, key in (("可买", "buyable"), ("待启动观察", "watch"),
-                       ("近失（只复盘）", "near_miss"), ("低吸观察", "eve")):
+    for title, key in (("可买（追高）", "buyable"), ("待启动观察", "watch"),
+                       ("近失（只复盘）", "near_miss"), ("低吸观察（启动前夕）", "eve")):
         evs = result.get(key) or []
         op_label, color = op_map.get(key, ("", utils.COLOR_WARN))
         lines.append(f"  ---- {title}（{len(evs)}）----")

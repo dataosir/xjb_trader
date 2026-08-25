@@ -32,7 +32,7 @@ VERDICT_PENDING = "PENDING"
 VERDICT_EMPTY = "EMPTY"
 
 # 候选明细裁决（报告里逐只可追溯，含被 continue 丢弃的硬否决/数据缺）
-CAND_BUYABLE = "可买"
+CAND_BUYABLE = "可买（追高）"
 CAND_WATCH = "观察轨"
 CAND_NEAR = "近失"
 CAND_HARD = "硬否决"

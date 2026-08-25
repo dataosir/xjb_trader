@@ -2453,6 +2453,18 @@ def check_followthrough(t: Suite, cfg: Config) -> None:
     t.eq("阶段B未达标时还差条数", st2["threshold"] - st2["max_n"], 2)
     t.ok("阶段B未达标判定", not st2["ready"])
 
+    # 低吸样本计数：lowbuy=True 的样本，含回填进度
+    ft_mod.save_records([
+        {"date": "2026-08-19", "code": "600905", "name": "低吸1", "lowbuy": True, "result": "win"},
+        {"date": "2026-08-20", "code": "600906", "name": "低吸2", "lowbuy": True, "result": None},
+        {"date": "2026-08-20", "code": "600907", "name": "追高1", "lowbuy": False, "result": "loss"},
+    ], cfg)
+    lb = ft_mod.lowbuy_sample_stats(cfg)
+    t.eq("低吸样本总数", lb["total"], 2)
+    t.eq("低吸样本已回填", lb["backfilled"], 1)
+    t.eq("低吸样本胜", lb["wins"], 1)
+    t.ok("低吸进度文案", "2 条" in ft_mod.format_lowbuy_status(cfg))
+
 
 def check_pricetrack(t: Suite, cfg: Config, mk: FakeMarket) -> None:
     """价格跟踪：进入种子文档 → 每日记价 → 卖出/删除停止。"""
