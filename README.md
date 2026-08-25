@@ -268,8 +268,13 @@ python3 -m tea selftest
 
 | 文档 | 说明 |
 |---|---|
-| [docs/CONTRIBUTING.md](docs/CONTRIBUTING.md) | 参与贡献指南：一条硬规矩（公式与断言同步）、代码风格、模块归属、提 Issue 规范 |
+| [docs/README.md](docs/README.md) | 文档总入口：prd / tech / ops 分层 + **4 步迭代闭环** |
+| [docs/project-state.md](docs/project-state.md) | 当前全局状态（版本 / 进行中 / 下一步） |
+| [docs/prd/README.md](docs/prd/README.md) | 产品需求（PRD）：定位、日常流程、F01–F15 与 backlog |
+| [docs/tech/00-engineering-standards.md](docs/tech/00-engineering-standards.md) | 工程规范：公式与断言同步、代码风格、模块归属 |
+| [docs/tech/01-architecture.md](docs/tech/01-architecture.md) | 技术架构与数据流 |
 | [docs/CHANGELOG.md](docs/CHANGELOG.md) | 版本变更记录（格式参考 Keep a Changelog） |
+| [docs/archive/](docs/archive/) | 历史策略路线图与评审（只读归档） |
 | [LICENSE](LICENSE) | MIT 许可证 |
 | [.github/ISSUE_TEMPLATE/](.github/ISSUE_TEMPLATE/) | Bug 与规则讨论模板 |
 | [.github/workflows/ci.yml](.github/workflows/ci.yml) | CI 流水线（自测矩阵 / lint / 构包） |

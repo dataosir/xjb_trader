@@ -279,7 +279,7 @@ def winrate_plan(cfg: Optional[Config] = None, market: Optional[Market] = None,
     """胜率选股扫描（数据型通道）：winrate_score 分档，落盘 mode=winrate 与纪律型对比。
 
     只落盘观察、不写计划、不买入——数据型通道先积累样本，攒够后与 9 分共振（rule）
-    对比胜率，再决定是否替换（见 docs/WINRATE_ROADMAP_2026-08-24.md）。
+    对比胜率，再决定是否替换（见 docs/archive/WINRATE_ROADMAP_2026-08-24.md）。
     """
     cfg = cfg or load_config()
     io = io or IO()

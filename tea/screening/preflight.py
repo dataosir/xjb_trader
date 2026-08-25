@@ -376,7 +376,7 @@ def winrate_score(ev: dict, cfg: Optional[Config] = None) -> dict:
     - 放量上涨+多头 赢、放量下跌 亏
 
     与 9 分共振（纪律型启发式）并行：本函数是「数据型」通道，落盘 mode=winrate
-    后与 mode=rule 对比，攒够样本再重拟合权重（见 docs/WINRATE_ROADMAP）。
+    后与 mode=rule 对比，攒够样本再重拟合权重（见 docs/archive/WINRATE_ROADMAP）。
     """
     cfg = cfg or load_config()
     parts: List[str] = []

@@ -297,7 +297,7 @@ def hl(text: str, color: str = "yellow") -> str:
 
 
 # ------------------------------------------------------------------ 统一颜色方案
-# 工程规则（见 docs/CONTRIBUTING.md「颜色方案」）：业务代码里禁止散落裸颜色名，
+# 工程规则（见 docs/tech/00-engineering-standards.md「颜色方案」）：业务代码里禁止散落裸颜色名，
 # 一律用这些语义常量 + utils.hl / utils.sign_color。语义由含义决定，不由位置决定。
 
 COLOR_PROFIT = "green"      # 盈利 / 上涨 / 通过

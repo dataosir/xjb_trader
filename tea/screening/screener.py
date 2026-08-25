@@ -818,7 +818,7 @@ class Screener:
         """低吸（启动前夕）板块池：排名 3~10、刚开始升温（涨幅 2~4%、涨停≤1）的板块。
 
         追涨吃的是 TOP1-3 已涨停板块的鱼尾，低吸吃的是排名靠后、刚开始升温的鱼身。
-        依据 docs/LOWBUY_PLAN_2026-08-25.md：1~3% 的票大部分不会启动，先落盘积累样本
+        依据 docs/archive/LOWBUY_PLAN_2026-08-25.md：1~3% 的票大部分不会启动，先落盘积累样本
         验证「升温板块 + 低吸票」的胜率，再决定是否上线买入。
         """
         cfg = self.cfg
@@ -1061,5 +1061,5 @@ class Screener:
             result["verdict"] = VERDICT_TRADEABLE
         elif watch:
             result["verdict"] = VERDICT_PENDING
-        result["notes"].append(f"胜率评分门槛 {threshold} 分（数据启发，见 docs/WINRATE_ROADMAP）")
+        result["notes"].append(f"胜率评分门槛 {threshold} 分（数据启发，见 docs/archive/WINRATE_ROADMAP）")
         return result

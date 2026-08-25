@@ -4,6 +4,25 @@
 
 ## [Unreleased]
 
+### 文档（2026-08-25：技术迭代铁律入库）
+
+> 关联：根目录 `RULES.md`；`docs/tech/00-engineering-standards.md`；`.cursorrules`；`docs/project-state.md`。
+
+- **新建** 根目录 `RULES.md`：依赖红线 / KISS / 禁空 catch / 文档先行与同步 / 禁静默改 CHANGELOG。
+- **增补** `tech/00`「技术迭代铁律」摘要表，指向根 `RULES.md`。
+- **`docs/tech/RULES.md`** 改为指针（避免双源正文）。
+- **`.cursorrules`** 挂钩根 `RULES.md`；`project-state` 文档健康项更新为已存在。
+
+### 文档（2026-08-25：docs 瘦身与一人公司框架）
+
+> 关联：文档总入口 `docs/README.md`；状态 `docs/project-state.md`。
+
+- **标准分层落地**：保留 `docs/prd/`；新建 `docs/tech/`（工程规范/架构/接口/持久化）、`docs/ops/`（增长/反馈）。
+- **确立 4 步闭环**：Sync → Plan → Code & Doc → Log（见 `docs/README.md`）。
+- **归档**：胜率/低吸/评审日期笔记迁入 `docs/archive/`（不删）。
+- **迁移**：原 `docs/CONTRIBUTING.md` → `docs/tech/00-engineering-standards.md`。
+- **新增** `docs/project-state.md` 作为每次迭代必读必写的全局状态。
+
 ### 策略（2026-08-25 P0：可买硬规则 + 入选板块一致性）
 
 > 堵中游漏网与多板块归因错位：可买必须「筛入板块 rank≤5 且与预审板块一致」。
@@ -36,7 +55,7 @@
 ### 策略（2026-08-25 新增「胜率选股」菜单：数据型通道）
 
 > 与 9 分共振（纪律型 rule）并行，用实证胜率因素加权选票，只落盘不买入，攒够样本
-> 再对比谁胜率高，决定是否替换现有选票（见 docs/WINRATE_ROADMAP）。
+> 再对比谁胜率高，决定是否替换现有选票（见 docs/archive/WINRATE_ROADMAP_2026-08-24.md）。
 
 - **`preflight.winrate_score`**：按已回填样本的胜率拆解加权——板块排名 1-3 +3/4-5 +1/>8 -2、
   突破 -1、身份分 85-93 +1/<75 -1、涨幅 3-5% +1/5-7% -1、放量多头 +1、放量下跌 -1。
@@ -74,7 +93,7 @@
   只有放量(≥1.2)+多头才 2 分、量比≥1.0+多头才 1 分，弱票不再靠「涨了今天」混分。
 - **放量下跌 → 量价结构 -1 分**：放量下跌是强负信号（大资金出逃），比 0 分更重，
   量价结构下限放开到 -1。
-- **低吸（启动前夕）技术方案成文 TODO**：`docs/LOWBUY_PLAN_2026-08-25.md`——三阶段
+- **低吸（启动前夕）技术方案成文 TODO**：`docs/archive/LOWBUY_PLAN_2026-08-25.md`——三阶段
   （前夕候选落盘 → 样本验证 → 上线低吸买入），数据先行、暂不买入。
 
 ### 改进（2026-08-25 数据缺口/网络异常在扫描结果里醒目提示）
@@ -118,7 +137,7 @@
   开关 `strategy.winrate_gate_enabled`，一键回滚。
 - **板块「涨停1家」放宽通道补排名上限**：`seed.sector_relax_rank=5`（原无上限，
   会放排名 9~15 的中游板块进池，是最大输家桶）。
-- **阶段 B 技术方案成文 HOLD**：`docs/WINRATE_PRIOR_PLAN_2026-08-24.md`——经验胜率先验
+- **阶段 B 技术方案成文 HOLD**：`docs/archive/WINRATE_PRIOR_PLAN_2026-08-24.md`——经验胜率先验
   需每桶 ≥30 样本，当前最大桶仅 9，暂不实现。
 - **`review` 自动打印阶段 B 触发进度**（`followthrough.stage_b_bucket_stats`）：
   盘后回填时提示「最大桶样本 N/30（桶：…），还差 M 条达标」，样本够了即可开始实现。
@@ -187,7 +206,7 @@
 ### 策略（2026-08-18 准入松绑：修复"9 天 0 可买"的结构性死锁）
 
 > 复盘 08-08 ~ 08-18 的 30+ 次扫描与观察池/种子记录：从未产出过 1 只「可买」，
-> 根因不是市场差，而是三处过滤器互相锁死。详见 `docs/STRATEGY_ADJUSTMENT_2026-08-18.md`。
+> 根因不是市场差，而是三处过滤器互相锁死。详见 `docs/archive/STRATEGY_ADJUSTMENT_2026-08-18.md`。
 
 - **R:R 门槛 3 → 2（`strategy.min_odds` + `scoring.sl_struct_min_odds`）**：止损硬顶 6% + 止盈上限 15% + 双边滑点 0.5% 的结构下，含滑点最大盈亏比 ≈2.1，3 恒不可达——观察池 12 只 odds 全部卡在 2.08~2.18，无一达标。降到 2 后由「止盈抬升」逻辑自动满足（需 tp≈14.4% ≤ 15% 上限）。同时修复连锁问题：「止损结构」维度因 `odds≥3` 恒为 0 分、有效满分从 9 掉到 8
 - **分时高位/封顶否决改为仅在盘中交易时段生效**（`veto.skip_intraday_check_off_session`，默认 true）：盘后扫描时「现价≈当日最高」是强势股常态，分时位置≈1.0 会把龙头误判成「追高/封顶」——28 只候选里 71% 被此否决杀掉。跳过时在 `veto.intraday_skipped`/`intraday_note` 留痕；T+1 真实买入在 14:00–14:45 盘中重新评估，不受影响

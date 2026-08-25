@@ -2,7 +2,7 @@
 
 > 状态：**阶段 1 已落地，只积累不买入**。本文是「从追涨扩展到低吸」的技术方案与待办清单。
 > 配套：当前程序是「追涨」策略（涨幅窗口 3% 起），低吸是「启动前夕买入」（1~3%）。
-> 关联：`docs/WINRATE_ROADMAP_2026-08-24.md`（胜率迭代路线）、`docs/WINRATE_PRIOR_PLAN_2026-08-24.md`（阶段 B 先验）。
+> 关联：`docs/archive/WINRATE_ROADMAP_2026-08-24.md`（胜率迭代路线）、`docs/archive/WINRATE_PRIOR_PLAN_2026-08-24.md`（阶段 B 先验）。
 
 ---
 
