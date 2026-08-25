@@ -1779,6 +1779,32 @@ def check_sector_tradeable(t: Suite, cfg: Config, mk: FakeMarket) -> None:
         mk.get_sector_members = orig_members
 
 
+def check_lowbuy_pool(t: Suite, cfg: Config, mk: FakeMarket) -> None:
+    """低吸板块池：排名 3~10、升温(2~4%)、涨停≤1 的板块。"""
+    t.head("扫描 · 低吸（启动前夕）板块池")
+    sc = screener_mod.Screener(cfg, mk)
+    scored = [
+        {"rank": 1, "chg": 6.5, "limit_up_count": 3, "name": "已涨停龙头"},
+        {"rank": 2, "chg": 5.0, "limit_up_count": 2, "name": "涨停次强"},
+        {"rank": 3, "chg": 3.5, "limit_up_count": 1, "name": "升温1"},
+        {"rank": 5, "chg": 2.5, "limit_up_count": 0, "name": "升温2"},
+        {"rank": 8, "chg": 3.0, "limit_up_count": 1, "name": "升温3"},
+        {"rank": 10, "chg": 4.0, "limit_up_count": 1, "name": "升温4"},
+        {"rank": 11, "chg": 3.0, "limit_up_count": 1, "name": "排名超限"},
+        {"rank": 4, "chg": 5.5, "limit_up_count": 0, "name": "涨幅超限"},
+        {"rank": 4, "chg": 1.0, "limit_up_count": 0, "name": "涨幅不足"},
+        {"rank": 4, "chg": 3.0, "limit_up_count": 3, "name": "涨停过多"},
+    ]
+    pool = sc.lowbuy_sector_pool(scored)
+    names = [s["name"] for s in pool]
+    t.eq("低吸板块池数量", len(pool), 4)
+    t.ok("低吸池含升温板块",
+         all(n in names for n in ("升温1", "升温2", "升温3", "升温4")), str(names))
+    t.ok("低吸池排除已涨停龙头", "已涨停龙头" not in names)
+    t.ok("低吸池排除排名超限", "排名超限" not in names)
+    t.ok("低吸池排除涨停过多", "涨停过多" not in names)
+
+
 def check_seed(t: Suite, cfg: Config, mk: FakeMarket, sent: dict) -> dict:
     t.head("扫描 · 种子四步流（§9）")
     sc = screener_mod.Screener(cfg, mk)
@@ -2832,6 +2858,7 @@ def main(verbose: bool = True, cfg: Optional[Config] = None) -> int:
         check_market_trend_deduction(t, c, mk)
         check_winrate_gate(t, c, mk)
         check_sector_tradeable(t, c, mk)
+        check_lowbuy_pool(t, c, mk)
         check_plan_labels(t, c, mk, sent)
         check_plan_clear(t, c)
         check_plan_check_clear_prompt(t, c)

@@ -176,10 +176,10 @@ def render_md(result: dict, cfg: Optional[Config] = None) -> str:
             lines += _scoring_dims_lines(e)
         lines.append("")
 
-    # ---- 前夕观察
+    # ---- 低吸（启动前夕）观察
     eve = result.get("eve") or []
     ew = result.get("eve_window") or [1.0, 3.0]
-    lines += [f"## 前夕观察（{ew[0]:.1f}%~{ew[1]:.1f}% 涨幅窗 · 永不写计划）", ""]
+    lines += [f"## 低吸观察（启动前夕 {ew[0]:.1f}%~{ew[1]:.1f}% 涨幅窗 · 暂不写计划，积累样本）", ""]
     if eve:
         lines += _EV_HEADER + [_ev_row(e) for e in eve] + [""]
         for e in eve:
@@ -189,7 +189,7 @@ def render_md(result: dict, cfg: Optional[Config] = None) -> str:
             lines += _scoring_dims_lines(e)
         lines.append("")
     else:
-        lines += ["无前夕观察标的。", ""]
+        lines += ["无低吸观察标的。", ""]
 
     # ---- 候选明细（初筛后逐只的最终裁决，硬否决/数据缺也在这里）
     cands = result.get("candidates") or []
@@ -268,7 +268,7 @@ def format_result(result: dict, cfg: Optional[Config] = None) -> str:
         "eve": ("观察", utils.COLOR_INFO),          # 前夕观察 → 青
     }
     for title, key in (("可买", "buyable"), ("待启动观察", "watch"),
-                       ("近失（只复盘）", "near_miss"), ("前夕观察", "eve")):
+                       ("近失（只复盘）", "near_miss"), ("低吸观察", "eve")):
         evs = result.get(key) or []
         op_label, color = op_map.get(key, ("", utils.COLOR_WARN))
         lines.append(f"  ---- {title}（{len(evs)}）----")

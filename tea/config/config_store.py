@@ -534,6 +534,13 @@ DEFAULTS: Dict[str, Any] = {
         "eve_min_chg": 1.0,
         "eve_max_chg": 3.0,
         "eve_trigger_intraday": 0.75,
+        # 低吸（启动前夕）板块池：追涨吃 TOP1-3 已涨停的鱼尾，低吸吃排名 3~10、
+        # 刚开始升温（涨幅 2~4%、涨停≤1）的鱼身。仅观察落盘，暂不写计划。
+        "lowbuy_rank_min": 3,
+        "lowbuy_rank_max": 10,
+        "lowbuy_chg_min": 2.0,
+        "lowbuy_chg_max": 4.0,
+        "lowbuy_limit_up_max": 1,
         "sprout_scan_enabled": True,
         "member_fetch_cap": 60,
         # 预审候选上限：板块池拓宽后需相应提高，防止有效候选被截断

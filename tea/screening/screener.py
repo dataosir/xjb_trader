@@ -757,11 +757,30 @@ class Screener:
         return {"buyable": buyable[:max_out], "watch": watch[:max_watch], "near_miss": near[:max_near],
                 "buyable_all": buyable, "dropped_buyable": buyable[max_out:]}
 
-    # ============================================================== 前夕观察
+    # ============================================================== 低吸板块池
+    def lowbuy_sector_pool(self, scored: List[dict]) -> List[dict]:
+        """低吸（启动前夕）板块池：排名 3~10、刚开始升温（涨幅 2~4%、涨停≤1）的板块。
+
+        追涨吃的是 TOP1-3 已涨停板块的鱼尾，低吸吃的是排名靠后、刚开始升温的鱼身。
+        依据 docs/LOWBUY_PLAN_2026-08-25.md：1~3% 的票大部分不会启动，先落盘积累样本
+        验证「升温板块 + 低吸票」的胜率，再决定是否上线买入。
+        """
+        cfg = self.cfg
+        lo = int(cfg.get("seed.lowbuy_rank_min", 3))
+        hi = int(cfg.get("seed.lowbuy_rank_max", 10))
+        chg_lo = float(cfg.get("seed.lowbuy_chg_min", 2.0))
+        chg_hi = float(cfg.get("seed.lowbuy_chg_max", 4.0))
+        zt_max = int(cfg.get("seed.lowbuy_limit_up_max", 1))
+        return [s for s in scored
+                if lo <= (s.get("rank") or 99) <= hi
+                and chg_lo <= (s.get("chg") or 0) <= chg_hi
+                and (s.get("limit_up_count") or 0) <= zt_max]
+
+    # ============================================================== 前夕观察 / 低吸候选
     def eve_scan(self, sectors: List[dict], sent: Optional[dict],
                  tracer: Optional[seed_trace.Tracer] = None, io: Any = None,
                  max_sector_chg: Optional[float] = None) -> List[dict]:
-        """前夕观察（1%~3% 涨幅窗，上限随动态下限收）：仅观察/报告，永不写计划。"""
+        """前夕/低吸候选（1%~3% 涨幅窗，上限随动态下限收）：仅观察落盘，暂不写计划。"""
         cfg = self.cfg
         cands = self.screen_tier(sectors, TIER_EVE, tracer, max_sector_chg=max_sector_chg)
         out: List[dict] = []
@@ -778,6 +797,7 @@ class Screener:
                 continue
             ev["tier_label"] = TIER_EVE
             ev["track"] = watch_pool.TRACK_EVE
+            ev["lowbuy"] = True  # 低吸（启动前夕）候选标签：落盘后可单独归因
             lo = dyn_min_chg(cfg, max_sector_chg)
             hi = float(cfg.get("seed.strict_max_chg", 5.5))
             intr = float(cfg.get("seed.eve_trigger_intraday", 0.75))
@@ -868,11 +888,18 @@ class Screener:
         result["soft_n"] = len(vf["soft"])
 
         if include_eve:
-            utils.tell(io, "  ⏳ 前夕观察扫描...")
+            utils.tell(io, "  ⏳ 低吸（启动前夕）扫描...")
             try:
-                with utils.timed("前夕观察扫描", io, threshold=0.5):
-                    result["eve"] = self.eve_scan(sectors, sent, tracer, io=io,
-                                                  max_sector_chg=strongest)
+                with utils.timed("低吸扫描", io, threshold=0.5):
+                    # 低吸不追 TOP1-3 已涨停板块（那是鱼尾），改扫排名 3~10 升温板块。
+                    lowbuy_sectors = self.lowbuy_sector_pool(step1["scored"])
+                    result["lowbuy_sectors_n"] = len(lowbuy_sectors)
+                    if lowbuy_sectors:
+                        result["eve"] = self.eve_scan(lowbuy_sectors, sent, tracer, io=io,
+                                                      max_sector_chg=strongest)
+                    else:
+                        result["eve"] = []
+                        result["notes"].append("无低吸板块（排名 3~10 升温板块为空）")
             except Exception as exc:
                 result["notes"].append(f"前夕观察扫描异常：{exc}")
 

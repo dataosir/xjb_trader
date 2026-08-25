@@ -323,6 +323,7 @@ def _ft_entries(result: dict) -> List[dict]:
                 "rank_pct": sec.get("stock_rank_pct"),
                 "odds": ev.get("odds"),
                 "veto_labels": (ev.get("veto") or {}).get("labels"),
+                "lowbuy": bool(ev.get("lowbuy")),
                 **market,
             })
     return entries
