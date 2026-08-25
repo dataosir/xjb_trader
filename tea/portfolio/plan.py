@@ -334,8 +334,12 @@ def check_plan(market: Optional[Market] = None, cfg: Optional[Config] = None,
     mk = market or Market(cfg)
     for item in items:
         try:
+            # 复核时优先沿用计划快照的入选板块，避免 industry 重映射导致板块错位误杀/漏杀。
+            snap = item.get("snapshot") or {}
+            prefer = snap.get("sector_bk") or snap.get("sector_name")
             ev = preflight.evaluate(item["code"], mk, cfg, sent=sent,
-                                           sl_pct=item.get("sl_pct"), tp_pct=item.get("tp_pct"))
+                                           sl_pct=item.get("sl_pct"), tp_pct=item.get("tp_pct"),
+                                           prefer_sector=prefer)
         except Exception as exc:
             out["results"].append({"code": item["code"], "name": item.get("name"),
                                    "error": str(exc), "changes": [{"kind": "行情异常", "detail": str(exc)}]})

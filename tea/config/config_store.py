@@ -393,7 +393,14 @@ DEFAULTS: Dict[str, Any] = {
         # 依据 62 条回填样本：板块排名 1-3 胜率 50%、6~15 仅 0~17%；突破阶段仅 6%。
         "winrate_gate_enabled": True,
         "winrate_sector_rank_buyable_max": 5,
+        # 突破阶段一律不得可买（历史 T+1 仅 6%）；旧键 winrate_breakout_sector_rank_max
+        # 保留兼容，仅在 breakout_block=False 时回退为「突破+排名>N」逻辑。
+        "winrate_breakout_block": True,
         "winrate_breakout_sector_rank_max": 3,
+        # 可买还需 winrate_score ≥ winrate.buyable_threshold（与影子通道同门槛）。
+        "winrate_score_gate_enabled": True,
+        # 入选板块一致性：可买必须筛入板块 rank≤上限，且与预审板块同 bk/名。
+        "winrate_sector_consistency": True,
         # R:R 门槛 3 → 2：止损硬顶 6%（atr_sl_hard_max_pct）+ 止盈上限 15%
         # （atr_tp_cap_pct）+ 双边滑点 0.5% 的结构下，含滑点最大盈亏比 ≈2.1，
         # 3 恒不可达 → 引擎结构性地出不了「可买」。降到 2 后 R:R 由「止盈抬升」
@@ -490,7 +497,8 @@ DEFAULTS: Dict[str, Any] = {
         # 无涨停通道：弱市好板块常无涨停，阈值从 70 下调到 65 扩容
         # 排名上限收紧 12→6：无涨停板块本就更弱，再放排名 7~12 的中游板块只会拉低胜率。
         "sector_relax_score_nozt": 65.0,
-        "sector_relax_rank_nozt": 6,
+        # 无涨停通道排名上限：与「只做前 5」对齐（原 12→6→5）。
+        "sector_relax_rank_nozt": 5,
         "diversify_replace_last": True,
         "shadow_bonus": 18.0,
         "shadow_near_rank": 6,

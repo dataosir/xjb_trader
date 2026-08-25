@@ -4,6 +4,35 @@
 
 ## [Unreleased]
 
+### 策略（2026-08-25 P0：可买硬规则 + 入选板块一致性）
+
+> 堵中游漏网与多板块归因错位：可买必须「筛入板块 rank≤5 且与预审板块一致」。
+> 不动阶段 B / 低吸买入 / 共振权重。
+
+- **入选板块戳记**（`screener.screen_tier`）：候选携带 `pick_sector_bk/name/rank`，
+  经 `veto_filter` 透传到预审结果。
+- **一致性闸门**（`strategy.winrate_sector_consistency=true`）：
+  入选排名 > 可买上限，或入选 bk/名 ≠ 预审板块 → 降级观察。
+- **堵漏网**：`seed.sector_relax_rank_nozt` 6→5；多元化替换也要求排名 ≤
+  `seed_min_sector_rank`。
+- **计划复核**沿用快照 `sector_bk/name` 作 `prefer_sector`，避免 industry 重映射。
+- **落盘** `pick_sector_*` 进 `seed_records`；胜率通道共用同一套可买硬闸。
+
+### 策略（2026-08-25 可买口径纠偏：闸门 + winrate_score 硬条件）
+
+> 种子证据：可买 0/6、突破 T+1 仅 6%、观察轨反而更好。根因是「共振过线」把追高票
+> 打成可买，而 winrate_score 此前只在影子通道落盘、不驱动计划。
+
+- **突破阶段一律不得可买**（`strategy.winrate_breakout_block=true`）：不再放行
+  rank≤3 的突破（陕西黑猫/永杉锂业类）。关闭后回退为旧逻辑「突破+排名>N」。
+- **可买硬门槛接入 `winrate_score`**（`strategy.winrate_score_gate_enabled=true`）：
+  共振 PASS 后仍需 `winrate_score ≥ winrate.buyable_threshold`（默认 3），否则降级观察。
+- **规则通道每只候选都算并落盘 `winrate_score`**：可买排序改为胜率分优先。
+- **修复样本落盘缺口**（`followthrough.record_seed`）：此前 `_ft_entries` 传了
+  `lowbuy`/`winrate_score`/`mode` 但未写入 jsonl，导致低吸计数恒为 0。现一并落盘
+  `ma_bull`/`above_ma20`/`sector_chg`/`sl_pct`/`tp_pct`。
+- **低吸空池归因**：`lowbuy_pool_diag` 打印「板块→排名→涨幅→涨停」逐关剩余数。
+
 ### 策略（2026-08-25 新增「胜率选股」菜单：数据型通道）
 
 > 与 9 分共振（纪律型 rule）并行，用实证胜率因素加权选票，只落盘不买入，攒够样本

@@ -456,15 +456,17 @@ class Screener:
         want = int(cfg.s("seed_top_sectors", 3))
         top = qualified[:want]
 
-        # 多元化：若 TOP 全无温和票，则替换末位为最佳有温和票板块
+        # 多元化：若 TOP 全无温和票，则替换末位为最佳有温和票板块。
+        # 替换候选也必须满足可买板块排名上限，避免中游板块借「有温和票」漏进可买池。
         if top and not any(t["has_mild"] for t in top) and cfg.get("seed.diversify_replace_last", True):
-            cand = next((e for e in qualified[want:] if e["has_mild"]), None)
+            cand = next((e for e in qualified[want:]
+                         if e["has_mild"] and (e.get("rank") or 99) <= min_rank), None)
             if cand:
                 dropped = top[-1]
                 top = top[:-1] + [cand]
                 if tracer:
                     tracer.note(f"多元化替换：{dropped['name']}（无温和票）→ {cand['name']}"
-                                f"（温和票 {cand['mild_n']} 只）")
+                                f"（温和票 {cand['mild_n']} 只，排名 {cand.get('rank')}≤{min_rank}）")
 
         # 影子池：本次近榜板块留给次日 +18
         near = int(c("shadow_near_rank", 6))
@@ -572,6 +574,10 @@ class Screener:
                     "sector": sec_ctx, "sector_name": sec.get("name"), "sector_rank": sec.get("rank"),
                     "sector_chg": sec.get("chg"), "identity": idn, "pick": ps,
                     "tier": tier, "hot_sector": hot,
+                    # 入选板块戳记：多板块归属时以本次筛入板块为准，供可买一致性校验。
+                    "pick_sector_bk": sec.get("bk"),
+                    "pick_sector_name": sec.get("name"),
+                    "pick_sector_rank": sec.get("rank"),
                     # 第 3 步拉到实时行情后要用最新涨幅再核一次窗口（见 veto_filter），
                     # 这里把当初筛入时用的窗口下/上限记下来，避免批量快照涨幅与实时行情的偏差。
                     "win_min": p["min_chg"], "win_max": p["max_chg"],
@@ -642,6 +648,10 @@ class Screener:
                 continue
             ev["tier_label"] = cand["tier"]
             ev["pick"] = cand["pick"]
+            # 入选板块戳记透传：可买闸门以筛入板块为准，避免多板块归属时归因错位。
+            for k in ("pick_sector_bk", "pick_sector_name", "pick_sector_rank"):
+                if cand.get(k) is not None:
+                    ev[k] = cand[k]
             # 涨幅窗口复检：第 2 步用板块成分股的批量快照涨幅筛入窗口，可能比实时
             # 行情慢一拍。这里已拿到实时行情，用最新涨幅再核一次；移出窗口的候选
             # 不再作为种子输出（避免「显示 6.77%，实际已涨到 7.6% 却还当温和票」）。
@@ -669,6 +679,9 @@ class Screener:
             if vt.get("soft"):
                 ev["track"] = watch_pool.TRACK_WATCH
                 ev["triggers"] = followthrough.trigger_conditions(ev, cfg)
+                wr = preflight.winrate_score(ev, cfg)
+                ev["winrate_score"] = wr["score"]
+                ev["winrate_detail"] = wr.get("detail")
                 soft.append(ev)
                 details.append(candidate_row(cand, ev, CAND_SOFT,
                                              veto_detail(vt["soft"]) + " → 观察轨等回踩"))
@@ -690,22 +703,60 @@ class Screener:
     def _winrate_gate(self, ev: dict) -> Optional[str]:
         """把历史胜率低的特征从「可买」降级为观察。
 
-        依据 62 条回填样本（跨 T+1/T+3/T+5 单调）：板块排名 1-3 胜率 50%、
-        6~15 仅 0~17%；突破阶段仅 6%（T+3 -5.2%）。返回降级原因，放行返回 None。
+        依据 62+ 条回填样本（跨 T+1/T+3/T+5 单调）：
+        - 板块排名 1-3 胜率 50%、6~15 仅 0~17%
+        - 突破阶段仅 6%（T+3 -5.2%）→ 默认一律不得可买
+        - winrate_score 按实证因素加权，未达门槛的「共振过线」票多为追高后继乏力
+        - 入选板块必须与预审板块一致，且入选排名 ≤ 可买上限（堵多板块错位/中游漏网）
+
+        返回降级原因，放行返回 None。
         """
         cfg = self.cfg
         if not cfg.s("winrate_gate_enabled", True):
             return None
-        sec_rank = (ev.get("sector") or {}).get("rank")
-        if sec_rank is None:
-            return None  # 排名缺失不误杀
-        buyable_max = int(cfg.s("winrate_sector_rank_buyable_max", 5))
-        break_max = int(cfg.s("winrate_breakout_sector_rank_max", 3))
-        if sec_rank > buyable_max:
-            return f"板块排名 {sec_rank} > {buyable_max}（历史胜率 0~17%）→ 降级观察"
         stage = (ev.get("stage") or {}).get("stage")
-        if stage == preflight.STAGE_BREAK and sec_rank > break_max:
-            return f"突破 + 板块排名 {sec_rank} > {break_max}（历史胜率 6%）→ 降级观察"
+        # 突破阶段：历史胜率 6%，默认一律降级（不再放行 rank≤3 的突破）。
+        if stage == preflight.STAGE_BREAK and cfg.s("winrate_breakout_block", True):
+            return "突破阶段（历史胜率 6%）→ 降级观察"
+        buyable_max = int(cfg.s("winrate_sector_rank_buyable_max", 5))
+        sec = ev.get("sector") or {}
+        sec_rank = sec.get("rank")
+        if sec_rank is not None:
+            if sec_rank > buyable_max:
+                return f"板块排名 {sec_rank} > {buyable_max}（历史胜率 0~17%）→ 降级观察"
+            # 兼容旧逻辑：仅当未开启「突破一律否决」时，仍按「突破+排名>N」砍。
+            if (not cfg.s("winrate_breakout_block", True)
+                    and stage == preflight.STAGE_BREAK):
+                break_max = int(cfg.s("winrate_breakout_sector_rank_max", 3))
+                if sec_rank > break_max:
+                    return (f"突破 + 板块排名 {sec_rank} > {break_max}"
+                            f"（历史胜率 6%）→ 降级观察")
+        # 入选板块一致性：可买必须以筛入板块为准（rank≤上限，且与预审板块同 bk/名）。
+        if cfg.s("winrate_sector_consistency", True):
+            pick_rank = ev.get("pick_sector_rank")
+            if pick_rank is not None and pick_rank > buyable_max:
+                return (f"入选板块排名 {pick_rank} > {buyable_max}"
+                        f"（筛入板块非前{buyable_max}）→ 降级观察")
+            pick_bk = ev.get("pick_sector_bk")
+            pick_name = ev.get("pick_sector_name")
+            cur_bk, cur_name = sec.get("bk"), sec.get("name")
+            if pick_bk and cur_bk and pick_bk != cur_bk:
+                return (f"入选板块「{pick_name or pick_bk}」≠ 预审「{cur_name or cur_bk}」"
+                        f"（多板块错位）→ 降级观察")
+            if (not pick_bk) and pick_name and cur_name and pick_name != cur_name:
+                return (f"入选板块「{pick_name}」≠ 预审「{cur_name}」"
+                        f"（多板块错位）→ 降级观察")
+        # winrate_score 硬门槛：共振过线但仍是「追高弱票」时降级。
+        if cfg.s("winrate_score_gate_enabled", True):
+            wr_score = ev.get("winrate_score")
+            if wr_score is None:
+                wr = preflight.winrate_score(ev, cfg)
+                wr_score = wr["score"]
+                ev["winrate_score"] = wr_score
+                ev["winrate_detail"] = wr.get("detail")
+            th = int(cfg.get("winrate.buyable_threshold", 3))
+            if wr_score < th:
+                return f"胜率分 {wr_score} < {th} → 降级观察"
         return None
 
     # ============================================================== 第 4 步
@@ -723,6 +774,10 @@ class Screener:
             ft = followthrough.evaluate((ev.get("stage") or {}).get("stage"),
                                         ev.get("tier_label"), ev.get("track"), cfg)
             ev["followthrough"] = ft
+            # 影子/闸门共用：每只候选都算 winrate_score 并落盘，供 rule vs 实证对比。
+            wr = preflight.winrate_score(ev, cfg)
+            ev["winrate_score"] = wr["score"]
+            ev["winrate_detail"] = wr.get("detail")
             # 胜率因子门槛（阶段 A）：历史低胜率特征从「可买」降级观察。PASS 的 gap≤0，
             # 降级为 WATCH 后自然落入下面的「差1分→观察轨」分支（gap≤1 恒成立）。
             if ev.get("verdict") == preflight.VERDICT_PASS:
@@ -747,8 +802,9 @@ class Screener:
                                f"共振 {ev.get('total_score')}/{ev.get('pass_threshold')}，"
                                + "；".join(ev.get("reasons", [])))
 
-        # 排序：共振分 → 跟涨经验 → 身份分
-        keyf = lambda e: (-(e.get("total_score") or 0),
+        # 排序：胜率分 → 共振分 → 跟涨经验 → 身份分（胜率分优先，纠正「共振过线但追高」）
+        keyf = lambda e: (-(e.get("winrate_score") if e.get("winrate_score") is not None else -99),
+                          -(e.get("total_score") or 0),
                           -((e.get("followthrough") or {}).get("score") or 0),
                           -((e.get("identity") or {}).get("score") or 0))
         buyable.sort(key=keyf)
@@ -776,6 +832,26 @@ class Screener:
                 and chg_lo <= (s.get("chg") or 0) <= chg_hi
                 and (s.get("limit_up_count") or 0) <= zt_max]
 
+    def lowbuy_pool_diag(self, scored: List[dict]) -> str:
+        """低吸板块池为空时的归因文案（哪一关把候选挡掉），便于攒样本时排查。"""
+        cfg = self.cfg
+        lo = int(cfg.get("seed.lowbuy_rank_min", 3))
+        hi = int(cfg.get("seed.lowbuy_rank_max", 10))
+        chg_lo = float(cfg.get("seed.lowbuy_chg_min", 2.0))
+        chg_hi = float(cfg.get("seed.lowbuy_chg_max", 4.0))
+        zt_max = int(cfg.get("seed.lowbuy_limit_up_max", 1))
+        n = len(scored or [])
+        n_rank = sum(1 for s in scored if lo <= (s.get("rank") or 99) <= hi)
+        n_chg = sum(1 for s in scored
+                    if lo <= (s.get("rank") or 99) <= hi
+                    and chg_lo <= (s.get("chg") or 0) <= chg_hi)
+        n_zt = sum(1 for s in scored
+                   if lo <= (s.get("rank") or 99) <= hi
+                   and chg_lo <= (s.get("chg") or 0) <= chg_hi
+                   and (s.get("limit_up_count") or 0) <= zt_max)
+        return (f"无低吸板块（需排名{lo}~{hi}、涨幅{chg_lo:g}~{chg_hi:g}%、涨停≤{zt_max}）："
+                f"板块{n} → 排名合{n_rank} → 涨幅合{n_chg} → 涨停合{n_zt}")
+
     # ============================================================== 前夕观察 / 低吸候选
     def eve_scan(self, sectors: List[dict], sent: Optional[dict],
                  tracer: Optional[seed_trace.Tracer] = None, io: Any = None,
@@ -795,6 +871,12 @@ class Screener:
                 continue
             if (ev.get("stage") or {}).get("overheat"):
                 continue
+            wr = preflight.winrate_score(ev, cfg)
+            ev["winrate_score"] = wr["score"]
+            ev["winrate_detail"] = wr.get("detail")
+            for k in ("pick_sector_bk", "pick_sector_name", "pick_sector_rank"):
+                if cand.get(k) is not None:
+                    ev[k] = cand[k]
             ev["tier_label"] = TIER_EVE
             ev["track"] = watch_pool.TRACK_EVE
             ev["lowbuy"] = True  # 低吸（启动前夕）候选标签：落盘后可单独归因
@@ -899,7 +981,7 @@ class Screener:
                                                       max_sector_chg=strongest)
                     else:
                         result["eve"] = []
-                        result["notes"].append("无低吸板块（排名 3~10 升温板块为空）")
+                        result["notes"].append(self.lowbuy_pool_diag(step1["scored"]))
             except Exception as exc:
                 result["notes"].append(f"前夕观察扫描异常：{exc}")
 
@@ -955,7 +1037,14 @@ class Screener:
             wr = preflight.winrate_score(ev, cfg)
             ev["winrate_score"] = wr["score"]
             ev["winrate_detail"] = wr["detail"]
-            if wr["score"] >= threshold:
+            # 与规则通道共用可买硬闸（突破/板块上限/入选一致性）；胜率分门槛仍用本通道阈值。
+            wr_note = self._winrate_gate(ev)
+            if wr_note:
+                ev["track"] = watch_pool.TRACK_WATCH
+                ev["winrate_gate"] = wr_note
+                ev["triggers"] = followthrough.trigger_conditions(ev, cfg)
+                watch.append(ev)
+            elif wr["score"] >= threshold:
                 buyable.append(ev)
             else:
                 ev["track"] = watch_pool.TRACK_WATCH

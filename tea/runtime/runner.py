@@ -377,6 +377,7 @@ def _ft_entries(result: dict) -> List[dict]:
                 "identity_score": (ev.get("identity") or {}).get("score"),
                 "sector_name": sec.get("name"),
                 "sector_rank": sec.get("rank"),
+                "sector_chg": sec.get("chg"),
                 "scoring_dims": (ev.get("scoring") or {}).get("dims"),
                 # 技术指标（T+N 回填后做逐因子胜率归因）：乖离/波动/量比/换手/分时位
                 "bias_ma20": ind.get("bias_ma20"),
@@ -384,15 +385,22 @@ def _ft_entries(result: dict) -> List[dict]:
                 "vol_ratio": q.get("vol_ratio"),
                 "turnover": q.get("turnover"),
                 "intraday": ev.get("intraday"),
+                "ma_bull": ind.get("ma_bull"),
+                "above_ma20": ind.get("above_ma20"),
                 # 归因补充：成交额/市值/板块内排名占比/盈亏比/否决原因
                 "amount_yi": q.get("amount_yi"),
                 "cap_yi": q.get("cap_yi"),
                 "rank_pct": sec.get("stock_rank_pct"),
                 "odds": ev.get("odds"),
+                "sl_pct": ev.get("sl_pct"),
+                "tp_pct": ev.get("tp_pct"),
                 "veto_labels": (ev.get("veto") or {}).get("labels"),
                 "lowbuy": bool(ev.get("lowbuy")),
                 "winrate_score": ev.get("winrate_score"),
                 "mode": result.get("mode", "rule"),
+                "pick_sector_bk": ev.get("pick_sector_bk"),
+                "pick_sector_name": ev.get("pick_sector_name"),
+                "pick_sector_rank": ev.get("pick_sector_rank"),
                 **market,
             })
     return entries

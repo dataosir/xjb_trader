@@ -1748,21 +1748,56 @@ def check_winrate_gate(t: Suite, cfg: Config, mk: FakeMarket) -> None:
     t.head("扫描 · 胜率因子门槛（阶段 A）")
     sc = screener_mod.Screener(cfg, mk)
 
-    def gate(rank, stage):
+    def gate(rank, stage, wr_score=None):
         ev = {"sector": {"rank": rank}, "stage": {"stage": stage}}
+        if wr_score is not None:
+            ev["winrate_score"] = wr_score
         return sc._winrate_gate(ev)
 
-    t.ok("板块排名 6 > 5 → 降级", bool(gate(6, "过热")))
-    t.ok("板块排名 5 ≤ 5 → 放行", gate(5, "过热") is None)
-    t.ok("突破 + 排名 4 > 3 → 降级", bool(gate(4, "突破")))
-    t.ok("突破 + 排名 3 ≤ 3 → 放行", gate(3, "突破") is None)
-    t.ok("排名缺失不误杀", gate(None, "突破") is None)
+    t.ok("板块排名 6 > 5 → 降级", bool(gate(6, "过热", wr_score=5)))
+    t.ok("板块排名 5 ≤ 5 → 放行（胜率分达标）", gate(5, "过热", wr_score=5) is None)
+    t.ok("突破一律降级（即使排名 1）", bool(gate(1, "突破", wr_score=5)))
+    t.ok("突破一律降级（排名 3）", bool(gate(3, "突破", wr_score=5)))
+    t.ok("胜率分不足 → 降级", bool(gate(2, "过热", wr_score=2)))
+    t.ok("排名缺失不因排名误杀（胜率分达标）", gate(None, "过热", wr_score=5) is None)
+
+    # 入选板块一致性：筛入排名超限 / 与预审板块错位 → 降级
+    def gate_pick(rank, stage, wr_score=5, pick_rank=None, pick_bk=None, cur_bk=None,
+                  pick_name=None, cur_name=None):
+        ev = {
+            "sector": {"rank": rank, "bk": cur_bk, "name": cur_name},
+            "stage": {"stage": stage},
+            "winrate_score": wr_score,
+            "pick_sector_rank": pick_rank,
+            "pick_sector_bk": pick_bk,
+            "pick_sector_name": pick_name,
+        }
+        return sc._winrate_gate(ev)
+
+    t.ok("入选板块排名 11 > 5 → 降级",
+         bool(gate_pick(3, "过热", pick_rank=11, pick_bk="BK1", cur_bk="BK1")))
+    t.ok("入选/预审板块 bk 不一致 → 降级",
+         bool(gate_pick(2, "过热", pick_rank=2, pick_bk="BK_A", cur_bk="BK_B",
+                        pick_name="强板块", cur_name="弱板块")))
+    t.ok("入选/预审一致且排名达标 → 放行",
+         gate_pick(2, "过热", pick_rank=2, pick_bk="BK1", cur_bk="BK1") is None)
+
+    # 关闭「突破一律否决」后，回退为「突破+排名>N」
+    old_block = cfg.get("strategy.winrate_breakout_block")
+    cfg.set("strategy.winrate_breakout_block", False)
+    try:
+        t.ok("兼容：突破+排名4>3 → 降级", bool(gate(4, "突破", wr_score=5)))
+        t.ok("兼容：突破+排名3≤3 → 放行", gate(3, "突破", wr_score=5) is None)
+    finally:
+        cfg.set("strategy.winrate_breakout_block", old_block)
 
     # 总开关关闭 → 全部放行
     old = cfg.get("strategy.winrate_gate_enabled")
     cfg.set("strategy.winrate_gate_enabled", False)
     try:
         t.ok("关闭开关后排名 6 放行", gate(6, "过热") is None)
+        t.ok("关闭开关后错位放行",
+             gate_pick(2, "过热", pick_rank=11, pick_bk="A", cur_bk="B") is None)
     finally:
         cfg.set("strategy.winrate_gate_enabled", old)
 
@@ -2439,6 +2474,28 @@ def check_followthrough(t: Suite, cfg: Config) -> None:
     t.eq("板块内排名占比随样本落盘", f.get("rank_pct"), 0.15)
     t.eq("盈亏比随样本落盘", f.get("odds"), 2.4)
     t.eq("否决原因随样本落盘", f.get("veto_labels"), ["接近涨停", "分时偏高"])
+
+    # 低吸/胜率字段必须落盘（否则样本计数永远为 0）
+    r5 = ft_mod.record_seed([{
+        "code": "600654", "name": "低吸字段票", "price": 8.0, "track": "前夕观察轨",
+        "lowbuy": True, "winrate_score": 4, "mode": "rule",
+        "ma_bull": True, "above_ma20": True, "sector_chg": 3.2,
+        "sl_pct": 4.0, "tp_pct": 10.0,
+        "pick_sector_bk": "BK001", "pick_sector_name": "入选测试板", "pick_sector_rank": 2,
+    }], cfg, date="2026-08-13")
+    t.eq("低吸/胜率字段样本落盘", r5, {"added": 1, "skipped": 0, "updated": 0})
+    f5 = next(r for r in ft_mod.load_records(cfg) if r.get("code") == "600654")
+    t.eq("lowbuy 标签落盘", f5.get("lowbuy"), True)
+    t.eq("winrate_score 落盘", f5.get("winrate_score"), 4)
+    t.eq("mode 落盘", f5.get("mode"), "rule")
+    t.eq("ma_bull 落盘", f5.get("ma_bull"), True)
+    t.eq("above_ma20 落盘", f5.get("above_ma20"), True)
+    t.eq("sector_chg 落盘", f5.get("sector_chg"), 3.2)
+    t.eq("sl_pct 落盘", f5.get("sl_pct"), 4.0)
+    t.eq("tp_pct 落盘", f5.get("tp_pct"), 10.0)
+    t.eq("pick_sector_bk 落盘", f5.get("pick_sector_bk"), "BK001")
+    t.eq("pick_sector_name 落盘", f5.get("pick_sector_name"), "入选测试板")
+    t.eq("pick_sector_rank 落盘", f5.get("pick_sector_rank"), 2)
 
     # 多周期回填：T+1/T+2/T+3/T+5 一次算好
     d = _end_dates(30)[10]
