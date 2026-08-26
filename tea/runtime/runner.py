@@ -5,6 +5,7 @@
     run_once()      单标的准入评估 Phase1 → Phase4
     seed_plan()     14:30 种子扫描 → 写次日计划 → SEED 报告
     plan_check()    次日 09:35 计划复核（任一变动整单作废）
+    maybe_auto_backfill()  轻量/全量自动回填（seed / menu 触发）
     close_review()  盘后复核：T+1 回填 / 观察池复核 / 当日累积
     daily_status()  今日状态（门禁计数 / 计划 / 持仓）
 
@@ -239,22 +240,37 @@ def seed_plan(cfg: Optional[Config] = None, market: Optional[Market] = None,
             parts.append(f"已落 {ft_res['added']} 条")
         if ft_res.get("updated"):
             parts.append(f"升级 {ft_res['updated']} 条")
-        io.say(f"  跟涨样本 {'、'.join(parts)}（去重跳过 {ft_res.get('skipped', 0)} 条），"
-               f"次日 close-review 自动回填 T+1 结果")
+        io.say(f"  跟涨样本 {'、'.join(parts)}（去重跳过 {ft_res.get('skipped', 0)} 条）；"
+               f"历史样本可在收尾自动轻量回填，今日新样本须下一交易日")
     elif ft_res.get("skipped"):
         io.say(f"  跟涨样本全部与历史重复（{ft_res['skipped']} 条），未新增落盘")
+
+    # 自动轻量回填历史 pending（今日新样本本身回填不了）
+    auto_upd = None
+    try:
+        auto_upd = maybe_auto_backfill(cfg=cfg, market=mk, io=io, trigger="seed")
+    except Exception as exc:
+        io.say(f"  ! 自动回填失败（不阻断种子）：{exc}")
+        logger_mod.get_logger("scan").warning("自动回填失败: %s", exc)
+    result["auto_backfill"] = auto_upd
+
     pending_ft = ft_mod.pending_backfill(cfg)
     if pending_ft:
         io.say(f"  ⏳ 仍有 {pending_ft} 条历史跟涨样本未回填 T+1，"
-               f"跑 `tea review` 补齐后跟涨胜率才有数据")
+               f"可再跑 `tea review` 全量复核（含观察池）")
+    elif auto_upd:
+        io.say("  ✓ 历史跟涨样本已自动回填完毕")
     # 归档提醒进 SEED 报告：控制台消息转瞬即逝，写进 notes 才能随 MD 存档复盘。
     # 「宁缺毋滥」与「回填提醒」是积累数据闭环的关键，不该只在控制台一闪而过。
     if not buyable:
         result.setdefault("notes", []).append("宁缺毋滥：今日无可买标的，不写计划")
+    if auto_upd and not cfg.get("followthrough.auto_backfill_full_review", False):
+        result.setdefault("notes", []).append(
+            f"自动回填 {auto_upd.get('updated', 0)} 条，仍待 {auto_upd.get('pending', 0)} 条")
     if pending_ft:
         result.setdefault("notes", []).append(
             f"⏳ 仍有 {pending_ft} 条历史跟涨样本未回填 T+1，"
-            f"跑 `tea review` 补齐后跟涨胜率才有数据")
+            f"可再跑 `tea review` 全量复核")
 
     # ---------------------------------------------------------- 每日价格跟踪
     codes = [e.get("code") for e in entries if e.get("code")]
@@ -428,6 +444,63 @@ def plan_check(cfg: Optional[Config] = None, market: Optional[Market] = None,
     if not res.get("changed") and plan_mod.active_items(plan):
         io.say(f"  → 可在 {Timing(cfg).buy_window_text()} 用 run 逐只执行准入")
     return res
+
+
+# ==================================================================== 自动回填（轻量）
+
+def maybe_auto_backfill(cfg: Optional[Config] = None, market: Optional[Market] = None,
+                        io: Optional[IO] = None, *,
+                        trigger: str = "seed") -> Optional[dict]:
+    """按配置自动回填跟涨样本（默认轻量：只 update_results）。
+
+    trigger:
+      - ``seed``：seed-plan 收尾；``followthrough.auto_backfill_on_seed``
+      - ``menu``：进菜单；盘后/隔夜窗 + 每天最多 1 次（``daily_state.auto_backfill_menu``）
+
+    今日刚落盘的样本本就回填不了（须下一交易日），仅处理历史 pending。
+    失败向上抛：调用方决定是否吞掉提示（菜单不得因回填崩掉会话）。
+    """
+    cfg = cfg or load_config()
+    io = io or IO()
+    if trigger == "seed":
+        if not cfg.get("followthrough.auto_backfill_on_seed", True):
+            return None
+    elif trigger == "menu":
+        if not cfg.get("followthrough.auto_backfill_on_menu", True):
+            return None
+        tm = Timing(cfg)
+        if not (tm.is_after_close() or tm.is_overnight_review_window()):
+            return None
+        st = gates.load_state(cfg)
+        if st.get("auto_backfill_menu"):
+            return None
+    else:
+        raise ValueError(f"未知 auto_backfill trigger: {trigger!r}")
+
+    pending = ft_mod.pending_backfill(cfg)
+    if pending <= 0:
+        return None
+
+    if cfg.get("followthrough.auto_backfill_full_review", False):
+        io.say(f"  ⏳ 自动全量盘后复核（待回填 {pending} 条）...")
+        out = close_review(cfg=cfg, market=market, io=io)
+        if trigger == "menu":
+            st = gates.load_state(cfg)
+            st["auto_backfill_menu"] = True
+            gates.save_state(st, cfg)
+        return out
+
+    mk = market or Market(cfg)
+    io.say(f"  ⏳ 自动回填跟涨样本（待回填 {pending} 条）...")
+    with utils.timed("自动回填", io, threshold=0.5):
+        upd = ft_mod.update_results(mk, cfg, io=io)
+    io.say(f"  ✓ 自动回填 {upd.get('updated', 0)} 条，仍待 {upd.get('pending', 0)} 条"
+           f"（样本累计 {upd.get('total') or 0}）")
+    if trigger == "menu":
+        st = gates.load_state(cfg)
+        st["auto_backfill_menu"] = True
+        gates.save_state(st, cfg)
+    return upd
 
 
 # ==================================================================== 盘后复核

@@ -22,12 +22,15 @@
 | 命令 | Runner / 模块锚点 | 副作用 |
 |---|---|---|
 | `weather` | sentiment + timing | 只读 |
-| `seed-plan` | `Screener` 四步流 → `plan` 写次日计划 | 写计划 / 观察池 / 种子记录 |
-| `winrate-scan` | `Screener.winrate_scan` | **只落盘观察，不写计划** |
+| `seed-plan` | `Screener` 四步流 → `plan` 写次日计划 → `maybe_auto_backfill(seed)` | 写计划 / 观察池 / 种子记录；可自动轻量回填 |
+| `winrate-scan` | `Screener.winrate_scan`（菜单在复盘工具▸） | **只落盘观察，不写计划** |
 | `plan-check` | `plan` 复核 | 变动则整单作废 |
 | `run` / `eval` | gates → phases Phase1–4；`eval` 不落仓 | `run` 可登记灰度仓 |
 | `review` | followthrough 回填 + watch 复核 | 写 seed_records / 报告 |
+| （进菜单） | `maybe_auto_backfill(menu)` | 盘后/隔夜窗每天最多 1 次轻量回填 |
 | `selftest` | `tea/selftest.py` | 临时 `$TEA_HOME` 沙箱，不碰真实数据 |
+
+数字菜单顶层约 10 项（计划/准入/持仓/复盘/配置为子菜单）；改编号须同步 `check_menu`。
 
 ---
 

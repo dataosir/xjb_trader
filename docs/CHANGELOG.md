@@ -4,6 +4,15 @@
 
 ## [Unreleased]
 
+### 体验（2026-08-26：自动回填 + 菜单合并）
+
+> 关联：F11 / F05 / `02-daily-workflow`；`tea/runtime/cli.py` · `runner.maybe_auto_backfill`。
+
+- **自动轻量回填**（默认开）：`seed-plan` 收尾、进菜单（盘后/隔夜窗，每天最多 1 次）自动跑 `update_results`；不替代全量 `review`（观察池/accum）。  
+  - 配置：`followthrough.auto_backfill_on_seed` / `auto_backfill_on_menu` / `auto_backfill_full_review`  
+- **菜单顶层压到 10 项**：计划▸ / 准入▸ / 持仓▸；胜率选股迁入复盘工具▸；`suggest_keys` 与自测同步重排编号。  
+- 不做：系统 cron、自动下单、改可买闸门。
+
 ### 文档（2026-08-25：INDEX 总索引）
 
 > 关联：`docs/INDEX.md`；`docs/README.md`；`.cursorrules`；根 `RULES.md`；`docs/project-state.md`。

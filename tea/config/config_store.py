@@ -627,6 +627,10 @@ DEFAULTS: Dict[str, Any] = {
         "mult_low": 0.75,
         "default_score": None,
         "default_mult": 1.0,
+        # 自动回填：轻量只跑 update_results；不开 cron、不自动下单
+        "auto_backfill_on_seed": True,       # seed-plan 收尾若有待回填则自动轻量回填
+        "auto_backfill_on_menu": True,       # 进菜单时（盘后/隔夜窗，每天最多 1 次）
+        "auto_backfill_full_review": False,  # True 则等价 close_review（含观察池/accum）
     },
     # ---------------------------------------------------------- 观察池
     "watch": {

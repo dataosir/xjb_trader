@@ -413,50 +413,56 @@ MENU = [
     ("1", "市场天气（道）", ["weather"]),
     ("2", "今日状态（法）", ["status"]),
     ("3", "种子扫描 + 写计划（14:30）", ["seed-plan"]),
-    ("4", "胜率选股（数据型，只落盘对比）", ["winrate-scan"]),
-    ("5", "计划复核（09:35 / 14:35）", ["plan-check"]),
-    ("6", "查看交易计划", ["__plan__"]),
-    ("7", "单标的准入评估", ["run"]),
-    ("8", "只算不买（单票快评）", ["__eval__"]),
-    ("9", "持仓 / 资金", ["pos"]),
-    ("10", "平仓登记", ["__close__"]),
-    ("11", "观察池", ["watch"]),
-    ("12", "盘后复核（跟涨回填+观察池）", ["review"]),
-    ("13", "复盘工具 ▸", ["__submenu__", "复盘工具"]),
-    ("14", "持仓管理 ▸", ["__submenu__", "持仓管理"]),
-    ("15", "配置与维护 ▸", ["__submenu__", "配置与维护"]),
+    ("4", "计划 ▸", ["__submenu__", "计划"]),
+    ("5", "准入 ▸", ["__submenu__", "准入"]),
+    ("6", "持仓 ▸", ["__submenu__", "持仓"]),
+    ("7", "观察池", ["watch"]),
+    ("8", "盘后复核（跟涨回填+观察池）", ["review"]),
+    ("9", "复盘工具 ▸", ["__submenu__", "复盘工具"]),
+    ("10", "配置与维护 ▸", ["__submenu__", "配置与维护"]),
 ]
 
-# 二级子菜单：常用功能留在顶层一键直达，低频功能收进来，顶层从 24 项压到 13 项。
+# 二级子菜单：顶层压到约 10 项；低频（胜率选股等）收进复盘工具。
 SUBMENUS = {
-    "复盘工具": [
-        ("1", "当日累积（为什么没交易）", ["accum"]),
-        ("2", "落选追溯", ["trace"]),
-        ("3", "跟涨经验", ["followthrough"]),
-        ("4", "交易流水", ["trades"]),
-        ("5", "统计与归因", ["stats"]),
-        ("6", "周复盘报告", ["weekly"]),
+    "计划": [
+        ("1", "查看交易计划", ["__plan__"]),
+        ("2", "计划复核（09:35 / 14:35）", ["plan-check"]),
+        ("3", "清除过期计划", ["plan-clear"]),
     ],
-    "持仓管理": [
-        ("1", "手动录入持仓", ["__pos_add__"]),
-        ("2", "删除持仓", ["__pos_rm__"]),
-        ("3", "补足确认仓（3/7 的 7）", ["__confirm__"]),
+    "准入": [
+        ("1", "单标的准入评估", ["run"]),
+        ("2", "只算不买（单票快评）", ["__eval__"]),
+    ],
+    "持仓": [
+        ("1", "持仓 / 资金", ["pos"]),
+        ("2", "平仓登记", ["__close__"]),
+        ("3", "手动录入持仓", ["__pos_add__"]),
+        ("4", "删除持仓", ["__pos_rm__"]),
+        ("5", "补足确认仓（3/7 的 7）", ["__confirm__"]),
+    ],
+    "复盘工具": [
+        ("1", "胜率选股（数据型，只落盘对比）", ["winrate-scan"]),
+        ("2", "当日累积（为什么没交易）", ["accum"]),
+        ("3", "落选追溯", ["trace"]),
+        ("4", "跟涨经验", ["followthrough"]),
+        ("5", "交易流水", ["trades"]),
+        ("6", "统计与归因", ["stats"]),
+        ("7", "周复盘报告", ["weekly"]),
     ],
     "配置与维护": [
         ("1", "配置一览", ["config", "list"]),
         ("2", "配置向导（重新配置）", ["setup"]),
         ("3", "离线自测", ["selftest"]),
-        ("4", "清除过期计划", ["plan-clear"]),
     ],
 }
 
 # 顶层展开视图的分组（子菜单只占一项）。
 MENU_GROUPS = [
     ("道法 · 先看天气", ["1", "2"]),
-    ("计划 · 次日", ["3", "4", "5", "6"]),
-    ("交易 · 买与卖", ["7", "8", "9", "10"]),
-    ("观察 · 盘中与盘后", ["11", "12"]),
-    ("更多功能", ["13", "14", "15"]),
+    ("计划 · 次日", ["3", "4"]),
+    ("交易 · 买与卖", ["5", "6"]),
+    ("观察 · 盘中与盘后", ["7", "8"]),
+    ("更多功能", ["9", "10"]),
 ]
 
 
@@ -478,23 +484,32 @@ def suggest_keys(tm: Timing, cfg: Optional[Config] = None) -> list:
     再怎么评估也会被门禁挡回来。默认视图只印这几条，其余的按 m 展开。
     """
     if not tm.is_trading_day():
-        keys = ["11", "3", "2", "1"]
+        keys = ["7", "3", "2", "1"]                   # 观察池 / 种子 / 状态 / 天气
     else:
         keys = []
         if tm.is_buy_window():
-            keys += ["6", "5"]                      # 唯一新开窗口，先看计划再评估
+            keys += ["4", "5"]                        # 先看计划▸再准入▸
         if tm.is_seed_window():
             keys += ["3"]                            # 14:30 扫种子、写次日计划
         if tm.is_plan_recheck_window() or tm.is_overnight_review_window():
-            keys += ["4", "5"]
+            keys += ["4"]                            # 计划复核在计划▸里
         if tm.is_after_close():
-            keys += ["11", "3"]
+            keys += ["7", "3"]                       # 观察池 / 种子
         if not keys:
-            keys = ["1", "10"] if tm.in_session() else ["1", "5"]  # 盘中盯观察池，盘前看计划
-        keys += ["8", "2"]                          # 持仓和今日状态任何时候都想看
+            keys = ["1", "7"] if tm.in_session() else ["1", "4"]  # 盘中盯观察池，盘前看计划
+        keys += ["6", "2"]                           # 持仓▸与今日状态任何时候都想看
+
+    # 有历史待回填且处于盘后/隔夜窗 → 优先推全量盘后复核
+    try:
+        pending = ft_mod.pending_backfill(cfg) if cfg is not None else 0
+    except Exception:
+        pending = 0
+    if pending > 0 and (tm.is_after_close() or tm.is_overnight_review_window()
+                        or not tm.is_trading_day()):
+        keys.insert(0, "8")
 
     if _has_stale_plan(cfg):
-        keys.insert(0, "14")                         # 旧计划没清干净 → 配置与维护里清除
+        keys.insert(0, "4")                          # 旧计划 → 计划▸里清除
 
     out = []
     for k in keys:
@@ -652,6 +667,11 @@ def _run_argv(argv: List[str], io: IO, cfg: Config) -> None:
 def menu_loop(cfg: Config) -> int:
     io = _io()
     onboarding.maybe_run(cfg, io)      # 首次启动先把必要配置问一遍
+    # 进菜单：盘后/隔夜窗且有待回填时，每天最多自动轻量回填一次（失败不阻断菜单）
+    try:
+        runner.maybe_auto_backfill(cfg=cfg, io=io, trigger="menu")
+    except Exception as exc:
+        io.say(f"  ! 自动回填跳过：{exc}")
     table = {k: argv for k, _, argv in MENU}
     full = False
     while True:

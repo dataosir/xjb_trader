@@ -2290,7 +2290,7 @@ def check_leader_relax(t: Suite, cfg: Config) -> None:
 
 
 def check_menu(t: Suite, cfg: Config) -> None:
-    """菜单：默认只印四条建议；顶层展开视图压到 13 项，其余收进子菜单。
+    """菜单：默认只印四条建议；顶层压到约 10 项，其余收进子菜单。
 
     分组表与子菜单都是手工维护的，日后加/挪一个菜单项很容易忘了归组或漏掉
     功能——那个功能就从界面上消失，而且不报错。这里把两边对齐当成硬约束。
@@ -2304,15 +2304,18 @@ def check_menu(t: Suite, cfg: Config) -> None:
 
     keys = [k for k, _, _ in cli.MENU]
     grouped = [k for _, ks in cli.MENU_GROUPS for k in ks]
+    t.eq("顶层约 10 项", len(keys), 10)
     t.eq("顶层分组总数等于菜单项数", len(grouped), len(keys))
     t.ok("顶层分组无重复", len(set(grouped)) == len(grouped))
     t.ok("顶层分组无遗漏", set(grouped) == set(keys),
          f"缺 {sorted(set(keys) - set(grouped))} 多 {sorted(set(grouped) - set(keys))}")
 
-    # 子菜单引用必须都真实存在，且 24 项功能一个不少（顶层 + 子菜单合并后）。
+    # 子菜单引用必须都真实存在，且全部功能一个不少（顶层 + 子菜单合并后）。
     submenu_refs = [av[1] for _, _, av in cli.MENU if av[0] == "__submenu__"]
     t.ok("子菜单引用都存在", set(submenu_refs) <= set(cli.SUBMENUS),
          f"引用 {submenu_refs} 缺失 {sorted(set(submenu_refs) - set(cli.SUBMENUS))}")
+    expect_subs = {"计划", "准入", "持仓", "复盘工具", "配置与维护"}
+    t.eq("五组子菜单齐全", set(cli.SUBMENUS), expect_subs)
     all_argv = [av[0] for _, _, av in cli.MENU if av[0] != "__submenu__"]
     for sub in cli.SUBMENUS.values():
         all_argv += [av[0] for _, _, av in sub]
@@ -2330,7 +2333,7 @@ def check_menu(t: Suite, cfg: Config) -> None:
                       "2026-08-03 16:30", "2026-08-02 16:30"):
             fake = _dt.datetime.strptime(stamp, "%Y-%m-%d %H:%M")
             utils.now = lambda when=None, _f=fake: _f
-            ks = cli.suggest_keys(Timing(cfg))
+            ks = cli.suggest_keys(Timing(cfg), cfg)
             t.ok(f"{stamp} 建议 1-4 条且均合法",
                  1 <= len(ks) <= 4 and len(set(ks)) == len(ks) and all(k in keys for k in ks),
                  f"got={ks}")
@@ -2338,12 +2341,12 @@ def check_menu(t: Suite, cfg: Config) -> None:
         # 非交易日不能推荐新开：门禁必定拦回，推了就是领着人撞墙。
         holiday = _dt.datetime(2026, 8, 2, 16, 30)
         utils.now = lambda when=None, _f=holiday: _f
-        t.ok("非交易日不推荐准入评估", "6" not in cli.suggest_keys(Timing(cfg)))
+        t.ok("非交易日不推荐准入评估", "5" not in cli.suggest_keys(Timing(cfg), cfg))
 
         # 买入窗口必须推荐准入评估：一天就这 45 分钟能新开。
         window = _dt.datetime(2026, 8, 3, 14, 10)
         utils.now = lambda when=None, _f=window: _f
-        t.ok("买入窗口推荐准入评估", "6" in cli.suggest_keys(Timing(cfg)))
+        t.ok("买入窗口推荐准入评估", "5" in cli.suggest_keys(Timing(cfg), cfg))
     finally:
         utils.now = real_now
 
@@ -2543,6 +2546,69 @@ def check_followthrough(t: Suite, cfg: Config) -> None:
     t.eq("低吸样本已回填", lb["backfilled"], 1)
     t.eq("低吸样本胜", lb["wins"], 1)
     t.ok("低吸进度文案", "2 条" in ft_mod.format_lowbuy_status(cfg))
+
+    # 自动回填开关：seed 触发轻量回填；关开关则跳过；menu 每天最多一次
+    from .runtime import runner
+    from .phases import IO
+    import datetime as _dt
+
+    t.eq("auto_backfill_on_seed 默认开",
+         config_store.DEFAULTS["followthrough"]["auto_backfill_on_seed"], True)
+    t.eq("auto_backfill_on_menu 默认开",
+         config_store.DEFAULTS["followthrough"]["auto_backfill_on_menu"], True)
+    t.eq("auto_backfill_full_review 默认关",
+         config_store.DEFAULTS["followthrough"]["auto_backfill_full_review"], False)
+
+    d_hist = _end_dates(30)[8]
+    ft_mod.save_records([{"date": d_hist, "code": "600778", "name": "自动回填样本",
+                          "next_chg": None, "result": None, "chg_t5": None}], cfg)
+    t.eq("自动回填前有 pending", ft_mod.pending_backfill(cfg), 1)
+    io_q = IO(interactive=False, quiet=True)
+    cfg.set("followthrough.auto_backfill_on_seed", False)
+    t.ok("关 seed 开关则跳过",
+         runner.maybe_auto_backfill(cfg=cfg, market=FakeMarket(cfg), io=io_q,
+                                   trigger="seed") is None)
+    cfg.set("followthrough.auto_backfill_on_seed", True)
+    upd_auto = runner.maybe_auto_backfill(cfg=cfg, market=FakeMarket(cfg), io=io_q,
+                                         trigger="seed")
+    t.ok("seed 触发自动回填", upd_auto is not None and upd_auto.get("updated", 0) >= 1,
+         str(upd_auto))
+    t.eq("自动回填后 pending=0", ft_mod.pending_backfill(cfg), 0)
+
+    real_now = utils.now
+    try:
+        # 盘中：有 pending 也应跳过（不在盘后/隔夜窗）
+        mid = _dt.datetime(2026, 8, 3, 11, 0)
+        utils.now = lambda when=None, _f=mid: _f
+        d_mid = _end_dates(30)[8]
+        ft_mod.save_records([{"date": d_mid, "code": "600779", "name": "菜单回填样本",
+                              "next_chg": None, "result": None, "chg_t5": None}], cfg)
+        gates.reset_state(cfg)
+        t.ok("盘中 menu 自动回填跳过",
+             runner.maybe_auto_backfill(cfg=cfg, market=FakeMarket(cfg), io=io_q,
+                                       trigger="menu") is None)
+        # 盘后：日期与 FakeMarket K 线同一日历，应回填并打每日戳
+        after = _dt.datetime(2026, 8, 3, 16, 30)
+        utils.now = lambda when=None, _f=after: _f
+        d_after = _end_dates(30)[8]
+        ft_mod.save_records([{"date": d_after, "code": "600779", "name": "菜单回填样本",
+                              "next_chg": None, "result": None, "chg_t5": None}], cfg)
+        gates.reset_state(cfg)
+        upd_m = runner.maybe_auto_backfill(cfg=cfg, market=FakeMarket(cfg), io=io_q,
+                                          trigger="menu")
+        t.ok("盘后 menu 自动回填", upd_m is not None and upd_m.get("updated", 0) >= 1,
+             str(upd_m))
+        t.ok("daily_state 打了 menu 回填戳",
+             gates.load_state(cfg).get("auto_backfill_menu") is True)
+        # 同日第二次应跳过（即使再塞 pending）
+        ft_mod.save_records([{"date": d_after, "code": "600780", "name": "二次样本",
+                              "next_chg": None, "result": None, "chg_t5": None}], cfg)
+        t.ok("同日 menu 第二次跳过",
+             runner.maybe_auto_backfill(cfg=cfg, market=FakeMarket(cfg), io=io_q,
+                                       trigger="menu") is None)
+    finally:
+        utils.now = real_now
+        cfg.set("followthrough.auto_backfill_on_seed", True)
 
 
 def check_pricetrack(t: Suite, cfg: Config, mk: FakeMarket) -> None:
