@@ -18,6 +18,7 @@
 | B-P0-01 | 每日 `seed-plan` + `review` 回填 T+n | F03/F11 | 运营纪律 | WINRATE_ROADMAP §4 阶段1 |
 | B-P0-02 | 保证因子与标签落盘（`bias_ma20`/`vol_ratio`/`lowbuy`/`winrate_score`/`pick_sector_*`） | F11 | 代码已修，需持续验证 | CHANGELOG 2026-08-25 |
 | B-P0-03 | 突破一律不得可买 | F03 | **已落地**（`winrate_breakout_block`） | CHANGELOG |
+| B-P0-03b | 过热一律不得可买 | F03 | **已落地**（`winrate_overheat_block`） | CHANGELOG 2026-08-26 |
 | B-P0-04 | 可买需 `winrate_score` 达标 | F03/F05 | **已落地** | CHANGELOG |
 | B-P0-05 | 入选板块一致性 + 中游漏网封堵 | F03 | **已落地** | CHANGELOG |
 | B-P0-06 | 低吸空池可归因；低吸只攒不买 | F06 | **已落地**阶段1 | LOWBUY_PLAN |

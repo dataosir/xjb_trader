@@ -54,7 +54,7 @@
 | **VETO** | 一票否决（硬/软）；硬否决不可买 |
 | **ATR 止损止盈** | 止损 clamp；含滑点 R:R ≥ `strategy.min_odds`（当前默认 2） |
 | **winrate_score** | 按历史胜率因素加权的影子分；可买硬闸可要求 ≥ 门槛 |
-| **可买硬闸 `_winrate_gate`** | 突破禁买、板块排名、入选一致性、`winrate_score` 等 |
+| **可买硬闸 `_winrate_gate`** | 突破/过热禁买、板块排名、入选一致性、`winrate_score` 等 |
 
 ## 6. 仓位模型（3/7 灰度）
 

@@ -397,6 +397,8 @@ DEFAULTS: Dict[str, Any] = {
         # 保留兼容，仅在 breakout_block=False 时回退为「突破+排名>N」逻辑。
         "winrate_breakout_block": True,
         "winrate_breakout_sector_rank_max": 3,
+        # 过热阶段一律不得可买（旧可买多为过热追高，T+3 期望偏负）。
+        "winrate_overheat_block": True,
         # 可买还需 winrate_score ≥ winrate.buyable_threshold（与影子通道同门槛）。
         "winrate_score_gate_enabled": True,
         # 入选板块一致性：可买必须筛入板块 rank≤上限，且与预审板块同 bk/名。

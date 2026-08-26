@@ -4,6 +4,15 @@
 
 ## [Unreleased]
 
+### 策略 / 体验（2026-08-26：过热禁买 + 回填降噪）
+
+> 关联：F03 / F11；`screener._winrate_gate` · `runner.maybe_auto_backfill`。
+
+- **过热一律不得可买**（`strategy.winrate_overheat_block=true`）：与突破同级硬闸；可买实质偏向萌芽阶段，更常 EMPTY。  
+- **种子收尾回填降噪**：自动轻量回填静默进度，控制台只留一行 `回填 x 条，仍待 y 条`；去掉重复「可再跑 review」提示。  
+- 已完整回填行仍跳过，不改写历史；低吸仍只攒不买。  
+- 回滚：`winrate_overheat_block=false`；或 `winrate_gate_enabled=false` 关总闸。
+
 ### 体验（2026-08-26：自动回填 + 菜单合并）
 
 > 关联：F11 / F05 / `02-daily-workflow`；`tea/runtime/cli.py` · `runner.maybe_auto_backfill`。

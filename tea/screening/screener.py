@@ -706,6 +706,7 @@ class Screener:
         依据 62+ 条回填样本（跨 T+1/T+3/T+5 单调）：
         - 板块排名 1-3 胜率 50%、6~15 仅 0~17%
         - 突破阶段仅 6%（T+3 -5.2%）→ 默认一律不得可买
+        - 过热阶段 T+3 期望偏负、旧可买多为过热追高 → 默认一律不得可买
         - winrate_score 按实证因素加权，未达门槛的「共振过线」票多为追高后继乏力
         - 入选板块必须与预审板块一致，且入选排名 ≤ 可买上限（堵多板块错位/中游漏网）
 
@@ -718,6 +719,9 @@ class Screener:
         # 突破阶段：历史胜率 6%，默认一律降级（不再放行 rank≤3 的突破）。
         if stage == preflight.STAGE_BREAK and cfg.s("winrate_breakout_block", True):
             return "突破阶段（历史胜率 6%）→ 降级观察"
+        # 过热阶段：历史可买多为过热追高且 T+3 偏负，默认一律降级（冲三日期望）。
+        if stage == preflight.STAGE_OVERHEAT and cfg.s("winrate_overheat_block", True):
+            return "过热阶段（历史三日期望偏负）→ 降级观察"
         buyable_max = int(cfg.s("winrate_sector_rank_buyable_max", 5))
         sec = ev.get("sector") or {}
         sec_rank = sec.get("rank")

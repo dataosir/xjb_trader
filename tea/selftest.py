@@ -1754,12 +1754,14 @@ def check_winrate_gate(t: Suite, cfg: Config, mk: FakeMarket) -> None:
             ev["winrate_score"] = wr_score
         return sc._winrate_gate(ev)
 
-    t.ok("板块排名 6 > 5 → 降级", bool(gate(6, "过热", wr_score=5)))
-    t.ok("板块排名 5 ≤ 5 → 放行（胜率分达标）", gate(5, "过热", wr_score=5) is None)
+    t.ok("板块排名 6 > 5 → 降级", bool(gate(6, "萌芽", wr_score=5)))
+    t.ok("板块排名 5 ≤ 5 → 放行（胜率分达标）", gate(5, "萌芽", wr_score=5) is None)
     t.ok("突破一律降级（即使排名 1）", bool(gate(1, "突破", wr_score=5)))
     t.ok("突破一律降级（排名 3）", bool(gate(3, "突破", wr_score=5)))
-    t.ok("胜率分不足 → 降级", bool(gate(2, "过热", wr_score=2)))
-    t.ok("排名缺失不因排名误杀（胜率分达标）", gate(None, "过热", wr_score=5) is None)
+    t.ok("过热一律降级（即使排名 1）", bool(gate(1, "过热", wr_score=5)))
+    t.ok("过热一律降级（排名 5）", bool(gate(5, "过热", wr_score=5)))
+    t.ok("胜率分不足 → 降级", bool(gate(2, "萌芽", wr_score=2)))
+    t.ok("排名缺失不因排名误杀（胜率分达标）", gate(None, "萌芽", wr_score=5) is None)
 
     # 入选板块一致性：筛入排名超限 / 与预审板块错位 → 降级
     def gate_pick(rank, stage, wr_score=5, pick_rank=None, pick_bk=None, cur_bk=None,
@@ -1775,12 +1777,12 @@ def check_winrate_gate(t: Suite, cfg: Config, mk: FakeMarket) -> None:
         return sc._winrate_gate(ev)
 
     t.ok("入选板块排名 11 > 5 → 降级",
-         bool(gate_pick(3, "过热", pick_rank=11, pick_bk="BK1", cur_bk="BK1")))
+         bool(gate_pick(3, "萌芽", pick_rank=11, pick_bk="BK1", cur_bk="BK1")))
     t.ok("入选/预审板块 bk 不一致 → 降级",
-         bool(gate_pick(2, "过热", pick_rank=2, pick_bk="BK_A", cur_bk="BK_B",
+         bool(gate_pick(2, "萌芽", pick_rank=2, pick_bk="BK_A", cur_bk="BK_B",
                         pick_name="强板块", cur_name="弱板块")))
     t.ok("入选/预审一致且排名达标 → 放行",
-         gate_pick(2, "过热", pick_rank=2, pick_bk="BK1", cur_bk="BK1") is None)
+         gate_pick(2, "萌芽", pick_rank=2, pick_bk="BK1", cur_bk="BK1") is None)
 
     # 关闭「突破一律否决」后，回退为「突破+排名>N」
     old_block = cfg.get("strategy.winrate_breakout_block")
@@ -1790,6 +1792,15 @@ def check_winrate_gate(t: Suite, cfg: Config, mk: FakeMarket) -> None:
         t.ok("兼容：突破+排名3≤3 → 放行", gate(3, "突破", wr_score=5) is None)
     finally:
         cfg.set("strategy.winrate_breakout_block", old_block)
+
+    # 关闭过热禁买 → 过热可按其他闸门放行
+    old_oh = cfg.get("strategy.winrate_overheat_block")
+    cfg.set("strategy.winrate_overheat_block", False)
+    try:
+        t.ok("关闭过热禁买后排名5+胜率分达标 → 放行",
+             gate(5, "过热", wr_score=5) is None)
+    finally:
+        cfg.set("strategy.winrate_overheat_block", old_oh)
 
     # 总开关关闭 → 全部放行
     old = cfg.get("strategy.winrate_gate_enabled")

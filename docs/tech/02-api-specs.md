@@ -50,7 +50,7 @@
 ### 3.3 种子与闸门
 
 - `Screener.screen_tier`：候选携带 `pick_sector_bk/name/rank`。  
-- `_winrate_gate`：突破禁买、胜率分门槛、入选板块一致性等（可配置开关）。  
+- `_winrate_gate`：突破/过热禁买、胜率分门槛、入选板块一致性等（可配置开关）。  
 - 低吸：`lowbuy_sector_pool` —— 阶段 1 **只攒样本、不写计划**。
 
 ### 3.4 计划状态机
