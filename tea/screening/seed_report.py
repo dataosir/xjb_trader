@@ -9,6 +9,7 @@ import sys
 from typing import Any, Dict, List, Optional
 
 from tea.config.config_store import Config, load_config
+from tea.analysis.sentiment import allow_new_label
 from tea.core import utils
 from . import preflight
 from .screener import (VERDICT_EMPTY, VERDICT_PENDING, VERDICT_TRADEABLE,
@@ -34,7 +35,7 @@ def _sent_line(sent: Optional[dict]) -> str:
     return (f"情绪 {utils.num(sent.get('score'), 1)} 分 · {sent.get('cycle')} · "
             f"姿态 {sent.get('stance')} · 半仓基数 ×{utils.num(sent.get('base_pos_mult'), 2)}"
             + ("（冰点降仓）" if sent.get("ice_cut") else "")
-            + ("" if sent.get("allow_new", True) else " · 禁止新开"))
+            + f" · 新开 {allow_new_label(sent)}")
 
 
 def _ev_row(ev: dict) -> str:
@@ -77,11 +78,26 @@ def _ident(c: dict, nd: int = 1) -> str:
     return f"{c.get('identity_tier') or '—'} {utils.num(c.get('identity_score'), nd)}"
 
 
+def cand_display_reason(c: dict) -> str:
+    """候选明细展示用原因：优先 reason，否决类用 veto_labels / veto_reason 兜底。"""
+    reason = (c.get("reason") or "").strip()
+    if reason:
+        return reason
+    labels = [x for x in (c.get("veto_labels") or []) if x]
+    if labels:
+        verdict = c.get("verdict") or "否决"
+        return f"{verdict}：" + "；".join(labels)
+    veto_reason = (c.get("veto_reason") or "").strip()
+    if veto_reason:
+        return veto_reason
+    return "—"
+
+
 def _cand_row(c: dict) -> str:
     return (f"| {c.get('code')} | {c.get('name')} | {c.get('sector_name') or '—'} "
             f"| {utils.pct(c.get('chg'))} | {_intr(c.get('intraday'))} | {_reso(c)} "
             f"| {_ident(c)} "
-            f"| **{c.get('verdict') or '—'}** | {c.get('reason') or '—'} |")
+            f"| **{c.get('verdict') or '—'}** | {cand_display_reason(c)} |")
 
 
 def _dyn_line(result: dict) -> Optional[str]:
@@ -302,8 +318,7 @@ def format_result(result: dict, cfg: Optional[Config] = None) -> str:
                      f"{utils.pct(c.get('chg')):>8}  分时 {_intr(c.get('intraday')):>4}"
                      f"  共振 {_reso(c):<5}  {_ident(c, 0):<8}"
                      f"  [{c.get('verdict') or '—'}]")
-        if c.get("reason"):
-            lines.append(f"        原因：{c['reason']}")
+        lines.append(f"        原因：{cand_display_reason(c)}")
 
     for n in (result.get("notes") or []):
         lines.append(f"  · {n}")

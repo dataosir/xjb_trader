@@ -67,6 +67,7 @@ P0 纠偏后：**共振 PASS 不足以可买**，还需硬闸（突破/过热禁
 - [ ] `ok_nozt` / 多元化路径不可引入 rank>5 可买  
 - [ ] selftest 覆盖闸门开/关行为  
 - [ ] 关闭 `winrate_gate_enabled` 可回滚总闸  
+- [ ] 候选明细每条必带「原因」（含软/硬否决的 veto_detail 或 labels 兜底）  
 
 ## 8. 已知缺口 / 待迭代
 

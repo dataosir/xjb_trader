@@ -64,8 +64,10 @@
 | 文件 | 职责 |
 |---|---|
 | [`ops/README.md`](ops/README.md) | 运营层导读 |
+| [`ops/00-operator-hats.md`](ops/00-operator-hats.md) | 运营者两顶帽子（交易员 / 策略研发）与时间占比 |
 | [`ops/01-growth-channels.md`](ops/01-growth-channels.md) | 受众与推广渠道假设 |
 | [`ops/02-user-feedback.md`](ops/02-user-feedback.md) | 反馈 / Bug 收集规则 |
+| [`ops/03-operator-daily-sop.md`](ops/03-operator-daily-sop.md) | 交易运营日 SOP（MIT / 晨晚间 checklist；命令见 prd/02） |
 
 ---
 

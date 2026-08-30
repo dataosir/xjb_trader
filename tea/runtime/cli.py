@@ -327,6 +327,10 @@ def cmd_followthrough(args, cfg: Config) -> int:
             upd = ft_mod.update_results(_market(cfg), cfg, io=io)
         io.say(f"回填 {upd.get('updated')} 条，待回填 {upd.get('pending')} 条")
     io.say(ft_mod.format_followthrough(cfg))
+    io.say(ft_mod.format_sample_gap(cfg))
+    io.say(ft_mod.format_shadow_status(cfg))
+    io.say(ft_mod.format_stage_b_status(cfg))
+    io.say(ft_mod.format_lowbuy_status(cfg))
     return 0
 
 

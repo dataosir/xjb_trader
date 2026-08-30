@@ -201,6 +201,47 @@ def veto_detail(items: List[dict]) -> str:
     return "；".join(out)
 
 
+def _finalize_cand_reason(row: dict, ev: Optional[dict] = None) -> None:
+    """确保候选明细 reason 非空；否决类优先展开 veto_detail / labels。"""
+    reason = (row.get("reason") or "").strip()
+    if reason:
+        row["reason"] = reason
+        return
+    ev = ev or {}
+    vt = ev.get("veto") or {}
+    verdict = row.get("verdict") or ""
+    if verdict == CAND_HARD and vt.get("hard"):
+        row["reason"] = veto_detail(vt["hard"])
+        return
+    if verdict == CAND_SOFT and vt.get("soft"):
+        detail = veto_detail(vt["soft"])
+        labels = row.get("veto_labels") or [i.get("label") for i in vt["soft"] if i.get("label")]
+        if detail:
+            row["reason"] = detail + " → 观察轨等回踩"
+        elif labels:
+            row["reason"] = "软否决：" + "；".join(labels) + " → 观察轨等回踩"
+        else:
+            row["reason"] = "软否决 → 观察轨等回踩"
+        return
+    if row.get("veto_reason"):
+        row["reason"] = row["veto_reason"]
+        return
+    labels = row.get("veto_labels") or []
+    if labels:
+        row["reason"] = f"{verdict or '否决'}：" + "；".join(labels)
+        return
+    fallbacks = {
+        CAND_WATCH: "观察轨（待启动或胜率因子降级）",
+        CAND_NEAR: "共振分不足",
+        CAND_BUYABLE: (f"共振 {row.get('score')}/{row.get('threshold')} 达标"
+                       if row.get("score") is not None else "共振达标"),
+        CAND_ERROR: "行情/指标异常",
+        CAND_CHG_OUT: "实时涨幅移出窗口",
+        CAND_SKIPPED: "超出单次预审上限",
+    }
+    row["reason"] = fallbacks.get(verdict, "—")
+
+
 # ------------------------------------------------------------------ 候选明细
 
 def candidate_row(cand: dict, ev: Optional[dict] = None,
@@ -220,7 +261,7 @@ def candidate_row(cand: dict, ev: Optional[dict] = None,
     chg = q.get("chg_pct")
     # 数据积累：把预审的关键指标与 9 分共振逐维拆解一并落进 scan_details，
     # 供日后复盘「哪一维在系统性拖分、R:R 卡在哪」，据此迭代指标与阈值。
-    return {
+    row = {
         "code": cand.get("code"), "name": cand.get("name"),
         "sector_name": cand.get("sector_name"), "tier_label": cand.get("tier"),
         "chg": chg if chg is not None else cand.get("chg"),
@@ -249,8 +290,11 @@ def candidate_row(cand: dict, ev: Optional[dict] = None,
         "strong_exempt": vt.get("strong_exempt"),
         "identity_flags": idn.get("flags") or [],
         "veto_labels": [i.get("label") for i in vt.get("items", [])],
+        "veto_reason": vt.get("reason") or None,
         "verdict": verdict, "reason": reason,
     }
+    _finalize_cand_reason(row, ev)
+    return row
 
 
 def finalize_candidates(details: List[dict], evaluations: List[dict],
@@ -275,10 +319,12 @@ def finalize_candidates(details: List[dict], evaluations: List[dict],
         else:
             d["verdict"] = CAND_NEAR
             d["reason"] = "；".join(ev.get("reasons") or []) or "共振分不足"
+        _finalize_cand_reason(d, ev)
     for d in details:
         if not d.get("verdict"):
             d["verdict"] = CAND_NEAR
             d["reason"] = d.get("reason") or "预审完成但未进入任何输出档"
+        _finalize_cand_reason(d)
     return details
 
 

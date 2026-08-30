@@ -15,7 +15,7 @@
 | 清单 | [`INDEX.md`](INDEX.md) | **权威文件表**（一行一文） |
 | 产品 | [`prd/`](prd/README.md) | 定位、领域模型、日常流程、F01–F15、NFR、backlog |
 | 技术 | [`tech/`](tech/README.md) | 工程规范、架构、模块契约、持久化 |
-| 运营 | [`ops/`](ops/README.md) | 增长渠道、用户反馈 |
+| 运营 | [`ops/`](ops/README.md) | 两顶帽子、日 SOP、增长渠道、用户反馈 |
 | 状态 | [`project-state.md`](project-state.md) | 当前焦点与下一步（每次迭代必读必写） |
 | 变更 | [`CHANGELOG.md`](CHANGELOG.md) | 已发生事实；条目宜标注 Fxx / tech |
 | 归档 | [`archive/`](archive/README.md) | 历史策略/评审；只读，不写新主文档 |

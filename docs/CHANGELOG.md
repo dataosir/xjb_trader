@@ -4,6 +4,37 @@
 
 ## [Unreleased]
 
+### 运营（2026-08-30：Ops-1 运营者日 SOP + 两顶帽子）
+
+> 借鉴 indie-build-log 创始人 SOP；纯文档，零代码。
+
+- **新增** [`ops/00-operator-hats.md`](ops/00-operator-hats.md)：交易员 / 策略研发两帽；证据阶段 ≥70% / ≤30% 时间占比与升权条件。  
+- **新增** [`ops/03-operator-daily-sop.md`](ops/03-operator-daily-sop.md)：晨间 MIT、盘中约束、晚间复盘、日日志模板；与 `prd/02-daily-workflow` 分工明确。  
+- 同步 [`INDEX.md`](INDEX.md)、[`ops/README.md`](ops/README.md)、[`project-state.md`](project-state.md)、[`README.md`](README.md)；[`prd/02-daily-workflow.md`](prd/02-daily-workflow.md) 增加与 ops 分工互链。
+
+### 数据（2026-08-28：样本缺口看板 + 影子桶对照）
+
+> 关联：F11 / backlog；`followthrough.sample_gap_stats` · `shadow_tag`。
+
+- **样本缺口看板**：`review` / `followthrough` 打印待 T+1、待 T+3、今日待下一交易日、低吸条数、因子覆盖、新闸门后（≥`p0_gate_date`）可买条数。  
+- **`shadow_tag` 落盘**：萌芽 ∪（非突破∧rank≤3）→ `萌芽` / `前三非突破`（可合并）；只对照 **T+3>0**，**不驱动计划**。验收门槛默认 `t3_up_target=0.60`（配置可调，非收益承诺）。  
+- 低吸仍只观察空池 diag、不放宽落盘、不买入。  
+- 配置：`followthrough.p0_gate_date` / `t3_up_target` / `shadow_min_samples`。
+
+### 体验（2026-08-27：候选明细否决原因必展示）
+
+> 关联：F03；`screener.candidate_row` · `seed_report.cand_display_reason`。
+
+- **候选明细每条必带「原因」行**：控制台与 SEED 报告不再因 `reason` 为空而缺行；软/硬否决优先展开 `veto_detail`，空时由 `veto_labels` / `veto_reason` 兜底。  
+- `scan_details` 候选行新增 `veto_reason` 留痕（与 `veto_labels` 互补）。
+
+### 体验（2026-08-27：新开文案消歧）
+
+> 关联：F01；`tea/analysis/sentiment.py` · `allow_new_label`。
+
+- **防守日不再显示「新开 允许」**：改为 `未硬禁（防守缩手）`；进攻日 `未硬禁`；空仓/高潮仍 `禁止`。逻辑不变（`allow_new` 布尔未改），仅减少误读为「鼓励买入」。  
+- 种子报告 / TRADE_CHECK 报告同步同一文案。
+
 ### 策略 / 体验（2026-08-26：过热禁买 + 回填降噪）
 
 > 关联：F03 / F11；`screener._winrate_gate` · `runner.maybe_auto_backfill`。

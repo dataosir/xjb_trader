@@ -8,6 +8,7 @@ from typing import Any, Dict, List, Optional
 
 from tea.config.config_store import Config, load_config
 from tea.core import utils
+from tea.analysis.sentiment import allow_new_label
 from tea.screening import preflight
 
 DECISION_BUY = "BUY"
@@ -53,7 +54,7 @@ def _sentiment_block(sent: Optional[dict]) -> List[str]:
         f"- 周期：{sent.get('cycle')}　姿态：**{sent.get('stance')}**",
         f"- 半仓基数：×{utils.num(sent.get('base_pos_mult'), 2)}"
         + ("（冰点降仓生效）" if sent.get("ice_cut") else ""),
-        f"- 允许新开：{'是' if sent.get('allow_new', True) else '否'}",
+        f"- 新开：{allow_new_label(sent)}",
     ]
     br = sent.get("breadth") or {}
     idx = sent.get("index") or {}

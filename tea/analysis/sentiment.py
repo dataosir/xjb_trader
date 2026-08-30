@@ -324,13 +324,22 @@ def clear_cache() -> None:
     _CACHE["ts"], _CACHE["data"] = 0.0, None
 
 
+def allow_new_label(s: dict) -> str:
+    """屏上「新开」文案：区分硬禁与防守缩手，避免误读为鼓励买入。"""
+    if not s.get("allow_new", True):
+        return "禁止"
+    if s.get("stance") == STANCE_DEFEND:
+        return "未硬禁（防守缩手）"
+    return "未硬禁"
+
+
 def format_weather(s: dict) -> str:
     """CLI 单屏市场天气。"""
     idx = s.get("index") or {}
     lines = [
         "===== 道 · 市场天气 =====",
         f"情绪分 {s['score']}  周期 {s['cycle']}  姿态 {s['stance']}  "
-        f"新开 {'允许' if s['allow_new'] else '禁止'}",
+        f"新开 {allow_new_label(s)}",
         f"上证 {utils.num(idx.get('point'))} ({utils.pct(idx.get('chg_pct'))})  "
         f"MA20 {utils.num(idx.get('ma20'))} → "
         f"{('上方' if s.get('ma20_above') else '下方') if s.get('ma20_known') else '未知'}",

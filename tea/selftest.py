@@ -1286,6 +1286,15 @@ def check_sentiment(t: Suite, cfg: Config, mk: FakeMarket) -> dict:
     t.ok("MA20 未知不谎报退潮", gap["cycle"] != sent_mod.CYCLE_EBB, f"cycle={gap['cycle']}")
     t.ok("MA20 未知落防守", gap["stance"] == sent_mod.STANCE_DEFEND, f"stance={gap['stance']}")
     t.ok("MA20 未知仍允许新开", bool(gap.get("allow_new")))
+    t.eq("防守+允许新开 文案", sent_mod.allow_new_label(
+        {"allow_new": True, "stance": sent_mod.STANCE_DEFEND}),
+        "未硬禁（防守缩手）")
+    t.eq("进攻+允许新开 文案", sent_mod.allow_new_label(
+        {"allow_new": True, "stance": sent_mod.STANCE_ATTACK}),
+        "未硬禁")
+    t.eq("禁止新开 文案", sent_mod.allow_new_label(
+        {"allow_new": False, "stance": sent_mod.STANCE_EMPTY}),
+        "禁止")
 
     # MA20 下方（已知）不再单独触发防守：位置已由共振「大盘趋势」维扣分表达，
     # 这里不再对同一信号罚第二遍（否则弱势市数学上无人能过）。
@@ -1991,6 +2000,16 @@ def check_seed(t: Suite, cfg: Config, mk: FakeMarket, sent: dict) -> dict:
     t.eq("2 只涨停票 → 硬否决入明细", len(hard), 2)
     t.ok("硬否决原因带具体触发点", all("阈值" in (d.get("reason") or "") for d in hard),
          "；".join(d.get("reason") or "" for d in hard))
+    fmt_det = seed_report.format_result({**res, "candidates": det, "candidates_n": len(det)}, cfg)
+    t.ok("控制台候选明细每条都带原因行",
+         all(f"        原因：{seed_report.cand_display_reason(d)}" in fmt_det for d in det),
+         fmt_det[-20:] if len(fmt_det) > 20 else fmt_det)
+    soft_stub = {"code": "002141", "name": "贤丰控股", "verdict": screener_mod.CAND_SOFT,
+                 "veto_labels": ["MA20 乖离过热"], "reason": ""}
+    screener_mod._finalize_cand_reason(soft_stub)
+    t.ok("软否决 reason 空时由 veto_labels 兜底",
+         "MA20" in (soft_stub.get("reason") or ""),
+         soft_stub.get("reason"))
     md = seed_report.render_md({**res, "candidates": det, "candidates_n": 3}, cfg)
     t.ok("SEED 报告含候选明细表且覆盖全部候选",
          "候选明细" in md and all(d["code"] in md for d in det),
@@ -2558,6 +2577,66 @@ def check_followthrough(t: Suite, cfg: Config) -> None:
     t.eq("低吸样本胜", lb["wins"], 1)
     t.ok("低吸进度文案", "2 条" in ft_mod.format_lowbuy_status(cfg))
 
+    # 影子标签：萌芽 ∪（非突破∧rank≤3）；只落盘对照，不驱动计划
+    t.eq("萌芽打 shadow_tag",
+         ft_mod.compute_shadow_tag("萌芽", 8), "萌芽")
+    t.eq("前三非突破打标签",
+         ft_mod.compute_shadow_tag("过热", 2), "前三非突破")
+    t.eq("萌芽且前三合并标签",
+         ft_mod.compute_shadow_tag("萌芽", None, 1), "萌芽|前三非突破")
+    t.eq("突破不进前三非突破",
+         ft_mod.compute_shadow_tag("突破", 1), None)
+    t.eq("中游过热无标签",
+         ft_mod.compute_shadow_tag("过热", 6), None)
+    r_sh = ft_mod.record_seed([{
+        "code": "600911", "name": "影子票", "price": 9.0, "track": "观察轨",
+        "stage": "萌芽", "sector_rank": 2, "pick_sector_rank": 2,
+    }], cfg, date="2026-08-21")
+    t.eq("shadow_tag 随 record_seed 落盘", r_sh, {"added": 1, "skipped": 0, "updated": 0})
+    f_sh = next(r for r in ft_mod.load_records(cfg) if r.get("code") == "600911")
+    t.eq("落盘 shadow_tag 值", f_sh.get("shadow_tag"), "萌芽|前三非突破")
+
+    ft_mod.save_records([
+        {"date": "2026-08-10", "code": "601001", "stage": "萌芽", "sector_rank": 1,
+         "chg_t3": 2.0, "result": "win"},
+        {"date": "2026-08-11", "code": "601002", "stage": "过热", "pick_sector_rank": 2,
+         "chg_t3": -1.0, "result": "loss"},
+        {"date": "2026-08-12", "code": "601003", "stage": "突破", "sector_rank": 1,
+         "chg_t3": 5.0, "result": "win"},
+        {"date": "2026-08-13", "code": "601004", "stage": "萌芽", "sector_rank": 5,
+         "chg_t3": None, "result": "loss"},
+    ], cfg)
+    cfg.set("followthrough.shadow_min_samples", 2)
+    cfg.set("followthrough.t3_up_target", 0.60)
+    sh = ft_mod.shadow_t3_stats(cfg)
+    t.eq("影子桶有 T+3 条数（突破不算）", sh["n_t3"], 2)
+    t.eq("影子桶 T+3>0 条数", sh["t3_up"], 1)
+    t.eq("影子桶 T+3>0 胜率", sh["t3_up_rate"], 0.5)
+    t.ok("未达 60% 门槛", not sh["ready"])
+    t.ok("影子文案含目标", "60%" in ft_mod.format_shadow_status(cfg)
+         or "≥60%" in ft_mod.format_shadow_status(cfg))
+
+    # 样本缺口看板：待 T+1 / T+3、低吸、新闸门后可买
+    today = utils.today_str()
+    ft_mod.save_records([
+        {"date": "2026-08-10", "code": "602001", "track": "观察轨", "result": None},
+        {"date": "2026-08-11", "code": "602002", "track": "可买", "result": "loss",
+         "chg_t3": None, "bias_ma20": 8.0},
+        {"date": "2026-08-27", "code": "602003", "track": "可买", "result": "win",
+         "chg_t3": 1.2, "bias_ma20": 3.0},
+        {"date": today, "code": "602004", "track": "观察轨", "result": None,
+         "lowbuy": True},
+    ], cfg)
+    gap = ft_mod.sample_gap_stats(cfg)
+    t.eq("缺口：待 T+1", gap["pending_t1"], 1)
+    t.eq("缺口：待 T+3", gap["pending_t3"], 1)
+    t.eq("缺口：今日待下一交易日", gap["today_waiting"], 1)
+    t.eq("缺口：新闸门后可买", gap["post_gate_buyable"], 1)
+    t.eq("缺口：新闸门后可买已有 T+3", gap["post_gate_buyable_t3"], 1)
+    t.eq("缺口：因子齐全数", gap["factor_ok"], 2)
+    t.eq("缺口：低吸总数", gap["lowbuy_total"], 1)
+    t.ok("缺口文案含待 T+1", "待 T+1" in ft_mod.format_sample_gap(cfg))
+
     # 自动回填开关：seed 触发轻量回填；关开关则跳过；menu 每天最多一次
     from .runtime import runner
     from .phases import IO
@@ -2569,6 +2648,10 @@ def check_followthrough(t: Suite, cfg: Config) -> None:
          config_store.DEFAULTS["followthrough"]["auto_backfill_on_menu"], True)
     t.eq("auto_backfill_full_review 默认关",
          config_store.DEFAULTS["followthrough"]["auto_backfill_full_review"], False)
+    t.eq("t3_up_target 默认 60%",
+         config_store.DEFAULTS["followthrough"]["t3_up_target"], 0.60)
+    t.eq("p0_gate_date 默认",
+         config_store.DEFAULTS["followthrough"]["p0_gate_date"], "2026-08-26")
 
     d_hist = _end_dates(30)[8]
     ft_mod.save_records([{"date": d_hist, "code": "600778", "name": "自动回填样本",

@@ -26,7 +26,8 @@
 | `winrate-scan` | `Screener.winrate_scan`（菜单在复盘工具▸） | **只落盘观察，不写计划** |
 | `plan-check` | `plan` 复核 | 变动则整单作废 |
 | `run` / `eval` | gates → phases Phase1–4；`eval` 不落仓 | `run` 可登记灰度仓 |
-| `review` | followthrough 回填 + watch 复核 | 写 seed_records / 报告 |
+| `review` | followthrough 回填 + watch 复核 + 缺口/影子看板 | 写 seed_records / 报告 |
+| `followthrough` | 跟涨胜率 + 样本缺口 + 影子桶 T+3 对照 | 只读（`--update` 可写回填） |
 | （进菜单） | `maybe_auto_backfill(menu)` | 盘后/隔夜窗每天最多 1 次轻量回填 |
 | `selftest` | `tea/selftest.py` | 临时 `$TEA_HOME` 沙箱，不碰真实数据 |
 

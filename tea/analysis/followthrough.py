@@ -40,6 +40,37 @@ def _track_rank(track: Optional[str]) -> int:
     return _TRACK_PRIORITY.get(track, -1)
 
 
+# ------------------------------------------------------------------ 影子对照标签（不驱动计划）
+
+def compute_shadow_tag(stage: Optional[str], sector_rank: Any = None,
+                       pick_sector_rank: Any = None) -> Optional[str]:
+    """影子对照桶标签：萌芽 ∪（非突破 ∧ rank≤3）。
+
+    只用于落盘对照 T+3>0，**不写计划、不改可买**。优先用入选板块
+    ``pick_sector_rank``，缺则退回预审 ``sector_rank``。
+    """
+    tags: List[str] = []
+    if stage == "萌芽":
+        tags.append("萌芽")
+    rank = pick_sector_rank if pick_sector_rank is not None else sector_rank
+    try:
+        rank_i = int(rank) if rank is not None else None
+    except (TypeError, ValueError):
+        rank_i = None
+    if stage and stage != "突破" and rank_i is not None and rank_i <= 3:
+        tags.append("前三非突破")
+    return "|".join(tags) if tags else None
+
+
+def resolve_shadow_tag(rec: dict) -> Optional[str]:
+    """读已落盘标签；缺则按阶段/排名重算（兼容闸门前旧样本）。"""
+    raw = rec.get("shadow_tag")
+    if raw:
+        return str(raw)
+    return compute_shadow_tag(rec.get("stage"), rec.get("sector_rank"),
+                              rec.get("pick_sector_rank"))
+
+
 def record_seed(entries: List[dict], cfg: Optional[Config] = None,
                 date: Optional[str] = None) -> dict:
     """落盘当日种子记录（供次日回填 T+1 结果），按 (date, code) 去重。
@@ -88,6 +119,10 @@ def record_seed(entries: List[dict], cfg: Optional[Config] = None,
             "pick_sector_bk": e.get("pick_sector_bk"),
             "pick_sector_name": e.get("pick_sector_name"),
             "pick_sector_rank": e.get("pick_sector_rank"),
+            "shadow_tag": (e.get("shadow_tag")
+                           or compute_shadow_tag(
+                               e.get("stage"), e.get("sector_rank"),
+                               e.get("pick_sector_rank"))),
             "close": e.get("price"), "next_chg": None, "result": None,
             "chg_t2": None, "chg_t3": None, "chg_t5": None,
         }
@@ -403,3 +438,129 @@ def format_lowbuy_status(cfg: Optional[Config] = None) -> str:
         return f"低吸样本：累计 {st['total']} 条，尚无回填（跑 review 回填 T+N）"
     return (f"低吸样本：累计 {st['total']} 条，已回填 {st['backfilled']} 条"
             f"（胜 {st['wins']}/{st['backfilled']}），目标 ≥30 条进入验证")
+
+
+# ------------------------------------------------------------------ 样本缺口看板 + 影子桶 T+3
+
+def sample_gap_stats(cfg: Optional[Config] = None) -> dict:
+    """样本缺口看板：待 T+1 / 待 T+3、低吸、因子覆盖、新闸门后可买。
+
+    只读统计，不改策略。今日未回填不算进「历史待 T+1」。
+    """
+    cfg = cfg or load_config()
+    today = utils.today_str()
+    gate = str(cfg.get("followthrough.p0_gate_date", "2026-08-26") or "2026-08-26")
+    recs = load_records(cfg)
+    pending_t1 = pending_t3 = today_waiting = 0
+    factor_ok = 0
+    post_buyable = 0
+    post_buyable_t3 = 0
+    for r in recs:
+        if not r.get("code"):
+            continue
+        d = r.get("date") or ""
+        if d == today:
+            today_waiting += 1
+        elif r.get("result") is None:
+            pending_t1 += 1
+        elif r.get("chg_t3") is None:
+            pending_t3 += 1
+        if r.get("bias_ma20") is not None:
+            factor_ok += 1
+        if r.get("track") == "可买" and d >= gate:
+            post_buyable += 1
+            if r.get("chg_t3") is not None:
+                post_buyable_t3 += 1
+    lb = lowbuy_sample_stats(cfg)
+    return {
+        "total": len(recs),
+        "pending_t1": pending_t1,
+        "pending_t3": pending_t3,
+        "today_waiting": today_waiting,
+        "lowbuy_total": lb["total"],
+        "lowbuy_backfilled": lb["backfilled"],
+        "factor_ok": factor_ok,
+        "factor_pct": (factor_ok / len(recs)) if recs else 0.0,
+        "p0_gate_date": gate,
+        "post_gate_buyable": post_buyable,
+        "post_gate_buyable_t3": post_buyable_t3,
+    }
+
+
+def format_sample_gap(cfg: Optional[Config] = None) -> str:
+    """一行可读的样本缺口摘要（review / followthrough 打印）。"""
+    st = sample_gap_stats(cfg)
+    factor = f"{st['factor_ok']}/{st['total']}"
+    if st["total"]:
+        factor += f"（{st['factor_pct']:.0%}）"
+    lines = [
+        "===== 样本缺口看板 =====",
+        (f"  累计 {st['total']} 条｜待 T+1 {st['pending_t1']}｜"
+         f"待 T+3 {st['pending_t3']}｜今日待下一交易日 {st['today_waiting']}"),
+        (f"  低吸 {st['lowbuy_total']} 条（已回填 {st['lowbuy_backfilled']}）｜"
+         f"因子字段齐全 {factor}"),
+        (f"  新闸门后（≥{st['p0_gate_date']}）可买 {st['post_gate_buyable']} 条"
+         f"（其中已有 T+3 {st['post_gate_buyable_t3']}）"),
+    ]
+    return "\n".join(lines)
+
+
+def shadow_t3_stats(cfg: Optional[Config] = None) -> dict:
+    """影子桶「萌芽∪前三非突破」的 T+3>0 对照（不驱动计划）。
+
+    验收门槛默认 t3_up_target=0.60；样本不足时 ready=False。
+    """
+    cfg = cfg or load_config()
+    target = float(cfg.get("followthrough.t3_up_target", 0.60))
+    min_n = int(cfg.get("followthrough.shadow_min_samples", 15))
+    tagged: List[dict] = []
+    for r in load_records(cfg):
+        tag = resolve_shadow_tag(r)
+        if not tag:
+            continue
+        tagged.append({**r, "_shadow_tag": tag})
+    with_t3 = [r for r in tagged if r.get("chg_t3") is not None]
+    t3_up = sum(1 for r in with_t3 if float(r["chg_t3"]) > 0)
+    rate = (t3_up / len(with_t3)) if with_t3 else None
+    # 分标签粗看（同一条可属多标签，分母按标签各自计）
+    by_tag: Dict[str, dict] = {}
+    for r in with_t3:
+        for part in str(r["_shadow_tag"]).split("|"):
+            if not part:
+                continue
+            slot = by_tag.setdefault(part, {"n": 0, "up": 0})
+            slot["n"] += 1
+            if float(r["chg_t3"]) > 0:
+                slot["up"] += 1
+    return {
+        "n_tagged": len(tagged),
+        "n_t3": len(with_t3),
+        "t3_up": t3_up,
+        "t3_up_rate": rate,
+        "target": target,
+        "min_samples": min_n,
+        "ready": bool(rate is not None and len(with_t3) >= min_n and rate >= target),
+        "by_tag": by_tag,
+    }
+
+
+def format_shadow_status(cfg: Optional[Config] = None) -> str:
+    """影子桶 T+3 对照文案：对照验收门槛，不暗示可买。"""
+    st = shadow_t3_stats(cfg)
+    if st["n_tagged"] == 0:
+        return ("影子桶（萌芽∪前三非突破）：0 条（跑 seed-plan 落盘 shadow_tag；"
+                "只对照不驱动计划）")
+    if st["n_t3"] == 0:
+        return (f"影子桶：已标 {st['n_tagged']} 条，尚无 T+3 回填"
+                f"（目标 T+3>0 ≥{st['target']:.0%}，至少 {st['min_samples']} 条）")
+    rate = st["t3_up_rate"] or 0.0
+    flag = "达标" if st["ready"] else (
+        "样本不足" if st["n_t3"] < st["min_samples"] else "未达门槛")
+    parts = []
+    for name, slot in sorted(st["by_tag"].items(), key=lambda x: -x[1]["n"]):
+        rr = slot["up"] / slot["n"] if slot["n"] else 0.0
+        parts.append(f"{name} {slot['up']}/{slot['n']}={rr:.0%}")
+    detail = "；".join(parts) if parts else "—"
+    return (f"影子桶 T+3>0：{st['t3_up']}/{st['n_t3']} = {rate:.0%}"
+            f"（目标 ≥{st['target']:.0%}，{flag}；已标 {st['n_tagged']}）"
+            f"　{detail}")

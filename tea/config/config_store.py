@@ -633,6 +633,10 @@ DEFAULTS: Dict[str, Any] = {
         "auto_backfill_on_seed": True,       # seed-plan 收尾若有待回填则自动轻量回填
         "auto_backfill_on_menu": True,       # 进菜单时（盘后/隔夜窗，每天最多 1 次）
         "auto_backfill_full_review": False,  # True 则等价 close_review（含观察池/accum）
+        # 样本缺口看板 / 影子桶（只对照不驱动计划）
+        "p0_gate_date": "2026-08-26",       # 突破+过热禁买后的可买样本起算日
+        "t3_up_target": 0.60,               # 验收门槛：影子桶 T+3>0 目标胜率（不承诺收益）
+        "shadow_min_samples": 15,           # 影子桶对照最少回填条数才谈「够不够」
     },
     # ---------------------------------------------------------- 观察池
     "watch": {
