@@ -1,0 +1,16 @@
+---
+description: 改代码后自动 commit，不 push；由用户确认后手动推送
+alwaysApply: true
+---
+
+# Git 工作流：自动 commit，不 push
+
+完成代码/文档修改后：
+
+1. **自动 commit**：任务收尾时创建本地 commit（用户未另行说明时默认执行）
+2. **禁止 push**：除非用户明确说「推送 / push」，否则不执行 `git push`
+3. **提交前**：跑相关自测（如 `python3 -m tea.selftest`）；通过后再 commit
+4. **提交信息**：简洁说明「为什么」，遵循仓库既有 commit 风格
+5. **收尾告知**：回复中给出 commit hash、摘要；提醒用户确认后可自行 `git push`
+
+例外：纯问答、只读排查、未改任何文件时，不创建空 commit。
