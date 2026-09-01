@@ -2120,6 +2120,7 @@ def check_plan_labels(t: Suite, cfg: Config, mk: FakeMarket, sent: dict) -> None
         res = runner.seed_plan(cfg=cfg, market=mk, io=io, sent=sent, include_eve=False)
     finally:
         cfg.set("strategy.seed_max_output", old_max)
+    runner.wait_backfill_done(timeout=120)
     t.eq("无可买 → 不写计划", res.get("plan"), None)
     warn = "\n".join(ln for ln in io.transcript if "仍存在未执行的旧计划" in ln)
     t.ok("旧计划提醒含股票名", "002882 中元股份" in warn, warn or "未出现提醒")
@@ -2668,6 +2669,8 @@ def check_followthrough(t: Suite, cfg: Config) -> None:
     from .phases import IO
     import datetime as _dt
 
+    runner.wait_backfill_done(timeout=120)  # 收拢 seed_plan 等可能遗留的后台线程
+
     t.eq("auto_backfill_on_seed 默认开",
          config_store.DEFAULTS["followthrough"]["auto_backfill_on_seed"], True)
     t.eq("auto_backfill_on_menu 默认开",
@@ -2706,6 +2709,7 @@ def check_followthrough(t: Suite, cfg: Config) -> None:
                                         trigger="seed", background=True)
     t.ok("异步立即返回", upd_bg is not None and upd_bg.get("async") is True,
          str(upd_bg))
+    t.ok("异步已启动新线程", upd_bg.get("started") is True, str(upd_bg))
     t.ok("异步回填线程结束", runner.wait_backfill_done(timeout=60))
     t.eq("异步回填后 pending=0", ft_mod.pending_backfill(cfg), 0)
 
