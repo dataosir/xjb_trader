@@ -4,6 +4,46 @@
 
 ## [Unreleased]
 
+### 日志（2026-09-01：共振分 + 行情关键节点日志）
+
+> 关联：种子扫描追溯；launchd 14:30 漏日志排查。
+
+- **新增** `tea.score` logger：每只候选 `evaluate` 记共振六维摘要、门槛、裁决、否决原因。  
+- **新增** `tea.data` 行情/K 线成功与失败明细（`行情就绪` / `K线就绪` / 取数失败）。  
+- **新增** `tea.scan` 漏斗日志（档位、初筛数、降级 notes）与扫描开始标记。  
+- **修复** launchd plist 改直调 `python3 -m tea seed-plan`（绕过 Downloads 下 bash 脚本 `Operation not permitted`）；`seed_plan` 末尾补写 `seed-cron.log` 摘要行。  
+- 同步 [`ops/05-seed-plan-scheduler.md`](ops/05-seed-plan-scheduler.md) 日志速查与排障。
+
+### 数据（2026-09-01：大盘指数 MA20 跨源补全）
+
+> 关联：F01 市场天气；东财 `push2his` K 线封禁时报价仍可用、MA20 缺失。
+
+- **根因**：`index_snapshot` 在东财拿到 `point>0` 即命中，不再整包降级；东财 K 线挂时 `ma20=None`，备源腾讯 K 线未接上。  
+- **修复**：`Market.get_index` 在 `ma20` 缺失时另走 `fetch_klines` 降级链补全 MA20 / `ma20_above` / `ma20_bias_pct` / `ma20_slope_pct`。  
+- **日志**：成功记 `大盘指数 MA20 跨源补全`（含 `source/elapsed/bias`）；失败记 warning。  
+- **自测**：新增「报价通、东财 K 线挂 → 腾讯 K 线补 MA20」断言。
+
+### 数据（2026-09-01：大盘指数超时排查 + 运行日志增强）
+
+> 关联：F01 市场天气 / 赤天化案例（8/28 大盘指数超时 15s → 共振大盘维归零）。
+
+- **根因**：`sentiment.fetch_raw` 单路线程池超时硬编码 15s，短于指数降级链（东财→腾讯→新浪）最坏耗时，链未跑完即被掐断。  
+- **修复**：新增配置 `sentiment.fetch_timeout_sec`（默认 **30s**），给备源接手留余量。  
+- **日志**（`logs/tea.log`，`tea.data` logger）：  
+  - HTTP 层：请求最终失败记 `path/host/attempts/err`  
+  - 指数两路取源：报价/K 线分别失败、两路均无法得点位  
+  - 降级链：全部失败记 `method + detail`  
+  - `Market.get_index`：成功/失败记 `secid/point/ma20/source/elapsed`  
+  - `fetch_raw`：单路超时/失败 + 缺口汇总  
+
+### 运营（2026-09-01：种子扫描外部调度 · 方案 A）
+
+> 关联：B-P0-01 / F03 / F11 Out 边界；零 Python 代码改动。
+
+- **新增** 仓库 `ops/`：`seed-plan-cron.sh`（交易日 wrapper）、`com.tea.seed-plan.plist.template`、`install-launchd-seed-plan.sh`、`uninstall-launchd-seed-plan.sh`。  
+- **新增** [`ops/05-seed-plan-scheduler.md`](ops/05-seed-plan-scheduler.md)：macOS launchd 安装、日志路径、漏扫补救、Phase 0 验收清单。  
+- 同步 [`ops/03-operator-daily-sop.md`](ops/03-operator-daily-sop.md)、[`INDEX.md`](INDEX.md)、[`project-state.md`](project-state.md)。
+
 ### 运营（2026-08-30：Ops-1 运营者日 SOP + 两顶帽子）
 
 > 借鉴 indie-build-log 创始人 SOP；纯文档，零代码。

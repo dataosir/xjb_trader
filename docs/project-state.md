@@ -12,7 +12,7 @@
 | 产品 | XJB_TRADE（TEA）— A 股交易准入引擎 |
 | 代码版本 | `1.0.0`（`tea.__version__`） |
 | 文档框架 | 一人公司全栈：`prd` / `tech` / `ops` + CHANGELOG + 本文件；**清单权威源** `docs/INDEX.md` |
-| 更新日期 | 2026-08-30 |
+| 更新日期 | 2026-09-01 |
 
 ---
 
@@ -37,13 +37,13 @@
 
 **以攒证据为主**：缺口看板盯 T+1/T+3；影子桶（萌芽∪前三非突破）对照 **T+3>0≥60%**（验收门槛，非收益承诺）；巩固可买硬闸；低吸空池只观察。
 
-已落地（代码）：突破/过热禁买、`winrate_score`、板块一致性、自动轻量回填、候选否决原因必展示、**样本缺口看板**、**`shadow_tag` 落盘对照**。
+已落地（代码）：突破/过热禁买、`winrate_score`、板块一致性、自动轻量回填、候选否决原因必展示、**样本缺口看板**、**`shadow_tag` 落盘对照**、**大盘指数超时修复 + MA20 跨源补全 + `tea.data` 运行日志**、**共振分/行情关键节点 `tea.log` 追溯 + launchd 直调 python 修复**。
 
 ## 进行中
 
 | ID | 事项 | 说明 |
 |---|---|---|
-| B-P0-01 | 每日 `seed-plan` + 适时全量 `review` | 运营；看缺口看板补 T+3 |
+| B-P0-01 | 每日 `seed-plan` + 适时全量 `review` | 运营；**launchd 方案 A 已落地**（`ops/` + `ops/05`）；看缺口看板补 T+3 |
 | B-P0-02 / 07 | 因子与 `lowbuy` 样本积累 | 低吸**先观察**空池 diag，不放宽、不买入 |
 | B-P1-01 | rule vs winrate 影子对照 | 1–2 周，不写计划 |
 | B-P1-06 | `shadow_tag` T+3 对照 | 目标 T+3>0≥60%；样本≥`shadow_min_samples` 再议策略 |
@@ -62,7 +62,7 @@
 
 ## 下一步计划
 
-1. 日循环：`seed-plan`（自动回填）+ 每周至少一次菜单 `8` 全量 `review`，看缺口看板把待 T+3 压下去；**人**侧按 [`ops/03-operator-daily-sop.md`](ops/03-operator-daily-sop.md) 晨晚间 checklist。  
+1. 日循环：`seed-plan`（launchd 14:30 或手动；自动回填）+ 每周至少一次菜单 `8` 全量 `review`，看缺口看板把待 T+3 压下去；**人**侧按 [`ops/03-operator-daily-sop.md`](ops/03-operator-daily-sop.md) 晨晚间 checklist。  
 2. 影子桶回填 ≥15 且 T+3>0 稳定对照 60% 后，再开策略 Plan（收紧萌芽可买或另议）。  
 3. 低吸：空池只读 diag；`lowbuy` 回填 ≥30 前不上买入。  
 4. **Ops-2（待做）**：证据周 scorecard + 里程碑/Kill 表（`ops/04`–`05`）。

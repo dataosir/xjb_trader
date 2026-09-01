@@ -1170,6 +1170,16 @@ def check_providers(t: Suite, cfg: Config) -> None:
          1350.60, tol=1e-6)
     t.eq("两项都由腾讯接手", mkt.provider.last_source.get("quote"), "tencent")
 
+    # ---- 指数报价通、东财 K 线挂：get_index 跨源走 K 线降级链补 MA20
+    mock = _MockSources(fail=("em_kline",))
+    mkt = Market(cfg, fetcher=mock, provider=build_provider(cfg, mock, ALL))
+    idx = mkt.get_index()
+    t.eq("指数 · 报价通 K 线挂仍不整包降级",
+         mkt.provider.last_source.get("index_snapshot"), "eastmoney")
+    t.eq("指数 · 跨源 K 线补 MA20", idx["ma20"], 3800.0, tol=1e-6)
+    t.ok("指数 · 3832 > MA20 3800 → 在上方", idx["ma20_above"] is True)
+    t.eq("指数 · MA20 由腾讯 K 线补", mkt.provider.last_source.get("klines"), "tencent")
+
     # ---- _has_data 按 method 判有效性：半成品响应不能被当成命中
     from .data.providers.base import ChainedProvider, IDataProvider, _has_data
     t.ok("_has_data quote · 半成品无 price 判无数据",
@@ -1230,6 +1240,7 @@ def check_providers(t: Suite, cfg: Config) -> None:
 
 def check_sentiment(t: Suite, cfg: Config, mk: FakeMarket) -> dict:
     t.head("道 · 情绪评分（§4.2 表逐项复算）")
+    t.eq("天气采集单路超时默认30s", float(cfg.get("sentiment.fetch_timeout_sec", 30)), 30.0)
     raw = {"index": mk.get_index(), "sectors": mk.get_sector_ranking(),
            "breadth": mk.get_breadth(), "limit_up": mk.get_limit_up_stats()}
     scored = sent_mod.compute_score(raw, cfg)
@@ -1308,7 +1319,8 @@ def check_sentiment(t: Suite, cfg: Config, mk: FakeMarket) -> dict:
          f"stance={below['stance']} notes={below.get('notes')}")
 
     # 数据缺口横幅：指数超时 + 网络失败 → 醒目汇总；无缺口 → 空串
-    s_gap = {"errors": ["index: 超时 15s", "hard: 请求失败"], "limit_up_error": None}
+    fetch_to = int(cfg.get("sentiment.fetch_timeout_sec", 30))
+    s_gap = {"errors": [f"index: 超时 {fetch_to}s", "hard: 请求失败"], "limit_up_error": None}
     gaps = sent_mod.data_gap_summary(s_gap, "网络请求 27 次｜东财 1｜失败 9")
     t.ok("指数缺口映射为大盘指数", any(g.startswith("大盘指数: 超时") for g in gaps), str(gaps))
     t.ok("网络失败进缺口汇总", any("失败 9" in g for g in gaps), str(gaps))

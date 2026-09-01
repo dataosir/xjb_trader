@@ -11,7 +11,7 @@ from concurrent.futures import TimeoutError as FutureTimeout
 from typing import Any, Dict, List, Optional
 
 from tea.config.config_store import Config, load_config
-from tea.core import utils
+from tea.core import logger as logger_mod, utils
 from tea.data import Market
 
 CYCLE_ICE = "冰点"
@@ -27,14 +27,15 @@ STANCE_ATTACK = "进攻"
 
 _CACHE: Dict[str, Any] = {"ts": 0.0, "data": None}
 
-# 单路行情最长等待秒数：超时只降级该路，不让情绪评分整体卡住。
-_FETCH_TIMEOUT = 15
+_LOG = logger_mod.get_logger("data")
 
 
 # ------------------------------------------------------------------ 采集
 
-def fetch_raw(market: Market, io: Any = None) -> dict:
+def fetch_raw(market: Market, io: Any = None, cfg: Optional[Config] = None) -> dict:
     """并行采集三路原始数据，单路失败不影响整体（降级为 None）。"""
+    cfg = cfg or load_config()
+    fetch_timeout = float(cfg.get("sentiment.fetch_timeout_sec", 30.0))
     out: Dict[str, Any] = {"index": {}, "sectors": [], "breadth": {}, "limit_up": {}, "errors": []}
     labels = {"index": "大盘指数", "sectors": "板块排名", "hard": "涨跌家数/涨停池"}
     t0 = time.time()
@@ -52,14 +53,23 @@ def fetch_raw(market: Market, io: Any = None) -> dict:
         f_idx, f_sec, f_hard = ex.submit(_index), ex.submit(_sectors), ex.submit(_hard)
         # 在主线程按固定顺序收结果再打印，避开三个线程抢着往屏上写。
         for name, fut in (("index", f_idx), ("sectors", f_sec), ("hard", f_hard)):
+            ch_t0 = time.time()
             try:
-                res = fut.result(timeout=_FETCH_TIMEOUT)
+                res = fut.result(timeout=fetch_timeout)
             except FutureTimeout:
-                out["errors"].append(f"{name}: 超时 {_FETCH_TIMEOUT}s")
-                utils.tell(io, f"    · {labels[name]} 超时（>{_FETCH_TIMEOUT}s），跳过")
+                elapsed = time.time() - ch_t0
+                out["errors"].append(f"{name}: 超时 {fetch_timeout:g}s")
+                _LOG.warning(
+                    "市场天气 %s 采集超时 elapsed=%.1fs limit=%.0fs"
+                    "（降级链可能仍在后台运行，大盘趋势维将归零）",
+                    labels[name], elapsed, fetch_timeout)
+                utils.tell(io, f"    · {labels[name]} 超时（>{fetch_timeout:g}s），跳过")
                 continue
             except Exception as exc:
+                elapsed = time.time() - ch_t0
                 out["errors"].append(f"{name}: {exc}")
+                _LOG.warning("市场天气 %s 采集失败 elapsed=%.1fs: %s",
+                             labels[name], elapsed, exc)
                 utils.tell(io, f"    · {labels[name]} 失败：{exc}")
                 continue
             utils.tell(io, f"    · {labels[name]} 就绪 ({time.time() - t0:.1f}s)")
@@ -69,6 +79,8 @@ def fetch_raw(market: Market, io: Any = None) -> dict:
                 out["sectors"] = res or []
             else:
                 out["breadth"], out["limit_up"] = res[0] or {}, res[1] or {}
+    if out["errors"]:
+        _LOG.warning("市场天气采集存在缺口: %s", "; ".join(out["errors"]))
     # 板块排名是否来自磁盘兜底（可能是昨日排序），透传出去给天气屏提示。
     out["sector_stale"] = bool(getattr(market, "sector_stale", False))
     return out
@@ -279,7 +291,7 @@ def get_sentiment(market: Optional[Market] = None, cfg: Optional[Config] = None,
     utils.tell(io, "  ⏳ 正在采集市场天气（指数 / 板块 / 涨停）...")
     t0 = time.time()
     mk = market or Market(cfg)
-    raw = fetch_raw(mk, io)
+    raw = fetch_raw(mk, io, cfg)
     scored = compute_score(raw, cfg)
     cls = classify(scored, cfg)
     sec = scored["sector_summary"]

@@ -37,6 +37,7 @@
 | 键（示例） | 用途 |
 |---|---|
 | `market.*` | 超时、重试、数据源 |
+| `sentiment.fetch_timeout_sec` | 天气三路并行单路最长等待（默认 30s；过短会掐断指数降级链） |
 | 情绪/姿态相关阈值 | 见 `config_store.DEFAULTS` 中 sentiment/strategy 段 |
 
 ## 6. 代码锚点

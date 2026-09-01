@@ -29,7 +29,7 @@
 
 | 优先级 | 范例 | 对应命令/文档 |
 |---|---|---|
-| MIT-1 | 14:30 前完成 `seed-plan` | 菜单 `3` / `tea seed-plan` |
+| MIT-1 | 14:30 前完成 `seed-plan` | 菜单 `3` / `tea seed-plan`；已装 launchd 则查 [`05-seed-plan-scheduler`](05-seed-plan-scheduler.md) 日志 |
 | MIT-2 | 压待 T+3：全量或轻量回填有进展 | `review` / 种子收尾自动回填 |
 | MIT-3 | **零改 config**；调参冲动只写反馈日志 | [`02-user-feedback.md`](02-user-feedback.md) |
 
@@ -52,7 +52,7 @@
 | 时段 | 运营者记住 |
 |---|---|
 | ~13:30 | 天气只影响姿态，不把「未硬禁」读成鼓励买入 |
-| **~14:30** | **硬 MIT**：`seed-plan` 收尾看回填一行摘要 |
+| **~14:30** | **硬 MIT**：`seed-plan` 收尾看回填一行摘要（可用 launchd 自动触发，见 [`05-seed-plan-scheduler`](05-seed-plan-scheduler.md)） |
 | ~14:35 / 次日 09:35 | `plan-check`：要素漂移 → 整单作废，不凑合 |
 | T+1 14:00–14:45 | 仅计划内 `run`；破窗 = 纪律事件，记周报 |
 | 收盘后 | 全量 `review` 或确认轻量回填已消化 |
@@ -91,7 +91,7 @@
 ### Checklist
 
 - [ ] **MIT 对照**：完成 / 卡住（原因）/ 砍掉（原因）  
-- [ ] 今日是否跑通 `seed-plan`？回填摘要是否看过？  
+- [ ] 今日是否跑通 `seed-plan`？（自动：`logs/seed-cron.log`；手动：菜单 `3`）回填摘要是否看过？  
 - [ ] 本周是否已 ≥1 次全量 `review`？（周五前必须 yes）  
 - [ ] 今日是否改 config / 合并策略 PR？若是 → 是否违反「样本门槛」或缺少 CHANGELOG？  
 - [ ] **心流审计**（一句话）：今天是在攒证据，还是在用研发逃避复盘？  
@@ -155,3 +155,4 @@
 | [`../project-state.md`](../project-state.md) | 当前焦点 |
 | [`../prd/05-roadmap-backlog.md`](../prd/05-roadmap-backlog.md) | 样本门槛 |
 | [`02-user-feedback.md`](02-user-feedback.md) | 冲动与体感日志 |
+| [`05-seed-plan-scheduler.md`](05-seed-plan-scheduler.md) | 14:30 launchd 自动种子扫描 |

@@ -14,7 +14,7 @@ from contextlib import contextmanager
 from typing import Any, Callable, Dict, Iterator, List, Optional, Tuple
 
 from tea.config.config_store import Config
-from tea.core import utils
+from tea.core import logger as logger_mod, utils
 from ..errors import MarketError
 from ..indicators import ma, ma_slope_pct
 
@@ -47,12 +47,16 @@ def index_double_route(point_chg: Callable[[], Tuple[Optional[float], Optional[f
         raise
     except Exception as exc:
         quote_err = exc
+        logger_mod.get_logger("data").warning("指数报价路失败，将尝试 K 线兜底: %s", exc)
     rows: List[dict] = []
+    kline_err: Optional[Exception] = None
     try:
         rows = klines() or []
     except NotImplementedError:
         rows = []
-    except Exception:
+    except Exception as exc:
+        kline_err = exc
+        logger_mod.get_logger("data").warning("指数 K 线路失败: %s", exc)
         rows = []
     ma20 = ma(rows, ma_window) if rows else None
     if point is None or chg is None:
@@ -62,7 +66,12 @@ def index_double_route(point_chg: Callable[[], Tuple[Optional[float], Optional[f
         if chg is None and len(closes) >= 2 and closes[-2]:
             chg = round((closes[-1] / closes[-2] - 1) * 100, 2)
     if point is None:
-        raise quote_err or MarketError("指数点位取数失败")
+        detail = " | ".join(filter(None, [
+            f"报价:{quote_err}" if quote_err else None,
+            f"K线:{kline_err}" if kline_err else None,
+        ])) or "指数点位取数失败"
+        logger_mod.get_logger("data").warning("指数快照两路均无法得到点位: %s", detail)
+        raise quote_err or kline_err or MarketError("指数点位取数失败")
     # 更稳的趋势定义：单看「现价是否高于 MA20」在贴线处会来回翻转，于是补两个
     # 量纲不同的信号——点位相对 MA20 的乖离（带缓冲）与 MA20 自身斜率（方向）。
     ma20_bias = None
@@ -280,6 +289,10 @@ class ChainedProvider(IDataProvider):
                 p.stats["success"] += 1
                 self.stats["success"] += 1
                 self._mark(method, p.name)
+                if idx > 0 and errors:
+                    logger_mod.get_logger("data").info(
+                        "数据源降级命中 method=%s source=%s fallback_from=%s",
+                        method, p.name, errors[-1].split(":")[0])
                 return res
             empty.append((p.name, res))
         if empty:
@@ -290,6 +303,8 @@ class ChainedProvider(IDataProvider):
             return res
         self.stats["failed"] += 1
         detail = " | ".join(errors) if errors else "没有可用的数据源"
+        logger_mod.get_logger("data").warning(
+            "数据源降级链全部失败 method=%s detail=%s", method, detail)
         raise MarketError(f"数据源全部失败（{method}）：{detail}")
 
     def _mark(self, method: str, source: str) -> None:

@@ -68,6 +68,7 @@
 | [`ops/01-growth-channels.md`](ops/01-growth-channels.md) | 受众与推广渠道假设 |
 | [`ops/02-user-feedback.md`](ops/02-user-feedback.md) | 反馈 / Bug 收集规则 |
 | [`ops/03-operator-daily-sop.md`](ops/03-operator-daily-sop.md) | 交易运营日 SOP（MIT / 晨晚间 checklist；命令见 prd/02） |
+| [`ops/05-seed-plan-scheduler.md`](ops/05-seed-plan-scheduler.md) | 种子扫描外部调度（launchd 方案 A：安装 / 日志 / 漏扫补救） |
 
 ---
 

@@ -17,7 +17,7 @@ from contextlib import contextmanager
 from typing import Any, Callable, Iterator, Optional
 
 from tea.config.config_store import Config
-from tea.core import utils
+from tea.core import logger as logger_mod, utils
 from .errors import MarketError
 
 try:  # requests 可用则优先（连接复用），否则回退 urllib
@@ -247,6 +247,10 @@ class Fetcher:
                 self._retry_noticed_pools.add(pool_key)
                 print(f"  ⏳ {self._host_hint(url, hosts)} 网络抖动"
                       f"（{attempts} 次尝试均失败），即将切换...", flush=True)
+        path = urllib.parse.urlsplit(url).path or url
+        logger_mod.get_logger("data").warning(
+            "HTTP 请求失败 attempts=%d path=%s host=%s err=%s",
+            attempts, path, self._host_hint(url, hosts), last_err)
         raise MarketError(f"请求失败({attempts}次): {url} -> {last_err}")
 
     def _do_get(self, full_url: str, encoding: Optional[str] = None,

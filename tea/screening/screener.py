@@ -15,7 +15,7 @@ from typing import Any, Dict, Iterator, List, Optional, Tuple
 from tea.analysis import followthrough, identity as ident_mod
 from tea.analysis.sentiment import get_sentiment
 from tea.config.config_store import Config, load_config
-from tea.core import utils
+from tea.core import logger as logger_mod, utils
 from tea.data import Market, count_limit_ups
 from tea.portfolio import watch_pool
 from tea.reporting import seed_trace
@@ -687,6 +687,8 @@ class Screener:
                 ev = preflight.evaluate(
                     cand["code"], self.mk, cfg, sent=sent, sector=cand["sector"])
             except Exception as exc:
+                logger_mod.get_logger("scan").warning(
+                    "候选预审失败 %s %s: %s", cand.get("code"), cand.get("name"), exc)
                 details.append(candidate_row(cand, verdict=CAND_ERROR,
                                              reason=f"行情/指标异常：{exc}"))
                 if tracer:
@@ -1003,6 +1005,11 @@ class Screener:
         cands, tier, notes = self.screen_with_downgrade(sectors, step1["max_sector_chg"], tracer,
                                                         strongest_sector_chg=strongest)
         result["tier"], result["notes"] = tier, notes
+        logger_mod.get_logger("scan").info(
+            "种子漏斗 %s | 板块TOP %d | 最强涨幅 %s%% | 档位 %s | 初筛 %d | %s",
+            tracer.scan_id, len(sectors),
+            utils.num(strongest, 2) if strongest is not None else "—",
+            tier or "—", len(cands), "；".join(notes[:4]) or "—")
 
         vf = self.veto_filter(cands, sent, tracer, io=io)
         utils.tell(io, "  ⏳ 汇总三档输出...")

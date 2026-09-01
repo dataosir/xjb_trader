@@ -13,6 +13,7 @@
 """
 from __future__ import annotations
 
+import os
 import time
 from typing import Any, Dict, List, Optional
 
@@ -155,6 +156,10 @@ def seed_plan(cfg: Optional[Config] = None, market: Optional[Market] = None,
         io.say(f"  ! 当前不在种子扫描窗口（{cfg.get('timing.seed_scan')} 前后），结果仅供参考")
     io.say("  ⏳ 开始种子扫描（网络取数较多，预计 1~2 分钟）...")
 
+    logger_mod.get_logger("scan").info(
+        "种子扫描开始 phase=%s seed_window=%s require_window=%s",
+        tm.phase(), cfg.get("timing.seed_scan"), require_window)
+
     sent = sent if sent is not None else weather(cfg, mk, io=io)
     io.say(format_weather(sent))
 
@@ -272,6 +277,16 @@ def seed_plan(cfg: Optional[Config] = None, market: Optional[Market] = None,
 
     path = seed_report.write_report(result, cfg)
     result["report_path"] = path
+    # launchd 直调 python 时无 wrapper 写 seed-cron.log，在此补一行摘要便于 SOP 核对。
+    try:
+        cron_log = os.path.join(cfg.logs_dir(), "seed-cron.log")
+        with open(cron_log, "a", encoding="utf-8") as fh:
+            fh.write(
+                f"{utils.now().strftime('%Y-%m-%d %H:%M:%S %z')} "
+                f"done seed-plan scan_id={result.get('scan_id')} "
+                f"verdict={result.get('verdict')} exit={0 if buyable else 1}\n")
+    except OSError:
+        pass
     if path:
         io.say(f"  报告已存档：{path}")
     accumulator.record_seed(seed_report.summarize(result), cfg)

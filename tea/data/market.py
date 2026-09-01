@@ -20,7 +20,7 @@ from tea.core import logger as logger_mod, utils
 from .cache import MemCache
 from .errors import MarketError
 from .fetcher import Fetcher
-from .indicators import compute_indicators, count_limit_ups
+from .indicators import compute_indicators, count_limit_ups, ma, ma_slope_pct
 from .providers import IDataProvider, build_provider
 from .providers.eastmoney import parse_quote as _parse_em_quote
 
@@ -94,6 +94,10 @@ class Market:
         return rows
 
     # -------------------------------------------------- 3.1 实时行情
+    @staticmethod
+    def _fetch_source(provider: Any, method: str) -> str:
+        return (getattr(provider, "last_source", None) or {}).get(method) or "-"
+
     def get_quote(self, code: str) -> dict:
         code = utils.norm_code(code)
         if len(code) != 6:
@@ -104,7 +108,18 @@ class Market:
         if hit:
             self.f.stats["cache_hits"] += 1
             return hit
-        return self.cache.put(key, self.provider.fetch_quote(code))
+        log = logger_mod.get_logger("data")
+        t0 = time.time()
+        try:
+            q = self.provider.fetch_quote(code)
+        except Exception as exc:
+            log.warning("行情取数失败 code=%s elapsed=%.2fs err=%s", code, time.time() - t0, exc)
+            raise
+        log.info(
+            "行情就绪 code=%s price=%s chg=%s%% turnover=%s source=%s elapsed=%.2fs",
+            code, q.get("price"), q.get("chg_pct"), q.get("turnover"),
+            self._fetch_source(self.provider, "quote"), time.time() - t0)
+        return self.cache.put(key, q)
 
     @staticmethod
     def _parse_quote(code: str, mkt: int, d: dict) -> dict:
@@ -123,7 +138,21 @@ class Market:
             self.f.stats["cache_hits"] += 1
             return hit
         # secid 一路传下去：指数只有它分得清市场（上证 1.000001 vs 深市 0.000001）。
-        return self.cache.put(key, self.provider.fetch_klines(code, limit=lmt, secid=sid))
+        log = logger_mod.get_logger("data")
+        t0 = time.time()
+        try:
+            rows = self.provider.fetch_klines(code, limit=lmt, secid=sid)
+        except Exception as exc:
+            label = secid if secid else code
+            log.warning("K线取数失败 %s limit=%d elapsed=%.2fs err=%s",
+                        label, lmt, time.time() - t0, exc)
+            raise
+        log.info(
+            "K线就绪 %s rows=%d last=%s source=%s elapsed=%.2fs",
+            secid if secid else code, len(rows or []),
+            (rows[-1].get("date") if rows else None),
+            self._fetch_source(self.provider, "klines"), time.time() - t0)
+        return self.cache.put(key, rows)
 
     # -------------------------------------------------- 指标
     def get_indicators(self, code: str, price: Optional[float] = None) -> dict:
@@ -286,6 +315,45 @@ class Market:
         return self.cache.put(key, out)
 
     # -------------------------------------------------- 3.5 大盘指数
+    def _fill_index_ma20(self, snap: dict, secid: str) -> dict:
+        """东财报价通、K 线挂时快照 ma20 为空，但降级链因 point>0 不会整包问备源。
+
+        另走 ``fetch_klines`` 降级链（东财→腾讯→…）补 MA20 与趋势衍生字段。
+        """
+        if snap.get("ma20") is not None:
+            return snap
+        point = snap.get("point")
+        lmt = int(self.cfg.get("market.index_kline_limit", 25))
+        log = logger_mod.get_logger("data")
+        t0 = time.time()
+        try:
+            rows = self.get_klines("", limit=lmt, secid=secid)
+        except MarketError as exc:
+            log.warning(
+                "大盘指数 MA20 跨源补全失败 secid=%s point=%s elapsed=%.2fs: %s",
+                secid, point, time.time() - t0, exc)
+            return snap
+        ma20 = ma(rows, 20) if rows else None
+        if ma20 is None:
+            log.warning(
+                "大盘指数 MA20 跨源补全未得有效 K 线 secid=%s rows=%d elapsed=%.2fs",
+                secid, len(rows or []), time.time() - t0)
+            return snap
+        src = (getattr(self.provider, "last_source", None) or {}).get("klines")
+        ma20_bias = (point / ma20 - 1) * 100.0 if point and ma20 else None
+        ma20_slope = ma_slope_pct(rows, 20) if rows else None
+        out = {
+            **snap,
+            "ma20": ma20,
+            "ma20_above": (point is not None and point > ma20),
+            "ma20_bias_pct": round(ma20_bias, 3) if ma20_bias is not None else None,
+            "ma20_slope_pct": round(ma20_slope, 3) if ma20_slope is not None else None,
+        }
+        log.info(
+            "大盘指数 MA20 跨源补全 secid=%s point=%s ma20=%s bias=%s%% source=%s elapsed=%.2fs",
+            secid, point, ma20, out.get("ma20_bias_pct"), src or "-", time.time() - t0)
+        return out
+
     def get_index(self) -> dict:
         key = "index"
         ttl = float(self.cfg.get("market.index_cache_sec", 120))
@@ -297,7 +365,22 @@ class Market:
         # 每家源内部都是两路取源：点位/涨跌幅走报价，MA20 走 K 线，报价整条挂了就
         # 用最后一根收盘反推点位（见 providers.base.index_double_route）。两路都拿不到
         # 点位才抛错，让上层记「数据缺口」并显示「上证 —」。
-        return self.cache.put(key, self.provider.fetch_index_snapshot(secid))
+        t0 = time.time()
+        try:
+            snap = self.provider.fetch_index_snapshot(secid)
+        except MarketError as exc:
+            src = (getattr(self.provider, "last_source", None) or {}).get("index_snapshot")
+            logger_mod.get_logger("data").warning(
+                "大盘指数取数失败 secid=%s source=%s elapsed=%.2fs: %s",
+                secid, src or "-", time.time() - t0, exc)
+            raise
+        snap = self._fill_index_ma20(snap, secid)
+        src = (getattr(self.provider, "last_source", None) or {}).get("index_snapshot")
+        logger_mod.get_logger("data").info(
+            "大盘指数就绪 secid=%s point=%s chg=%s%% ma20=%s source=%s elapsed=%.2fs",
+            secid, snap.get("point"), snap.get("chg_pct"), snap.get("ma20"),
+            src or "-", time.time() - t0)
+        return self.cache.put(key, snap)
 
     # -------------------------------------------------- 3.6 涨跌家数
     def get_breadth(self) -> dict:

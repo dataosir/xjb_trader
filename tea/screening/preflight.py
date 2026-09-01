@@ -14,6 +14,8 @@ from tea.core.timing import Timing
 from tea.data import Market, intraday_position
 from . import veto as veto_mod
 
+_LOG = logger_mod.get_logger("score")
+
 STAGE_SPROUT = "萌芽"
 STAGE_BREAK = "突破"
 STAGE_OVERHEAT = "过热"
@@ -451,9 +453,19 @@ def evaluate(code: str, market: Optional[Market] = None, cfg: Optional[Config] =
     """轻量版 9 分共振预审：行情 → 身份 → VETO → 评分 → 判定。"""
     cfg = cfg or load_config()
     mk = market or Market(cfg)
-    q = quote or mk.get_quote(code)
+    code = utils.norm_code(code)
+    _LOG.info("共振预审开始 code=%s", code)
+    try:
+        q = quote or mk.get_quote(code)
+    except Exception as exc:
+        _LOG.warning("共振预审中止 code=%s 行情不可用: %s", code, exc)
+        raise
     code = q["code"]
-    ind = mk.get_indicators(code, q.get("price"))
+    try:
+        ind = mk.get_indicators(code, q.get("price"))
+    except Exception as exc:
+        _LOG.warning("共振预审中止 code=%s 指标不可用: %s", code, exc)
+        raise
     sec = sector if sector is not None else mk.sector_context(q, prefer=prefer_sector)
     idn = ident_mod.judge(q, sec, ind, cfg)
     intr = intraday_position(q.get("price"), q.get("high"), q.get("low"))
@@ -512,6 +524,19 @@ def evaluate(code: str, market: Optional[Market] = None, cfg: Optional[Config] =
     if ident_mod.rejects_zamao(cfg) and ident_mod.is_zamao(idn):
         verdict = VERDICT_REJECT
         reasons.append("杂毛（reject 模式）")
+
+    dim_brief = " ".join(
+        f"{d.get('name', '?')}{d.get('score', '?')}" for d in (scored.get("dims") or []))
+    _LOG.info(
+        "共振预审 %s %s | %d/%d %s | stage=%s identity=%s | %s | %s",
+        code, q.get("name"), total, threshold, verdict,
+        (stage or {}).get("stage"), idn.get("tier"),
+        "；".join(reasons[:3]) or "—", dim_brief)
+    if ind.get("kline_stale"):
+        _LOG.warning("日K非今日 %s %s → 量价/止损维可能归零", code, q.get("name"))
+    if vt.get("rejected"):
+        _LOG.info("硬否决 %s %s: %s", code, q.get("name"),
+                  "；".join(i.get("label", "") for i in vt.get("hard") or []))
 
     return {
         "code": code, "name": q.get("name"),
