@@ -407,7 +407,10 @@ def data_gap_summary(s: dict, net_line: str = "") -> List[str]:
         gaps.append(f"{_ERR_LABEL.get(name, name)}:{rest}" if sep else e)
     if (s or {}).get("limit_up_error"):
         gaps.append(f"涨停池:{s['limit_up_error']}")
-    if net_line and "失败" in net_line:
+    # HTTP 重试失败但备源已接上、三路天气无缺口时，不应误报「数据缺口」——
+    # 收尾那行「失败 N」留给统计行看即可，别和真缺数混为一谈。
+    has_data_errors = bool((s or {}).get("errors") or (s or {}).get("limit_up_error"))
+    if net_line and "失败" in net_line and has_data_errors:
         gaps.append(net_line)
     return gaps
 

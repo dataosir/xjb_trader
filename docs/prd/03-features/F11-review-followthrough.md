@@ -36,7 +36,7 @@
 
 1. 种子结束：`_ft_entries` 收集可买/观察/低吸/胜率影子。  
 2. `record_seed` 追加 jsonl；自动算 `shadow_tag`（萌芽 / 前三非突破）。  
-3. **自动回填（可选）**：`runner.maybe_auto_backfill(trigger=seed|menu)`。  
+3. **自动回填（可选）**：`runner.maybe_auto_backfill(trigger=seed|menu)`；默认**后台异步**（`auto_backfill_async`），不阻塞种子或菜单。  
 4. `review`/`followthrough`：回填 T+n；打印经验胜率 + **缺口看板** + **影子桶** + 阶段 B / 低吸进度。  
 5. 聚合输出胜率、分桶（供路线图与未来先验）。  
 
@@ -46,7 +46,8 @@
 - 字段缺失会导致阶段 2 归因失败——新字段必须双端（entries + record_seed）同时写。  
 - 菜单自动回填每天最多 1 次（`daily_state.auto_backfill_menu`）。  
 - **已完整回填**（有 `result` 且有 `chg_t5`）的行会被跳过，**不改写历史结论**。  
-- 种子收尾自动回填：**静默进度**，控制台只留一行 `回填 x 条，仍待 y 条`；无 pending 则不输出。  
+- 种子收尾自动回填：**默认后台线程**，控制台一行「后台回填已启动（待 N 条）」；结果见 `logs/tea.log`（`tea.ft`）；无 pending 则不输出。  
+- 同步路径：`maybe_auto_backfill(..., background=False)` 或 `auto_backfill_async: false`。  
 - 旧样本无 `shadow_tag` 时，统计侧按阶段/排名**重算**兼容。
 
 ## 5. 关键配置键
@@ -58,6 +59,7 @@
 | `followthrough.auto_backfill_on_seed` | seed-plan 收尾自动轻量回填（默认 true） |
 | `followthrough.auto_backfill_on_menu` | 进菜单盘后/隔夜窗自动回填（默认 true） |
 | `followthrough.auto_backfill_full_review` | true 则自动路径改为全量 `close_review`（默认 false） |
+| `followthrough.auto_backfill_async` | true 则自动回填走后台线程（默认 true） |
 | `followthrough.p0_gate_date` | 新闸门后可买起算日（默认 `2026-08-26`） |
 | `followthrough.t3_up_target` | 影子桶验收：T+3>0 目标比例（默认 0.60） |
 | `followthrough.shadow_min_samples` | 影子桶最少 T+3 回填条数（默认 15） |
@@ -73,7 +75,7 @@
 
 - [ ] 新种子记录含：`winrate_score`、`lowbuy`、`mode`、`pick_sector_*`、`shadow_tag`、因子字段  
 - [ ] `review` 后 T+1 可回填（交易日与停牌边界正确）  
-- [ ] seed/menu 自动回填可开关；失败不阻断种子或菜单  
+- [ ] seed/menu 自动回填可开关；失败不阻断种子或菜单；**默认异步不阻塞主流程**  
 - [ ] 自动回填路径不刷 `n/N` 进度，种子收尾最多一行数量摘要  
 - [ ] `review`/`followthrough` 打印缺口看板与影子桶文案  
 - [ ] 低吸进度可打印  

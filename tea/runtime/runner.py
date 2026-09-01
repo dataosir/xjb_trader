@@ -14,6 +14,7 @@
 from __future__ import annotations
 
 import os
+import threading
 import time
 from typing import Any, Dict, List, Optional
 
@@ -263,8 +264,12 @@ def seed_plan(cfg: Optional[Config] = None, market: Optional[Market] = None,
     if not buyable:
         result.setdefault("notes", []).append("宁缺毋滥：今日无可买标的，不写计划")
     if auto_upd and not cfg.get("followthrough.auto_backfill_full_review", False):
-        result.setdefault("notes", []).append(
-            f"回填 {auto_upd.get('updated', 0)} 条，仍待 {auto_upd.get('pending', 0)} 条")
+        if auto_upd.get("async"):
+            result.setdefault("notes", []).append(
+                f"待回填 {auto_upd.get('pending', 0)} 条（后台处理中）")
+        else:
+            result.setdefault("notes", []).append(
+                f"回填 {auto_upd.get('updated', 0)} 条，仍待 {auto_upd.get('pending', 0)} 条")
 
     # ---------------------------------------------------------- 每日价格跟踪
     codes = [e.get("code") for e in entries if e.get("code")]
@@ -450,11 +455,83 @@ def plan_check(cfg: Optional[Config] = None, market: Optional[Market] = None,
     return res
 
 
-# ==================================================================== 自动回填（轻量）
+# ==================================================================== 自动回填（轻量 / 后台）
+
+_backfill_lock = threading.Lock()
+_backfill_thread: Optional[threading.Thread] = None
+
+
+def backfill_running() -> bool:
+    """是否有后台回填线程在跑。"""
+    with _backfill_lock:
+        return _backfill_thread is not None and _backfill_thread.is_alive()
+
+
+def wait_backfill_done(timeout: float = 300.0) -> bool:
+    """等待后台回填结束（自测 / 脚本用）。返回 True 表示已结束。"""
+    with _backfill_lock:
+        th = _backfill_thread
+    if th is None or not th.is_alive():
+        return True
+    th.join(timeout)
+    return not th.is_alive()
+
+
+def _backfill_worker(*, trigger: str, full_review: bool, config_path: str,
+                     market: Optional[Market] = None) -> None:
+    """后台线程：轻量 update_results 或全量 close_review。"""
+    log = logger_mod.get_logger("ft")
+    log.info("后台回填开始 trigger=%s full_review=%s", trigger, full_review)
+    t0 = time.time()
+    try:
+        cfg = load_config(config_path)
+        mk = market or Market(cfg)
+        if full_review:
+            close_review(cfg=cfg, market=mk, io=IO(interactive=False, quiet=True))
+            log.info("后台全量复核完成 trigger=%s elapsed=%.1fs",
+                     trigger, time.time() - t0)
+        else:
+            upd = ft_mod.update_results(mk, cfg, io=None)
+            log.info("后台回填完成 trigger=%s updated=%d pending=%d elapsed=%.1fs",
+                     trigger, upd.get("updated", 0), upd.get("pending", 0),
+                     time.time() - t0)
+    except Exception as exc:
+        log.warning("后台回填失败 trigger=%s: %s", trigger, exc, exc_info=True)
+    finally:
+        global _backfill_thread
+        with _backfill_lock:
+            _backfill_thread = None
+
+
+def _spawn_background_backfill(cfg: Config, *, trigger: str, full_review: bool,
+                               market: Optional[Market] = None) -> bool:
+    """启动后台回填；若已有线程在跑则返回 False。"""
+    global _backfill_thread
+    with _backfill_lock:
+        if _backfill_thread is not None and _backfill_thread.is_alive():
+            return False
+        th = threading.Thread(
+            target=_backfill_worker,
+            kwargs={"trigger": trigger, "full_review": full_review,
+                    "config_path": cfg.path, "market": market},
+            name=f"tea-backfill-{trigger}",
+            daemon=True,
+        )
+        _backfill_thread = th
+        th.start()
+        return True
+
+
+def _mark_menu_backfill_done(cfg: Config) -> None:
+    st = gates.load_state(cfg)
+    st["auto_backfill_menu"] = True
+    gates.save_state(st, cfg)
+
 
 def maybe_auto_backfill(cfg: Optional[Config] = None, market: Optional[Market] = None,
                         io: Optional[IO] = None, *,
-                        trigger: str = "seed") -> Optional[dict]:
+                        trigger: str = "seed",
+                        background: Optional[bool] = None) -> Optional[dict]:
     """按配置自动回填跟涨样本（默认轻量：只 update_results）。
 
     trigger:
@@ -462,6 +539,8 @@ def maybe_auto_backfill(cfg: Optional[Config] = None, market: Optional[Market] =
       - ``menu``：进菜单；盘后/隔夜窗 + 每天最多 1 次（``daily_state.auto_backfill_menu``）
 
     今日刚落盘的样本本就回填不了（须下一交易日），仅处理历史 pending。
+    ``background=True``（默认，见 ``followthrough.auto_backfill_async``）时后台线程执行，
+    不阻塞种子扫描或菜单；进度与结果写 ``logs/tea.log``（logger ``tea.ft``）。
     失败向上抛：调用方决定是否吞掉提示（菜单不得因回填崩掉会话）。
     """
     cfg = cfg or load_config()
@@ -485,13 +564,33 @@ def maybe_auto_backfill(cfg: Optional[Config] = None, market: Optional[Market] =
     if pending <= 0:
         return None
 
-    if cfg.get("followthrough.auto_backfill_full_review", False):
+    full_review = bool(cfg.get("followthrough.auto_backfill_full_review", False))
+    if background is None:
+        background = bool(cfg.get("followthrough.auto_backfill_async", True))
+
+    if background:
+        started = _spawn_background_backfill(cfg, trigger=trigger, full_review=full_review,
+                                             market=market)
+        if trigger == "menu" and started:
+            _mark_menu_backfill_done(cfg)
+        if started:
+            if full_review:
+                io.say(f"  后台全量复核已启动（待回填 {pending} 条）")
+            else:
+                io.say(f"  后台回填已启动（待 {pending} 条）")
+            logger_mod.get_logger("ft").info(
+                "后台回填已调度 trigger=%s pending=%d full_review=%s",
+                trigger, pending, full_review)
+        else:
+            io.say(f"  后台回填进行中（待 {pending} 条）")
+        return {"async": True, "started": started, "pending": pending,
+                "updated": 0, "full_review": full_review}
+
+    if full_review:
         io.say(f"  ⏳ 自动全量盘后复核（待回填 {pending} 条）...")
         out = close_review(cfg=cfg, market=market, io=io)
         if trigger == "menu":
-            st = gates.load_state(cfg)
-            st["auto_backfill_menu"] = True
-            gates.save_state(st, cfg)
+            _mark_menu_backfill_done(cfg)
         return out
 
     mk = market or Market(cfg)
@@ -500,9 +599,7 @@ def maybe_auto_backfill(cfg: Optional[Config] = None, market: Optional[Market] =
         upd = ft_mod.update_results(mk, cfg, io=None)
     io.say(f"  回填 {upd.get('updated', 0)} 条，仍待 {upd.get('pending', 0)} 条")
     if trigger == "menu":
-        st = gates.load_state(cfg)
-        st["auto_backfill_menu"] = True
-        gates.save_state(st, cfg)
+        _mark_menu_backfill_done(cfg)
     return upd
 
 

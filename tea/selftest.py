@@ -1130,6 +1130,18 @@ def check_providers(t: Suite, cfg: Config) -> None:
     notice = buf.getvalue()
     t.eq("同一源连挂只报一次「改用谁」", notice.count("改用 腾讯"), 1)
 
+    # ---- 会话熔断：东财 K 线整池挂掉后，后续 K 线直接问腾讯，不再每条白等重试
+    mock = _MockSources(fail=("em_kline",))
+    mock.show_progress = True
+    chain = build_provider(cfg, mock, ALL)
+    chain.fetch_klines("600519")          # 第一次：东财挂 → 腾讯接手
+    em_kline_calls = sum(1 for k, _, _ in mock.seen if k == "em_kline")
+    chain.fetch_klines("600519")          # 第二次：应跳过东财
+    t.ok("熔断后不再重复打东财 K 线",
+         sum(1 for k, _, _ in mock.seen if k == "em_kline") == em_kline_calls,
+         f"seen={mock.seen}")
+    t.eq("两次都由腾讯供数", chain.source_hit_count.get("tencent"), 2)
+
     # ---- 抓取层的「网络抖动」只在重试全部用尽时兜底一句：逐次重试都报是无信息
     # 重复（上层紧接着就说清了「谁挂了、改用谁」）。用户抄回来的日志里连刷 5 条
     # 「网络抖动，正在重试」就是这么来的，所以节流关掉也不得超过一条。
@@ -1326,6 +1338,8 @@ def check_sentiment(t: Suite, cfg: Config, mk: FakeMarket) -> dict:
     t.ok("网络失败进缺口汇总", any("失败 9" in g for g in gaps), str(gaps))
     t.ok("缺口横幅醒目", "⚠️" in sent_mod.format_data_gap_banner(s_gap, "网络请求 27 次｜东财 1｜失败 9"))
     t.eq("无缺口返回空串", sent_mod.format_data_gap_banner({"errors": []}, ""), "")
+    t.eq("仅 HTTP 失败、无数据缺口 → 不报警",
+         sent_mod.format_data_gap_banner({"errors": []}, "网络请求 70 次｜失败 12"), "")
     return sent
 
 
@@ -2660,6 +2674,8 @@ def check_followthrough(t: Suite, cfg: Config) -> None:
          config_store.DEFAULTS["followthrough"]["auto_backfill_on_menu"], True)
     t.eq("auto_backfill_full_review 默认关",
          config_store.DEFAULTS["followthrough"]["auto_backfill_full_review"], False)
+    t.eq("auto_backfill_async 默认开",
+         config_store.DEFAULTS["followthrough"]["auto_backfill_async"], True)
     t.eq("t3_up_target 默认 60%",
          config_store.DEFAULTS["followthrough"]["t3_up_target"], 0.60)
     t.eq("p0_gate_date 默认",
@@ -2673,13 +2689,25 @@ def check_followthrough(t: Suite, cfg: Config) -> None:
     cfg.set("followthrough.auto_backfill_on_seed", False)
     t.ok("关 seed 开关则跳过",
          runner.maybe_auto_backfill(cfg=cfg, market=FakeMarket(cfg), io=io_q,
-                                   trigger="seed") is None)
+                                   trigger="seed", background=False) is None)
     cfg.set("followthrough.auto_backfill_on_seed", True)
     upd_auto = runner.maybe_auto_backfill(cfg=cfg, market=FakeMarket(cfg), io=io_q,
-                                         trigger="seed")
+                                         trigger="seed", background=False)
     t.ok("seed 触发自动回填", upd_auto is not None and upd_auto.get("updated", 0) >= 1,
          str(upd_auto))
     t.eq("自动回填后 pending=0", ft_mod.pending_backfill(cfg), 0)
+
+    # 异步回填：立即返回，后台线程完成后 pending 清零
+    d_async = _end_dates(30)[7]
+    ft_mod.save_records([{"date": d_async, "code": "600781", "name": "异步回填样本",
+                          "next_chg": None, "result": None, "chg_t5": None}], cfg)
+    t.eq("异步回填前有 pending", ft_mod.pending_backfill(cfg), 1)
+    upd_bg = runner.maybe_auto_backfill(cfg=cfg, market=FakeMarket(cfg), io=io_q,
+                                        trigger="seed", background=True)
+    t.ok("异步立即返回", upd_bg is not None and upd_bg.get("async") is True,
+         str(upd_bg))
+    t.ok("异步回填线程结束", runner.wait_backfill_done(timeout=60))
+    t.eq("异步回填后 pending=0", ft_mod.pending_backfill(cfg), 0)
 
     real_now = utils.now
     try:
@@ -2692,7 +2720,7 @@ def check_followthrough(t: Suite, cfg: Config) -> None:
         gates.reset_state(cfg)
         t.ok("盘中 menu 自动回填跳过",
              runner.maybe_auto_backfill(cfg=cfg, market=FakeMarket(cfg), io=io_q,
-                                       trigger="menu") is None)
+                                       trigger="menu", background=False) is None)
         # 盘后：日期与 FakeMarket K 线同一日历，应回填并打每日戳
         after = _dt.datetime(2026, 8, 3, 16, 30)
         utils.now = lambda when=None, _f=after: _f
@@ -2701,7 +2729,7 @@ def check_followthrough(t: Suite, cfg: Config) -> None:
                               "next_chg": None, "result": None, "chg_t5": None}], cfg)
         gates.reset_state(cfg)
         upd_m = runner.maybe_auto_backfill(cfg=cfg, market=FakeMarket(cfg), io=io_q,
-                                          trigger="menu")
+                                          trigger="menu", background=False)
         t.ok("盘后 menu 自动回填", upd_m is not None and upd_m.get("updated", 0) >= 1,
              str(upd_m))
         t.ok("daily_state 打了 menu 回填戳",
@@ -2711,7 +2739,7 @@ def check_followthrough(t: Suite, cfg: Config) -> None:
                               "next_chg": None, "result": None, "chg_t5": None}], cfg)
         t.ok("同日 menu 第二次跳过",
              runner.maybe_auto_backfill(cfg=cfg, market=FakeMarket(cfg), io=io_q,
-                                       trigger="menu") is None)
+                                       trigger="menu", background=False) is None)
     finally:
         utils.now = real_now
         cfg.set("followthrough.auto_backfill_on_seed", True)

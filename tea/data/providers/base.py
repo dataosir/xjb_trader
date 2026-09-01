@@ -235,6 +235,9 @@ class ChainedProvider(IDataProvider):
         self.source_hit_count: Dict[str, int] = {}
         #: 已经报过「改用谁」的 (源, 方法)，避免同一家连挂时每条记录刷一遍
         self._fallback_notified: set = set()
+        #: 会话内已熔断的 (源, 方法)：东财 push2his 整池挂掉后，回填/扫描几十条 K 线
+        #: 不应每条都再白等一轮重试才切腾讯——第一次失败后直接跳过后续同路请求。
+        self._circuit_open: set = set()
 
     # -------------------------------------------------- 降级
     def _supports(self, provider: IDataProvider, method: str) -> bool:
@@ -268,6 +271,11 @@ class ChainedProvider(IDataProvider):
         errors: List[str] = []
         empty: List[Tuple[str, Any]] = []
         for idx, p in enumerate(self.providers):
+            circuit_key = (p.name, method)
+            if circuit_key in self._circuit_open:
+                p.stats["skipped"] += 1
+                self.stats["skipped"] += 1
+                continue
             fn = getattr(p, f"fetch_{method}", None)
             if fn is None:
                 continue
@@ -280,6 +288,7 @@ class ChainedProvider(IDataProvider):
                 self.stats["skipped"] += 1
                 continue
             except Exception as exc:
+                self._circuit_open.add(circuit_key)
                 p.stats["failed"] += 1
                 self.stats["failed"] += 1
                 errors.append(f"{p.name}: {type(exc).__name__}: {exc}")

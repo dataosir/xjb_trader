@@ -4,6 +4,24 @@
 
 ## [Unreleased]
 
+### 数据（2026-09-01：东财 K 线熔断 + 缺口横幅误报修复）
+
+> 关联：F01 / F14；`push2his` 封禁时扫描收尾仍报「失败 12」与数据缺口横幅。
+
+- **根因**：东财 `push2his` 整池 `RemoteDisconnected` 时，降级链每条 K 线仍先重试东财（~13s/股），HTTP 失败累计进收尾摘要并误触「数据缺口」横幅（备源腾讯已接上、天气三路无缺口）。  
+- **修复**：`ChainedProvider` 会话熔断——某源某方法首次失败后本会话直接跳过后续同路请求，改问备源；仅当天气/涨停等**真缺数**时才把 HTTP 失败并入缺口横幅。  
+- **自测**：新增「熔断后不再重复打东财 K 线」「仅 HTTP 失败、无数据缺口 → 不报警」断言。
+
+### 回填（2026-09-01：自动回填改后台异步）
+
+> 关联：F11；`runner.maybe_auto_backfill` · 种子扫描 / 菜单启动不再被 K 线回填阻塞。
+
+- **行为**：`followthrough.auto_backfill_async` 默认 `true`；seed/menu 触发时后台 daemon 线程跑 `update_results`（或全量 `close_review`），主流程立即返回。  
+- **日志**：`tea.ft` 记 `后台回填开始/完成/失败`（含 `updated/pending/elapsed`）。  
+- **SEED 报告**：异步时 notes 写「待回填 N 条（后台处理中）」。  
+- **API**：`wait_backfill_done()` / `backfill_running()` 供自测与脚本等待；`background=False` 可强制同步。  
+- 同步更新 F11、`project-state`。
+
 ### 日志（2026-09-01：共振分 + 行情关键节点日志）
 
 > 关联：种子扫描追溯；launchd 14:30 漏日志排查。
