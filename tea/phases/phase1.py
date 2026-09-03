@@ -11,6 +11,7 @@ from tea.core import utils
 from tea.portfolio import plan as plan_mod
 from tea.screening import gates, preflight, veto as veto_mod
 from tea.data import intraday_position
+from tea.data.indicators import format_bollinger
 from .results import ABORT, OK, REJECT
 from .session import Session
 
@@ -81,6 +82,7 @@ def run(s: Session, code: Optional[str] = None, ask_levels: bool = True) -> str:
     io.say(f"  MA5/10/20 {utils.num(ind.get('ma5'))}/{utils.num(ind.get('ma10'))}/"
            f"{utils.num(ind.get('ma20'))}　多头 {'是' if ind.get('ma_bull') else '否'}"
            f"　乖离 {utils.pct(ind.get('bias_ma20'))}　ATR% {utils.num(ind.get('atr_pct'))}")
+    io.say(f"  {format_bollinger(ind)}")
     io.say(f"  分时位置 {('%.0f%%' % (s.intraday * 100)) if s.intraday is not None else '—'}"
            f"　阶段 {s.stage.get('stage')}　{s.stage.get('detail') or ''}")
     io.say(ident_mod.format_identity(s.identity))

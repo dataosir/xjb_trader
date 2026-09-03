@@ -18,6 +18,8 @@ from .errors import MarketError
 from .fetcher import Fetcher
 from .indicators import (
     atr,
+    bollinger,
+    bb_derived,
     compute_indicators,
     count_limit_ups,
     intraday_position,
@@ -36,6 +38,8 @@ __all__ = [
     "build_provider",
     "ma",
     "atr",
+    "bollinger",
+    "bb_derived",
     "compute_indicators",
     "count_limit_ups",
     "intraday_position",

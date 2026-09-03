@@ -40,7 +40,7 @@
 ### 3.1 行情
 
 - `Market` / `ChainedProvider`：按 `market.data_sources` 降级；单源失败静默跳下一家。  
-- `tea/data/indicators.py`：**纯函数**，不联网、不读配置。
+- `tea/data/indicators.py`：**纯函数**，不联网、不读配置。含 MA/ATR/布林（`bollinger`：MB=SMA(20)，UB/LB=MB±2σ，σ 为总体标准差；`bb_pct_b`、带宽仅观测不落闸）。
 
 ### 3.2 预审
 

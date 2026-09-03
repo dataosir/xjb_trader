@@ -11,6 +11,7 @@ from typing import Any, Dict, List, Optional
 from tea.config.config_store import Config, load_config
 from tea.analysis.sentiment import allow_new_label
 from tea.core import utils
+from tea.data.indicators import format_bollinger
 from . import preflight
 from .screener import (VERDICT_EMPTY, VERDICT_PENDING, VERDICT_TRADEABLE,
                        dyn_window_text)
@@ -36,6 +37,30 @@ def _sent_line(sent: Optional[dict]) -> str:
             f"姿态 {sent.get('stance')} · 半仓基数 ×{utils.num(sent.get('base_pos_mult'), 2)}"
             + ("（冰点降仓）" if sent.get("ice_cut") else "")
             + f" · 新开 {allow_new_label(sent)}")
+
+
+def _tech_indicators_line(ev: dict) -> Optional[str]:
+    """技术观测一行：乖离 + 布林（只展示，不参与裁决）。"""
+    ind = ev.get("ind") or {}
+    parts: List[str] = []
+    bias = ind.get("bias_ma20")
+    if bias is not None:
+        parts.append(f"乖离 {utils.pct(bias)}")
+    bb = format_bollinger(ind)
+    if bb != "布林 —":
+        parts.append(bb)
+    return " ｜ ".join(parts) if parts else None
+
+
+def _tech_indicators_line_cand(c: dict) -> Optional[str]:
+    """候选明细行上的技术观测（字段在 cand 顶层）。"""
+    parts: List[str] = []
+    if c.get("bias_ma20") is not None:
+        parts.append(f"乖离 {utils.pct(c.get('bias_ma20'))}")
+    bb = format_bollinger(c)
+    if bb != "布林 —":
+        parts.append(bb)
+    return " ｜ ".join(parts) if parts else None
 
 
 def _ev_row(ev: dict) -> str:
@@ -189,6 +214,9 @@ def render_md(result: dict, cfg: Optional[Config] = None) -> str:
                 detail.append("软否决：" + "；".join(i["label"] for i in vt["soft"]))
             if detail:
                 lines.append(f"- **{e.get('code')} {e.get('name')}** — " + " ｜ ".join(detail))
+            tech = _tech_indicators_line(e)
+            if tech:
+                lines.append(f"  - 技术观测：{tech}")
             lines += _scoring_dims_lines(e)
         lines.append("")
 
@@ -202,6 +230,9 @@ def render_md(result: dict, cfg: Optional[Config] = None) -> str:
             if e.get("triggers"):
                 lines.append(f"- {e.get('code')} {e.get('name')} — 触发条件："
                              + "；".join(e["triggers"]))
+            tech = _tech_indicators_line(e)
+            if tech:
+                lines.append(f"  - 技术观测：{tech}")
             lines += _scoring_dims_lines(e)
         lines.append("")
     else:
@@ -213,6 +244,11 @@ def render_md(result: dict, cfg: Optional[Config] = None) -> str:
     lines += [f"## 候选明细（初筛 {cn} 只 → 淘汰/保留原因）", ""]
     if cands:
         lines += _CAND_HEADER + [_cand_row(c) for c in cands] + [""]
+        for c in cands:
+            tech = _tech_indicators_line_cand(c)
+            if tech:
+                lines.append(f"- **{c.get('code')} {c.get('name')}** — 技术观测：{tech}")
+        lines.append("")
     else:
         lines += ["无候选（初筛未通过任何标的）。", ""]
 
@@ -302,10 +338,16 @@ def format_result(result: dict, cfg: Optional[Config] = None) -> str:
                          f"  {(e.get('stage') or {}).get('stage') or '—'}"
                          f"  止损 {utils.pct(lv.get('sl_pct'))} 止盈 {utils.pct(lv.get('tp_pct'))}"
                          f"  R:R {utils.num(lv.get('odds'))}")
+            shortfall = preflight.format_resonance_shortfall(e)
+            if shortfall and key != "near_miss":
+                lines.append(f"        {shortfall}")
             if e.get("triggers"):
                 lines.append("        触发：" + "；".join(e["triggers"]))
             if key == "near_miss" and e.get("reasons"):
-                lines.append("        原因：" + "；".join(e["reasons"][:3]))
+                lines.append("        原因：" + "；".join(e["reasons"][:4]))
+            tech = _tech_indicators_line(e)
+            if tech:
+                lines.append(f"        {tech}")
 
     # 候选明细：硬否决/数据缺不进上面四个桶，只能在这里看到为何被淘汰
     cands = result.get("candidates") or []
@@ -319,6 +361,9 @@ def format_result(result: dict, cfg: Optional[Config] = None) -> str:
                      f"  共振 {_reso(c):<5}  {_ident(c, 0):<8}"
                      f"  [{c.get('verdict') or '—'}]")
         lines.append(f"        原因：{cand_display_reason(c)}")
+        tech = _tech_indicators_line_cand(c)
+        if tech:
+            lines.append(f"        {tech}")
 
     for n in (result.get("notes") or []):
         lines.append(f"  · {n}")

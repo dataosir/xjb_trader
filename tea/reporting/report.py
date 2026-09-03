@@ -10,6 +10,7 @@ from tea.config.config_store import Config, load_config
 from tea.core import utils
 from tea.analysis.sentiment import allow_new_label
 from tea.screening import preflight
+from tea.data.indicators import format_bollinger
 
 DECISION_BUY = "BUY"
 DECISION_REJECT = "REJECT"
@@ -89,6 +90,7 @@ def _quote_block(ev: dict) -> List[str]:
         f"- MA5 {utils.num(ind.get('ma5'))}　MA10 {utils.num(ind.get('ma10'))}　MA20 {utils.num(ind.get('ma20'))}"
         f"　多头排列 {'是' if ind.get('ma_bull') else '否'}",
         f"- MA20 乖离 **{utils.pct(ind.get('bias_ma20'))}**　ATR% {utils.num(ind.get('atr_pct'))}"
+        f"　{format_bollinger(ind)}"
         f"　分时位置 **{('%.0f%%' % (ev['intraday'] * 100)) if ev.get('intraday') is not None else '—'}**"
         f"　阶段 **{(ev.get('stage') or {}).get('stage')}**",
         "",

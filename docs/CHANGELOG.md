@@ -4,6 +4,23 @@
 
 ## [Unreleased]
 
+### 数据（2026-09-03：布林线观测因子落盘）
+
+> 关联：F11 / `indicators`；只算不落闸，不参与共振分与 VETO。
+
+- **新增** `bollinger()` / `bb_derived()`：`N=20`、`K=2`，σ 用总体标准差（与东财对齐）；输出 `bb_mid/upper/lower`、`bb_pct_b`、`bb_bandwidth`。  
+- **落盘**：`seed_records`、`scan_details`、计划快照 `preflight.snapshot` 同步写入布林字段。  
+- **控制台**：`format_evaluation`、Phase1、`TRADE_CHECK` 报告打印 `UB/MB/LB`、%B、带宽。  
+- **自测**：独立复算布林公式 + `record_seed` 落盘断言。
+
+### 体验（2026-09-02：共振分不足展开到具体维度）
+
+> 关联：F04 / F03；观察轨只显示「共振 4/6」无法复盘拖分维。
+
+- **新增** `preflight.format_resonance_shortfall`：列出 `score < max` 的六维及简要原因（如 `板块强度 0/2`、`止损结构 0/1`），附差分与门槛。  
+- **种子控制台**：`[观察]` 行下追加 `短板：…`；近失 `原因` 行同步带上短板（与计划复核 `check_item` 口径对齐）。  
+- **候选明细**：`共振分不足` 类 reason 自动展开短板，不再只有总分。
+
 ### 数据（2026-09-01：东财 K 线熔断 + 缺口横幅误报修复）
 
 > 关联：F01 / F14；`push2his` 封禁时扫描收尾仍报「失败 12」与数据缺口横幅。

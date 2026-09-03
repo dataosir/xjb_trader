@@ -406,6 +406,11 @@ def _ft_entries(result: dict) -> List[dict]:
                 "scoring_dims": (ev.get("scoring") or {}).get("dims"),
                 # 技术指标（T+N 回填后做逐因子胜率归因）：乖离/波动/量比/换手/分时位
                 "bias_ma20": ind.get("bias_ma20"),
+                "bb_mid": ind.get("bb_mid"),
+                "bb_upper": ind.get("bb_upper"),
+                "bb_lower": ind.get("bb_lower"),
+                "bb_pct_b": ind.get("bb_pct_b"),
+                "bb_bandwidth": ind.get("bb_bandwidth"),
                 "atr_pct": ind.get("atr_pct"),
                 "vol_ratio": q.get("vol_ratio"),
                 "turnover": q.get("turnover"),

@@ -43,7 +43,7 @@
 | 板块 | `sector_*`、`pick_sector_bk/name/rank` | 入选一致性归因 |
 | 评分 | `score` `winrate_score` `tier` | 共振 vs 胜率 |
 | 标签 | `lowbuy` `buyable` / 观察原因 / `shadow_tag` | 低吸、可买分流、影子对照桶 |
-| 因子 | `bias_ma20` `vol_ratio` `atr_pct` `turnover` `intraday` … | 阶段 2 归因 |
+| 因子 | `bias_ma20` `bb_mid/upper/lower` `bb_pct_b` `bb_bandwidth` `vol_ratio` `atr_pct` `turnover` `intraday` … | 阶段 2 归因（布林只观测不落闸） |
 | 回填 | `next_chg`/`result`、`chg_t2`/`chg_t3`/`chg_t5` | 胜率与三日对照 |
 
 字段增删 → **同步本文 + F11 + `record_seed` + selftest**，并在 CHANGELOG 留痕。

@@ -12,6 +12,7 @@ from tea.config.config_store import Config, load_config
 from tea.core import logger as logger_mod, utils
 from tea.core.timing import Timing
 from tea.data import Market, intraday_position
+from tea.data.indicators import format_bollinger
 from . import veto as veto_mod
 
 _LOG = logger_mod.get_logger("score")
@@ -325,6 +326,52 @@ def score_nine(quote: dict, ind: dict, sector: dict, sent: Optional[dict],
     }
 
 
+def format_resonance_shortfall(ev: Optional[dict] = None, *,
+                               dims: Optional[List[dict]] = None,
+                               total: Optional[int] = None,
+                               threshold: Optional[int] = None,
+                               prefix: str = "短板") -> str:
+    """列出未拿满分的共振维度，供观察/近失/候选明细展开「哪一维拖分」。
+
+    只报「共振 4/6」是黑盒：复盘时不知道掉在板块强度还是量价结构。与 plan.check_item
+    的六维对比互补——这里面向单次快照，列出当前 score < max 的维度及简要原因。
+    """
+    sc = (ev or {}).get("scoring") or {}
+    dims = dims or sc.get("dims") or (ev or {}).get("scoring_dims") or []
+    if not dims:
+        return ""
+    if total is None:
+        total = sc.get("total") if sc else (ev or {}).get("total_score")
+    if threshold is None:
+        threshold = (ev or {}).get("pass_threshold")
+    if total is not None and threshold is not None and total >= threshold:
+        return ""
+
+    weak: List[dict] = []
+    for d in dims:
+        mx = int(d.get("max") or 0)
+        sc_ = d.get("score")
+        if sc_ is None or mx <= 0:
+            continue
+        if sc_ < mx:
+            weak.append(d)
+    if not weak:
+        return ""
+
+    def _brief(d: dict) -> str:
+        detail = (d.get("detail") or "").strip()
+        if not detail:
+            return f"{d.get('name')} {d.get('score')}/{d.get('max')}"
+        if len(detail) > 28:
+            detail = detail[:27] + "…"
+        return f"{d.get('name')} {d.get('score')}/{d.get('max')}（{detail}）"
+
+    msg = prefix + "：" + "、".join(_brief(d) for d in weak)
+    if total is not None and threshold is not None:
+        msg += f"（差 {threshold - total} 分达门槛 {threshold}）"
+    return msg
+
+
 # ------------------------------------------------------------------ 8.4 有效门槛
 
 def effective_threshold(identity: Optional[dict] = None, sent: Optional[dict] = None,
@@ -517,6 +564,10 @@ def evaluate(code: str, market: Optional[Market] = None, cfg: Optional[Config] =
     else:
         verdict = VERDICT_NEAR_MISS
         reasons.append(f"共振分 {total}/{threshold} 差 {threshold - total} 分 → 近失")
+    shortfall = format_resonance_shortfall(dims=scored.get("dims"),
+                                           total=total, threshold=threshold)
+    if shortfall:
+        reasons.append(shortfall)
     if not (levels.get("odds_ok", True)):
         reasons.append(f"R:R {utils.num(levels.get('odds'))} < {cfg.s('min_odds', 3)}")
         if verdict == VERDICT_PASS:
@@ -568,6 +619,11 @@ def snapshot(ev: dict) -> dict:
         "inner_rank": sec.get("stock_rank"), "inner_rank_pct": sec.get("stock_rank_pct"),
         "identity_score": idn.get("score"), "identity_tier": idn.get("tier"),
         "bias_ma20": (ev.get("ind") or {}).get("bias_ma20"),
+        "bb_mid": (ev.get("ind") or {}).get("bb_mid"),
+        "bb_upper": (ev.get("ind") or {}).get("bb_upper"),
+        "bb_lower": (ev.get("ind") or {}).get("bb_lower"),
+        "bb_pct_b": (ev.get("ind") or {}).get("bb_pct_b"),
+        "bb_bandwidth": (ev.get("ind") or {}).get("bb_bandwidth"),
         "atr_pct": (ev.get("ind") or {}).get("atr_pct"),
         "ma_bull": (ev.get("ind") or {}).get("ma_bull"),
         "intraday": ev.get("intraday"), "stage": (ev.get("stage") or {}).get("stage"),
@@ -618,6 +674,7 @@ def format_evaluation(ev: dict) -> str:
         f"涨停 {sec.get('limit_up_count')} 家）板块内 {sec.get('stock_rank')}/{sec.get('member_total')}",
         f"分时位置 {('%.0f%%' % (ev['intraday'] * 100)) if ev.get('intraday') is not None else '—'}  "
         f"阶段 {(ev.get('stage') or {}).get('stage')}  乖离 {utils.pct((ev.get('ind') or {}).get('bias_ma20'))}",
+        format_bollinger(ev.get("ind") or {}),
         ident_mod.format_identity(ev.get("identity") or {}),
         veto_mod.format_veto(ev.get("veto") or {}),
         format_levels(ev),

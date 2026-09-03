@@ -1406,6 +1406,30 @@ def check_levels(t: Suite, cfg: Config, mk: FakeMarket) -> dict:
     t.ok("日K最后一根为旧日期时 kline_stale=True",
          old.get("kline_stale") is True, f"kline_date={old.get('kline_date')}")
 
+    # 布林线独立复算（N=3, K=2, 收盘 10/11/12）
+    kl3 = [{"close": 10.0}, {"close": 11.0}, {"close": 12.0}]
+    bb3 = indicators.bollinger(kl3, n=3, k=2.0)
+    mid3 = 11.0
+    std3 = (2.0 / 3.0) ** 0.5
+    want_ub3 = mid3 + 2.0 * std3
+    want_lb3 = mid3 - 2.0 * std3
+    t.eq("布林中轨 SMA(3)", round(bb3["bb_mid"], 6), round(mid3, 6))
+    t.eq("布林上轨", round(bb3["bb_upper"], 6), round(want_ub3, 6), tol=1e-6)
+    t.eq("布林下轨", round(bb3["bb_lower"], 6), round(want_lb3, 6), tol=1e-6)
+    bb_extra3 = indicators.bb_derived(12.0, bb3)
+    want_pct_b3 = (12.0 - want_lb3) / (want_ub3 - want_lb3)
+    want_bw3 = (want_ub3 - want_lb3) / mid3 * 100.0
+    t.eq("%B", round(bb_extra3["bb_pct_b"], 6), round(want_pct_b3, 6), tol=1e-6)
+    t.eq("布林带宽%", round(bb_extra3["bb_bandwidth"], 4), round(want_bw3, 4), tol=1e-3)
+    t.ok("布林中轨=MA20", ind.get("bb_mid") is not None and ind.get("ma20") is not None
+         and abs(ind["bb_mid"] - ind["ma20"]) < 1e-6,
+         f"bb_mid={ind.get('bb_mid')} ma20={ind.get('ma20')}")
+    t.ok("compute_indicators 含布林字段",
+         ind.get("bb_upper") is not None and ind.get("bb_pct_b") is not None,
+         str({k: ind.get(k) for k in ("bb_upper", "bb_lower", "bb_pct_b", "bb_bandwidth")}))
+    t.ok("format_bollinger 含 UB/MB/LB",
+         "UB/MB/LB" in indicators.format_bollinger(ind))
+
     lv = preflight.compute_levels(price, ind["atr_pct"], cfg)
     want_sl = min(utils.clamp(want_atr_pct * 1.5, 2.0, 8.0), 6.0)
     t.eq("止损% = ATR%×1.5（夹 2~8，硬顶 6）", lv["sl_pct"], round(want_sl, 2), tol=0.011)
@@ -1488,6 +1512,18 @@ def check_scoring(t: Suite, cfg: Config, mk: FakeMarket, sent: dict, lv: dict) -
     t.ok("乖离 24% 不再触发量价扣分",
          not any("乖离" in p for p in sc_hibias["penalties"]),
          f"penalties={sc_hibias['penalties']}")
+
+    # 共振短板展开：观察/近失不能只报 4/6，要指出哪一维拖分
+    weak_dims = [dict(d) for d in sc["dims"]]
+    weak_dims[0]["score"] = 0
+    weak_dims[4]["score"] = 1
+    weak_dims[5]["score"] = 0
+    sf = preflight.format_resonance_shortfall(dims=weak_dims, total=4, threshold=6)
+    t.ok("短板含未满分维度名", "板块强度 0/2" in sf and "量价结构 1/2" in sf, sf)
+    t.ok("短板含差分与门槛", "差 2 分达门槛 6" in sf, sf)
+    t.ok("达标时不展开短板",
+         preflight.format_resonance_shortfall(dims=sc["dims"], total=9, threshold=6) == "",
+         "")
 
     # 板块排名磁盘兜底（stale）：板块强度整维归零，不拿昨日排名给假分。
     sec_stale = dict(sec, stale=True)
@@ -2515,6 +2551,8 @@ def check_followthrough(t: Suite, cfg: Config) -> None:
         "scoring_dims": [{"name": "板块强度", "score": 2, "max": 2}],
         "market_score": 47.0, "market_stance": "防守", "market_ma20_above": False,
         "bias_ma20": 12.5, "atr_pct": 5.2, "vol_ratio": 1.8,
+        "bb_mid": 10.5, "bb_upper": 11.2, "bb_lower": 9.8,
+        "bb_pct_b": 0.75, "bb_bandwidth": 22.9,
         "turnover": 9.5, "intraday": 0.72,
         "amount_yi": 12.0, "cap_yi": 150.0, "rank_pct": 0.15,
         "odds": 2.4, "veto_labels": ["接近涨停", "分时偏高"],
@@ -2525,6 +2563,9 @@ def check_followthrough(t: Suite, cfg: Config) -> None:
     t.eq("市场姿态随样本落盘", f.get("market_stance"), "防守")
     t.eq("大盘趋势随样本落盘", f.get("market_ma20_above"), False)
     t.eq("乖离随样本落盘", f.get("bias_ma20"), 12.5)
+    t.eq("布林中轨随样本落盘", f.get("bb_mid"), 10.5)
+    t.eq("布林上轨随样本落盘", f.get("bb_upper"), 11.2)
+    t.eq("%B 随样本落盘", f.get("bb_pct_b"), 0.75)
     t.eq("ATR%随样本落盘", f.get("atr_pct"), 5.2)
     t.eq("量比随样本落盘", f.get("vol_ratio"), 1.8)
     t.eq("换手随样本落盘", f.get("turnover"), 9.5)

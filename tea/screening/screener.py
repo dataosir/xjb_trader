@@ -240,6 +240,13 @@ def _finalize_cand_reason(row: dict, ev: Optional[dict] = None) -> None:
         CAND_SKIPPED: "超出单次预审上限",
     }
     row["reason"] = fallbacks.get(verdict, "—")
+    if verdict in (CAND_NEAR, CAND_WATCH):
+        shortfall = preflight.format_resonance_shortfall(
+            dims=row.get("scoring_dims"),
+            total=row.get("score"), threshold=row.get("threshold"))
+        if shortfall and shortfall not in row["reason"]:
+            base = row["reason"]
+            row["reason"] = f"{base}；{shortfall}" if base and base != "—" else shortfall
 
 
 # ------------------------------------------------------------------ 候选明细
@@ -271,6 +278,11 @@ def candidate_row(cand: dict, ev: Optional[dict] = None,
         # 技术/量价指标（评分与 VETO 的输入）
         "atr_pct": ind.get("atr_pct"),
         "bias_ma20": ind.get("bias_ma20"),
+        "bb_mid": ind.get("bb_mid"),
+        "bb_upper": ind.get("bb_upper"),
+        "bb_lower": ind.get("bb_lower"),
+        "bb_pct_b": ind.get("bb_pct_b"),
+        "bb_bandwidth": ind.get("bb_bandwidth"),
         "vol_ratio": q.get("vol_ratio"),
         "amount_yi": q.get("amount_yi"),
         "turnover": q.get("turnover"),
