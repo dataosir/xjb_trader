@@ -28,6 +28,9 @@ STATUS_ACTIVE = "active"
 STATUS_READY = "ready"
 STATUS_REMOVED = "removed"
 
+CONDITION_PULLBACK = "pullback_ready"
+CONDITION_PREFLIGHT = "preflight_pass"
+
 
 def pool_path(cfg: Optional[Config] = None) -> str:
     return (cfg or load_config()).data_file("watch_pool_file")
@@ -132,6 +135,11 @@ def items(cfg: Optional[Config] = None, track: Optional[str] = None) -> List[dic
     return [i for i in its if (track is None or i.get("track") == track)]
 
 
+def active_items(cfg: Optional[Config] = None, track: Optional[str] = None) -> List[dict]:
+    """仅 status=active 的观察池项（盘中提醒扫描对象）。"""
+    return [i for i in items(cfg, track=track) if i.get("status") == STATUS_ACTIVE]
+
+
 def find(code: str, cfg: Optional[Config] = None) -> Optional[dict]:
     code = utils.norm_code(code)
     return next((i for i in items(cfg) if i.get("code") == code), None)
@@ -163,6 +171,155 @@ def pullback_ready(item: dict, ev: dict, cfg: Optional[Config] = None) -> dict:
                       f"分时 {('%.0f%%' % (intr * 100)) if intr is not None else '—'}/需≤{max_intr:.0%}，"
                       f"持有 {days} 天/限 {max_days} 天）")
     return checks
+
+
+# ------------------------------------------------------------------ F16 盘中提醒
+
+def alert_state_path(cfg: Optional[Config] = None) -> str:
+    return (cfg or load_config()).data_file("watch_alert_state_file")
+
+
+def load_alert_state(cfg: Optional[Config] = None) -> dict:
+    data = utils.read_json(alert_state_path(cfg), default=None) or {"sent": []}
+    data.setdefault("sent", [])
+    return data
+
+
+def save_alert_state(state: dict, cfg: Optional[Config] = None) -> str:
+    state["updated_at"] = utils.now().strftime("%Y-%m-%d %H:%M:%S")
+    return utils.write_json(alert_state_path(cfg), state)
+
+
+def _alert_dedupe_key(date: str, code: str, condition: str) -> str:
+    return f"{date}|{utils.norm_code(code)}|{condition}"
+
+
+def is_alert_sent(date: str, code: str, condition: str, cfg: Optional[Config] = None) -> bool:
+    key = _alert_dedupe_key(date, code, condition)
+    return any(s.get("key") == key for s in load_alert_state(cfg).get("sent", []))
+
+
+def mark_alert_sent(date: str, code: str, condition: str, cfg: Optional[Config] = None,
+                    meta: Optional[dict] = None) -> None:
+    state = load_alert_state(cfg)
+    key = _alert_dedupe_key(date, code, condition)
+    if any(s.get("key") == key for s in state.get("sent", [])):
+        return
+    rec = {
+        "key": key,
+        "date": date,
+        "code": utils.norm_code(code),
+        "condition": condition,
+        "sent_at": utils.now().strftime("%Y-%m-%d %H:%M:%S"),
+    }
+    if meta:
+        rec.update(meta)
+    state.setdefault("sent", []).append(rec)
+    save_alert_state(state, cfg)
+
+
+def _passes_alert_filters(item: dict, ev: dict, condition: str,
+                          cfg: Config) -> tuple:
+    """返回 (是否触发, 原因/详情 dict)。"""
+    tier = (ev.get("identity") or {}).get("tier")
+    if tier == TIER_ZAMAO:
+        return False, {"reason": "身份降级杂毛"}
+
+    vt = ev.get("veto") or {}
+    if cfg.get("alert.require_no_hard_veto", True) and vt.get("rejected"):
+        hard = vt.get("hard") or []
+        if hard:
+            return False, {"reason": "硬否决：" + "；".join(i.get("label", "") for i in hard)}
+
+    if condition == CONDITION_PREFLIGHT:
+        ok = ev.get("verdict") == preflight.VERDICT_PASS
+        return ok, {"verdict": ev.get("verdict"), "total_score": ev.get("total_score")}
+
+    pb = pullback_ready(item, ev, cfg)
+    if not pb.get("ready"):
+        return False, {"pullback": pb, "reason": pb.get("hint")}
+    return True, {"pullback": pb, "condition": CONDITION_PULLBACK}
+
+
+def format_alert_body(candidate: dict, condition: str) -> str:
+    """邮件正文（含纪律提示）。"""
+    pb = candidate.get("pullback") or {}
+    price = candidate.get("price")
+    intr = candidate.get("intraday")
+    lines = [
+        f"标的：{candidate.get('code')} {candidate.get('name')}",
+        f"轨道：{candidate.get('track')}",
+        f"提醒条件：{condition}",
+        f"现价：{utils.num(price)}",
+        f"分时位置：{('%.0f%%' % (intr * 100)) if intr is not None else '—'}",
+    ]
+    if pb.get("drop") is not None:
+        lines.append(f"回撤：{utils.pct(pb.get('drop'))}（入池 {pb.get('days')} 天）")
+    if candidate.get("verdict"):
+        lines.append(f"预审：{candidate.get('verdict')} "
+                     f"共振 {candidate.get('total_score')}/{candidate.get('pass_threshold')}")
+    lines += [
+        "",
+        "请手动执行 tea eval / tea run 复核后再决定是否买入。",
+        "引擎不自动下单、不写计划。",
+    ]
+    return "\n".join(lines)
+
+
+def scan_alerts(market: Optional[Market] = None, cfg: Optional[Config] = None,
+                sent: Optional[dict] = None) -> dict:
+    """扫描观察池 active 项，返回满足 alert.condition 的待提醒列表（不发信）。"""
+    cfg = cfg or load_config()
+    mk = market or Market(cfg)
+    condition = str(cfg.get("alert.condition") or CONDITION_PULLBACK)
+    if condition not in (CONDITION_PULLBACK, CONDITION_PREFLIGHT):
+        condition = CONDITION_PULLBACK
+
+    pool_items = active_items(cfg)
+    if not cfg.get("alert.include_eve", True):
+        pool_items = [i for i in pool_items if i.get("track") != TRACK_EVE]
+
+    out: Dict[str, Any] = {
+        "condition": condition,
+        "scanned": len(pool_items),
+        "candidates": [],
+        "errors": [],
+        "at": utils.now().strftime("%Y-%m-%d %H:%M"),
+    }
+    if not pool_items:
+        return out
+
+    for item in pool_items:
+        code = item.get("code")
+        rec: Dict[str, Any] = {"code": code, "name": item.get("name"), "track": item.get("track")}
+        try:
+            ev = preflight.evaluate(code, mk, cfg, sent=sent)
+        except Exception as exc:
+            out["errors"].append({"code": code, "error": str(exc)})
+            continue
+
+        ok, detail = _passes_alert_filters(item, ev, condition, cfg)
+        if not ok:
+            continue
+
+        quote = ev.get("quote") or {}
+        rec.update({
+            "price": quote.get("price"),
+            "intraday": ev.get("intraday"),
+            "total_score": ev.get("total_score"),
+            "pass_threshold": ev.get("pass_threshold"),
+            "verdict": ev.get("verdict"),
+            "pullback": detail.get("pullback"),
+            "body": format_alert_body({
+                **rec,
+                "pullback": detail.get("pullback"),
+                "verdict": ev.get("verdict"),
+                "total_score": ev.get("total_score"),
+                "pass_threshold": ev.get("pass_threshold"),
+            }, condition),
+        })
+        out["candidates"].append(rec)
+    return out
 
 
 # ------------------------------------------------------------------ 12.2 收盘复核

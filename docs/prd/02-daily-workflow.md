@@ -7,6 +7,7 @@
 | 时刻 | 动作 | 命令 / 菜单 | 相关功能 |
 |---|---|---|---|
 | ~13:30 | 观察盘面强弱 | `weather` / 菜单 `1` | F01 |
+| 盘中（可选） | 观察池购买条件扫描 → 邮件提醒 | launchd `watch-alert` / `tea watch-alert` | F16 / F10 |
 | **~14:30** | 种子四步流 → 写次日计划（收尾可自动轻量回填） | `seed-plan` / 菜单 `3` | F03 / F04 / F06 / F07 / F11 |
 | 可选 | 胜率影子扫描（对比） | `winrate-scan` / 复盘工具▸ | F05 |
 | ~14:35 / 09:35 | 计划复核（要素变动 → 整单作废） | `plan-check` / 计划▸ | F07 |
@@ -57,6 +58,7 @@
 | `run` / `eval` | F08（+ F02/F04） |
 | `pos` / `pos-add` / `pos-rm` / `capital` / `add-confirm` / `close` | F09 |
 | `watch` | F10 |
+| `watch-alert` | F16（+ F10） |
 | `review` / `followthrough` | F11 |
 | `stats` / `weekly` / `accum` / `trace` / `trades` | F12 |
 | `setup` / `config` | F13 |

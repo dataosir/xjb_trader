@@ -7,6 +7,7 @@
     plan_check()    次日 09:35 计划复核（任一变动整单作废）
     maybe_auto_backfill()  轻量/全量自动回填（seed / menu 触发）
     close_review()  盘后复核：T+1 回填 / 观察池复核 / 当日累积
+    watch_alert()   盘中观察池扫描 + 邮件提醒（launchd 每分钟）
     daily_status()  今日状态（门禁计数 / 计划 / 持仓）
 
 设计约束：这里只做编排与落盘，所有公式都在各自模块里，runner 不重算任何一个分数。
@@ -21,7 +22,7 @@ from typing import Any, Dict, List, Optional
 from tea.analysis import followthrough as ft_mod, pricetrack, stats
 from tea.analysis.sentiment import data_gap_summary, format_data_gap_banner, format_weather, get_sentiment
 from tea.config.config_store import Config, load_config
-from tea.core import logger as logger_mod, utils
+from tea.core import logger as logger_mod, notify, utils
 from tea.core.timing import Timing
 from tea.data import Market
 from tea.phases import IO, Session, phase1, phase2, phase3, phase4, results
@@ -655,6 +656,77 @@ def close_review(cfg: Optional[Config] = None, market: Optional[Market] = None,
     out["digest"] = dg
     io.say(accumulator.format_day(dg))
     io.say(seed_trace.format_trace_summary(cfg))
+    return out
+
+
+def watch_alert(cfg: Optional[Config] = None, market: Optional[Market] = None,
+                io: Optional[IO] = None, sent: Optional[dict] = None,
+                force: bool = False) -> dict:
+    """盘中观察池扫描：满足购买条件则发邮件提醒（不自动下单）。
+
+    守卫：交易日 + 盘中 + alert.enabled + notify.email.enabled；观察池空则不打行情。
+    """
+    cfg = cfg or load_config()
+    io = io or IO()
+    mk = market or Market(cfg)
+    log = logger_mod.get_logger("alert")
+    tm = Timing(cfg)
+    today = utils.today_str()
+    out: Dict[str, Any] = {"date": today, "sent": [], "skipped": [], "failed": []}
+
+    if not force and not cfg.get("alert.enabled", False):
+        log.info("tea.alert skip: alert.enabled=false")
+        out["skip"] = "alert_disabled"
+        return out
+
+    if not force and not tm.in_session():
+        log.info("tea.alert skip: off_session phase=%s", tm.phase())
+        out["skip"] = "off_session"
+        return out
+
+    if not force and not notify.email_configured(cfg):
+        log.info("tea.alert skip: email_not_configured")
+        out["skip"] = "email_not_configured"
+        return out
+
+    active = watch_pool.active_items(cfg)
+    if not active:
+        log.info("tea.alert skip: empty_pool")
+        out["skip"] = "empty_pool"
+        return out
+
+    condition = str(cfg.get("alert.condition") or watch_pool.CONDITION_PULLBACK)
+    log.info("tea.alert scan start n=%d condition=%s", len(active), condition)
+
+    scan = watch_pool.scan_alerts(mk, cfg, sent=sent)
+    out["scan"] = scan
+    dedupe = bool(cfg.get("alert.dedupe_per_day", True))
+
+    for cand in scan.get("candidates") or []:
+        code = cand.get("code")
+        if dedupe and watch_pool.is_alert_sent(today, code, condition, cfg):
+            out["skipped"].append(code)
+            log.info("tea.alert dedupe %s condition=%s", code, condition)
+            continue
+
+        subject = f"{cand.get('name') or code} {condition} 提醒"
+        res = notify.send_email(cfg, subject=subject, body=cand.get("body") or "")
+        if not res.get("ok"):
+            out["failed"].append({"code": code, "error": res.get("error")})
+            log.error("tea.alert send failed %s: %s", code, res.get("error"))
+            continue
+
+        watch_pool.mark_alert_sent(today, code, condition, cfg,
+                                   meta={"track": cand.get("track"), "condition": condition})
+        out["sent"].append(code)
+        log.info("tea.alert sent %s condition=%s", code, condition)
+        io.say(f"  ✓ 已发邮件：{code} {cand.get('name')}（{condition}）")
+
+    summary = (f"扫描 {scan.get('scanned', 0)} 只，待发 {len(scan.get('candidates') or [])}，"
+               f"已发 {len(out['sent'])}，去重跳过 {len(out['skipped'])}，失败 {len(out['failed'])}")
+    log.info("tea.alert done %s", summary)
+    if out["sent"] or out["failed"]:
+        io.say(f"观察池提醒：{summary}")
     return out
 
 

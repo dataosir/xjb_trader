@@ -9,6 +9,7 @@
   tea plan-check           09:35 计划复核
   tea plan-clear           清除过期旧计划
   tea review               盘后复核（跟涨回填 + 观察池）
+  tea watch-alert          盘中观察池扫描 + 邮件提醒
   tea status / weather / pos / trades / stats / weekly
   tea setup                配置向导（首次启动自动进入）
   tea selftest             离线自测（公式对齐验证，不联网）
@@ -201,6 +202,13 @@ def cmd_eval(args, cfg: Config) -> int:
                                 has_news=args.news)
     io.say(preflight.format_evaluation(ev))
     return 0 if ev.get("verdict") == preflight.VERDICT_PASS else 1
+
+
+def cmd_watch_alert(args, cfg: Config) -> int:
+    res = runner.watch_alert(cfg=cfg, io=_io(), force=args.force)
+    if res.get("skip"):
+        return 0
+    return 0 if not res.get("failed") else 1
 
 
 def cmd_watch(args, cfg: Config) -> int:
@@ -802,6 +810,11 @@ def build_parser() -> argparse.ArgumentParser:
     w = sub.add_parser("weather", help="市场天气（情绪分 / 周期 / 姿态）")
     w.add_argument("--refresh", action="store_true", help="忽略 120s 缓存重算")
     w.set_defaults(func=cmd_weather)
+
+    wa = sub.add_parser("watch-alert", help="盘中观察池扫描 + 邮件提醒（launchd 每分钟）")
+    wa.add_argument("--force", action="store_true",
+                    help="忽略时段/开关守卫（仅演练，仍会发信若已配邮箱）")
+    wa.set_defaults(func=cmd_watch_alert)
 
     wp = sub.add_parser("watch", help="观察池：查看 / 复核 / 纳入 / 剔除")
     wp.add_argument("--review", action="store_true", help="执行盘后复核")

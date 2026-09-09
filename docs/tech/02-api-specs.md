@@ -27,6 +27,7 @@
 | `plan-check` | `plan` 复核 | 变动则整单作废 |
 | `run` / `eval` | gates → phases Phase1–4；`eval` 不落仓 | `run` 可登记灰度仓 |
 | `review` | followthrough 回填 + watch 复核 + 缺口/影子看板 | 写 seed_records / 报告 |
+| `watch-alert` | `watch_pool.scan_alerts` → `notify.send_email`；launchd 每分钟 | 写 `watch_alert_state.json`；**不发计划、不下单** |
 | `followthrough` | 跟涨胜率 + 样本缺口 + 影子桶 T+3 对照 | 只读（`--update` 可写回填） |
 | （进菜单） | `maybe_auto_backfill(menu)` | 盘后/隔夜窗每天最多 1 次轻量回填（**默认后台**） |
 | `selftest` | `tea/selftest.py` | 临时 `$TEA_HOME` 沙箱，不碰真实数据 |
@@ -73,6 +74,14 @@
 | 新门禁 / VETO | `gates.py` / `veto.py` | 配置化阈值 + selftest 断言 |
 | 新分析指标 | `tea/analysis/` | 不写跨日状态文件 |
 | 新报告 | `tea/reporting/` | 只呈现，不判断交易 |
+| 邮件通知 | `tea/core/notify.py` | 标准库 SMTP；配置 `notify.email.*`；失败留 ERROR 不 advance state |
+
+### 3.6 观察提醒（F16）
+
+- `watch_pool.scan_alerts(cfg, market)` → `[{code, name, track, condition, detail, ev}]`  
+- `notify.send_email(cfg, subject, body)` → `bool`；密码不进日志  
+- `runner.watch_alert()`：Timing 守卫 → scan → dedupe(`watch_alert_state.json`) → send  
+- CLI：`tea watch-alert`（单次）；调度见 `ops/06-watch-alert-scheduler.md`
 
 ---
 

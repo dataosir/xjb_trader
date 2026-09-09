@@ -22,7 +22,9 @@ from .config.config_store import Config
 from .core import paths, utils
 from .data import Market, MarketError, indicators
 from .data.fetcher import Fetcher
-from .portfolio import plan as plan_mod, portfolio
+from .core import notify as notify_mod
+from .portfolio import plan as plan_mod, portfolio, watch_pool as wp_mod
+from .runtime import runner as runner_mod
 from .screening import gates, preflight, screener as screener_mod, seed_report, veto as veto_mod
 
 TARGET = "600123"
@@ -3010,6 +3012,106 @@ def check_onboarding(t: Suite, home: str) -> None:
     t.ok("跳过仍打标记（不再纠缠）", not onboarding.is_first_run(cfg3))
 
 
+# ==================================================================== F16 观察池提醒
+
+def check_watch_alert(t: Suite, c: Config) -> None:
+    """盘中提醒：scan_alerts / 去重 / 发信失败不 advance state。"""
+    t.head("观察池 · 盘中邮件提醒")
+
+    sent_box: List[dict] = []
+
+    def _fake_sender(**_kw) -> None:
+        sent_box.append({"subject": _kw.get("subject"), "body": _kw.get("body")})
+
+    notify_mod.set_test_sender(_fake_sender)
+
+    item = {
+        "code": TARGET, "name": TARGET_NAME, "track": wp_mod.TRACK_WATCH,
+        "status": wp_mod.STATUS_ACTIVE, "added_date": utils.today_str(),
+        "ref_high": 12.0, "ref_price": 11.5, "keep_days": 3,
+        "identity_tier": ident_mod.TIER_FOLLOW,
+    }
+    ev_ready = {
+        "code": TARGET, "name": TARGET_NAME, "verdict": preflight.VERDICT_PASS,
+        "total_score": 7, "pass_threshold": 6, "intraday": 0.55,
+        "quote": {"price": 11.0, "high": 12.0},
+        "identity": {"tier": ident_mod.TIER_FOLLOW},
+        "veto": {"rejected": False, "hard": []},
+    }
+    ev_reject = dict(ev_ready)
+    ev_reject["verdict"] = "REJECT"
+    ev_reject["total_score"] = 4
+
+    pool_path = c.data_file("watch_pool_file")
+    utils.write_json(pool_path, {"items": [item], "removed": []})
+    state_path = c.data_file("watch_alert_state_file")
+    if os.path.exists(state_path):
+        os.remove(state_path)
+
+    c.set("alert.enabled", True)
+    c.set("alert.condition", wp_mod.CONDITION_PULLBACK)
+    c.set("notify.email.enabled", True)
+    c.set("notify.email.smtp_host", "smtp.163.com")
+    c.set("notify.email.smtp_user", "test@163.com")
+    c.set("notify.email.smtp_password", "secret")
+    c.set("notify.email.from_addr", "test@163.com")
+    c.set("notify.email.to_addrs", ["recv@163.com"])
+    c.save()
+
+    orig_eval = preflight.evaluate
+
+    def _eval_ready(code, market, cfg, **kw):
+        return ev_ready
+
+    preflight.evaluate = _eval_ready
+    try:
+        scan = wp_mod.scan_alerts(market=None, cfg=c)
+        t.eq("pullback_ready 扫描出 1 只", len(scan.get("candidates") or []), 1)
+        t.ok("邮件正文含不自动下单", "不自动下单" in (scan["candidates"][0].get("body") or ""))
+
+        res = runner_mod.watch_alert(cfg=c, market=None, io=None, force=True)
+        t.eq("首次发信成功", len(res.get("sent") or []), 1)
+        t.ok("state 已记录去重", wp_mod.is_alert_sent(utils.today_str(), TARGET,
+                                                     wp_mod.CONDITION_PULLBACK, c))
+
+        sent_box.clear()
+        res2 = runner_mod.watch_alert(cfg=c, market=None, io=None, force=True)
+        t.eq("同日去重不再发信", len(res2.get("sent") or []), 0)
+        t.eq("去重跳过 1 只", len(res2.get("skipped") or []), 1)
+        t.ok("去重后无新邮件", not sent_box)
+
+        c.set("alert.condition", wp_mod.CONDITION_PREFLIGHT)
+        c.save()
+        preflight.evaluate = lambda *a, **k: ev_reject
+        scan2 = wp_mod.scan_alerts(market=None, cfg=c)
+        t.eq("preflight_pass REJECT 不触发", len(scan2.get("candidates") or []), 0)
+
+        preflight.evaluate = lambda *a, **k: ev_ready
+        scan3 = wp_mod.scan_alerts(market=None, cfg=c)
+        t.eq("preflight_pass PASS 触发", len(scan3.get("candidates") or []), 1)
+
+        c.set("alert.enabled", False)
+        c.save()
+        sent_box.clear()
+        skip = runner_mod.watch_alert(cfg=c, market=None, io=None, force=False)
+        t.eq("alert.enabled=false 跳过", skip.get("skip"), "alert_disabled")
+        t.ok("禁用时不连 SMTP", not sent_box)
+
+        notify_mod.set_test_sender(lambda **kw: (_ for _ in ()).throw(RuntimeError("smtp fail")))
+        c.set("alert.enabled", True)
+        c.set("alert.condition", wp_mod.CONDITION_PULLBACK)
+        c.save()
+        os.remove(state_path)
+        preflight.evaluate = _eval_ready
+        fail = runner_mod.watch_alert(cfg=c, market=None, io=None, force=True)
+        t.eq("发信失败不写 state", len(fail.get("failed") or []), 1)
+        t.ok("失败后可重试", not wp_mod.is_alert_sent(utils.today_str(), TARGET,
+                                                      wp_mod.CONDITION_PULLBACK, c))
+    finally:
+        preflight.evaluate = orig_eval
+        notify_mod.set_test_sender(None)
+
+
 # ==================================================================== 路径 / 打包
 
 def check_paths(t: Suite) -> None:
@@ -3210,6 +3312,7 @@ def main(verbose: bool = True, cfg: Optional[Config] = None) -> int:
         check_end_to_end(t, c, mk, sent)
         check_followthrough(t, c)
         check_pricetrack(t, c, mk)
+        check_watch_alert(t, c)
         return t.report()
     finally:
         sent_mod.clear_cache()

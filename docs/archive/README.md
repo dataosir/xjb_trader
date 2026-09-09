@@ -11,5 +11,7 @@
 | `LOWBUY_PLAN_2026-08-25.md` | 低吸（启动前夕）三阶段方案 |
 | `STRATEGY_ADJUSTMENT_2026-08-18.md` | 早期过滤器死锁修复 |
 | `CODE_REVIEW_2026-08-18.md` | 代码评审纪要 |
+| `FACTOR_ATTRIB_2026-09-04.md` | 阶段 2 归因草稿（板块排名/影子桶/轨道·阶段；技术因子待补） |
+| `SHADOW_BUCKET_PLAN_2026-09-04.md` | 影子桶策略 Plan（**方案 0 已确认**：维持 2 周攒样本） |
 
 **规则**：不要把新的主 PRD/tech 写进 archive；归档文件默认只读，修订结论应回写到 `prd/` / `CHANGELOG.md` / `project-state.md`。

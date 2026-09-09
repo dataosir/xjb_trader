@@ -46,6 +46,8 @@ Screener 四步流 → Preflight 9分+VETO → _winrate_gate
 T+1 窗口 run → gates + phases → 持仓 / trades
     ↓
 review → followthrough 回填 T+n → accumulator / stats
+    ↓
+（可选）launchd 每分钟 watch-alert → SMTP 邮件（F16，不自动下单）
 ```
 
 串联否决：任一层（道/法/术）否决 → 整笔作废。
@@ -63,7 +65,8 @@ review → followthrough 回填 T+n → accumulator / stats
 | `tea/portfolio/plan.py` | F07 |
 | `tea/phases/*` `runtime/runner.py` | F08 |
 | `tea/portfolio/portfolio.py` `trades.py` | F09 |
-| `tea/portfolio/watch_pool.py` | F10 |
+| `tea/portfolio/watch_pool.py` | F10 / F16 |
+| `tea/core/notify.py` | F16（SMTP，标准库） |
 | `tea/analysis/followthrough.py` | F11 |
 | `tea/reporting/*` | F12 |
 | `tea/config/*` | F13 |

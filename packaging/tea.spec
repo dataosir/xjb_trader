@@ -70,6 +70,7 @@ HIDDEN = [
     # 基础层
     "tea.core",
     "tea.core.logger",
+    "tea.core.notify",
     "tea.core.paths",
     "tea.core.timing",
     "tea.core.utils",

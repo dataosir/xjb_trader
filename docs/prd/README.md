@@ -14,13 +14,13 @@
 1. [`00-product-overview.md`](00-product-overview.md) — 定位、用户、非目标  
 2. [`01-domain-model.md`](01-domain-model.md) — 核心概念与状态对象  
 3. [`02-daily-workflow.md`](02-daily-workflow.md) — 日/周时间线与命令映射  
-4. [`03-features/`](03-features/) — 功能拆解（F01–F15，可独立开 PR）  
+4. [`03-features/`](03-features/) — 功能拆解（F01–F16，可独立开 PR）  
 5. [`04-nfr-constraints.md`](04-nfr-constraints.md) — 非功能与硬约束  
 6. [`05-roadmap-backlog.md`](05-roadmap-backlog.md) — 迭代 backlog（链到胜率/低吸路线图）  
 
 ---
 
-## 功能索引（F01–F15）
+## 功能索引（F01–F16）
 
 | 编号 | 文档 | 一层摘要 | 主命令 / 入口 |
 |---|---|---|---|
@@ -39,6 +39,7 @@
 | F13 | [配置向导](03-features/F13-config-onboarding.md) | 410 参数 + setup | `setup` / `config` |
 | F14 | [行情数据源](03-features/F14-data-providers.md) | 五源降级链与缓存 | `market.*` 配置 |
 | F15 | [质量自测](03-features/F15-quality-selftest.md) | selftest / CI / 零依赖 | `selftest` |
+| F16 | [观察池盘中提醒](03-features/F16-watch-alert-notify.md) | 观察池每分钟扫描 + SMTP 邮件 | `watch-alert` |
 
 **迭代约定**：改某能力时，PR / CHANGELOG 注明功能号（如「改 F03」），并同步对应 PRD 的「已知缺口」与验收标准。
 

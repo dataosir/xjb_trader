@@ -23,6 +23,7 @@
 | `data/daily_state.json` | 单日门禁计数（开仓/评估/复筛） | `screening/gates.py` | F02 |
 | `data/capital_state.json` | 资金与持仓 | `portfolio/portfolio.py` | F09 |
 | `data/watch_pool.json` | 观察池 | `portfolio/watch_pool.py` | F10 |
+| `data/watch_alert_state.json` | 观察提醒去重（按日/code/条件） | `portfolio/watch_pool.py` + `core/notify.py` | F16 |
 | `data/trades.json` | 交易流水 | `portfolio/trades.py` | F09/F12 |
 | `data/seed_records.jsonl` | 种子样本 + T+n 回填 | `analysis/followthrough.py` | F11 |
 | `data/seed_trace.jsonl` | 落选追溯（结构化） | `reporting/seed_trace.py` | F12 |

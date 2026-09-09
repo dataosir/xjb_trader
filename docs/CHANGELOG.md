@@ -4,6 +4,35 @@
 
 ## [Unreleased]
 
+### 功能（2026-09-09：F16 观察池盘中邮件提醒）
+
+> 关联：F10 观察池 / F11 launchd 方案 A；默认 SMTP **163 邮箱**（`smtp.163.com:465`）。
+
+- **新增** `tea watch-alert`：交易日盘中（09:30–15:00）扫描观察池 `active` 项；默认 `pullback_ready`，可选 `preflight_pass`；满足条件发 SMTP 邮件，**不自动下单**。  
+- **模块**：`tea/core/notify.py`（标准库 smtplib）、`watch_pool.scan_alerts`、去重 `data/watch_alert_state.json`、`runner.watch_alert`。  
+- **调度**：`ops/watch-alert-cron.sh` + `install-launchd-watch-alert.sh`（`StartInterval=60`）。  
+- **自测**：mock SMTP + 去重 + 发信失败不 advance state。  
+- **文档**：F16 PRD、`ops/06`、tech 02/03 已对齐。
+
+### 文档（2026-09-04：影子桶策略 Plan — 方案 0 已确认）
+
+- **决策**：用户确认 **方案 0**（维持现状 2 周，不改闸门、不改代码）；~2026-09-18 复盘后再议方案 A。  
+- **同步**：`SHADOW_BUCKET_PLAN_2026-09-04.md`、`project-state`、`05-roadmap-backlog`。
+
+### 文档（2026-09-04：影子桶策略 Plan）
+
+> 关联：B-P1-05 / B-P1-06；依据 `FACTOR_ATTRIB_2026-09-04.md`。
+
+- **新增** `archive/SHADOW_BUCKET_PLAN_2026-09-04.md`：板块门槛维持 08-24 收紧；影子桶 T+3 69% 达标后的五方案（推荐 0→A 分步）；明确禁止影子轨写计划。  
+- **INDEX / archive README / project-state** 同步。
+
+### 文档（2026-09-04：阶段 2 归因草稿）
+
+> 关联：B-P1-04 / B-P1-06；`data/seed_records.jsonl` 全量统计。
+
+- **新增** `archive/FACTOR_ATTRIB_2026-09-04.md`：板块排名（rank≤3 T+1 36%/T+3 61%）、影子桶（T+3 69% 达标）、轨道/阶段粗归因；技术因子与布林线 **n 不足留空待补**。  
+- **INDEX / archive README / project-state** 同步。
+
 ### 数据（2026-09-03：布林线观测因子落盘）
 
 > 关联：F11 / `indicators`；只算不落闸，不参与共振分与 VETO。

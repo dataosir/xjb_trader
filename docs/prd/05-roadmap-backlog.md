@@ -32,9 +32,10 @@
 | B-P1-02 | 补跟涨字段：`amount_yi`/`cap_yi`/`rank_pct`/`odds`/`veto_labels` 等 | F11 | 待做 | ROADMAP §5.3 |
 | B-P1-03 | shadow_pool 板块次日涨跌回填 | F10/F11 | 待做 | 验证板块动量持续性 |
 | B-P1-04 | 逐因子归因（乖离/涨幅窗/身份/分时/各共振维） | F04/F11 | 等样本≥30/组 | ROADMAP 阶段2 |
-| B-P1-05 | 将归因结论反馈为闸门微调（非拍脑袋） | F03 | 待阶段2 | 须 param_change 留痕 |
-| B-P1-06 | `shadow_tag`（萌芽∪前三非突破）T+3>0 对照 | F11 | **已落地看板** | 目标 ≥60%；≥`shadow_min_samples` 再议策略 |
+| B-P1-05 | 将归因结论反馈为闸门微调（非拍脑袋） | F03 | **方案 0 执行中** | 用户确认维持 2 周；~09-18 复盘后再议方案 A；须 param_change |
+| B-P1-06 | `shadow_tag`（萌芽∪前三非突破）T+3>0 对照 | F11 | **对照达标 + 方案 0 已确认** | T+3 69%；维持现状攒样本至 ~09-18 |
 | B-P1-07 | 样本缺口看板（待 T+1/T+3、低吸、新闸门可买） | F11 | **已落地** | `format_sample_gap`；运营日看 |
+| B-P1-08 | 观察池盘中邮件提醒（launchd 每分钟） | F16/F10 | **Plan 已写，待实现** | [`F16-watch-alert-notify`](03-features/F16-watch-alert-notify.md) |
 
 ## P2 · 样本门槛未达 · HOLD
 

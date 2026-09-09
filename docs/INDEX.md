@@ -41,6 +41,7 @@
 | [`prd/03-features/F13-config-onboarding.md`](prd/03-features/F13-config-onboarding.md) | 配置与向导 | F13 |
 | [`prd/03-features/F14-data-providers.md`](prd/03-features/F14-data-providers.md) | 行情源降级链 | F14 |
 | [`prd/03-features/F15-quality-selftest.md`](prd/03-features/F15-quality-selftest.md) | 自测 / CI | F15 |
+| [`prd/03-features/F16-watch-alert-notify.md`](prd/03-features/F16-watch-alert-notify.md) | 观察池盘中邮件提醒 | F16 |
 | [`prd/04-nfr-constraints.md`](prd/04-nfr-constraints.md) | 非功能硬约束 | NFR |
 | [`prd/05-roadmap-backlog.md`](prd/05-roadmap-backlog.md) | 现行迭代 backlog | backlog |
 
@@ -69,6 +70,7 @@
 | [`ops/02-user-feedback.md`](ops/02-user-feedback.md) | 反馈 / Bug 收集规则 |
 | [`ops/03-operator-daily-sop.md`](ops/03-operator-daily-sop.md) | 交易运营日 SOP（MIT / 晨晚间 checklist；命令见 prd/02） |
 | [`ops/05-seed-plan-scheduler.md`](ops/05-seed-plan-scheduler.md) | 种子扫描外部调度（launchd 方案 A：安装 / 日志 / 漏扫补救） |
+| [`ops/06-watch-alert-scheduler.md`](ops/06-watch-alert-scheduler.md) | 观察池盘中提醒 launchd（每分钟 `watch-alert` + SMTP） |
 
 ---
 
@@ -82,5 +84,7 @@
 | [`archive/LOWBUY_PLAN_2026-08-25.md`](archive/LOWBUY_PLAN_2026-08-25.md) | 低吸三阶段 |
 | [`archive/STRATEGY_ADJUSTMENT_2026-08-18.md`](archive/STRATEGY_ADJUSTMENT_2026-08-18.md) | 早期策略死锁修复 |
 | [`archive/CODE_REVIEW_2026-08-18.md`](archive/CODE_REVIEW_2026-08-18.md) | 代码评审纪要 |
+| [`archive/FACTOR_ATTRIB_2026-09-04.md`](archive/FACTOR_ATTRIB_2026-09-04.md) | 阶段 2 归因草稿（板块/影子桶/轨道；技术因子待补） |
+| [`archive/SHADOW_BUCKET_PLAN_2026-09-04.md`](archive/SHADOW_BUCKET_PLAN_2026-09-04.md) | 影子桶策略 Plan（**方案 0 已确认**：维持 2 周攒样本） |
 
 现行 backlog 以 [`prd/05-roadmap-backlog.md`](prd/05-roadmap-backlog.md) 为准；归档不写新主文档。

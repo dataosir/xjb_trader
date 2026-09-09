@@ -64,6 +64,7 @@ DEFAULTS: Dict[str, Any] = {
         "breadth_cache_file": ".tea_breadth_cache.json",
         "ztpool_cache_file": ".tea_ztpool_cache.json",
         "shadow_pool_file": "shadow_pool.json",
+        "watch_alert_state_file": "watch_alert_state.json",
     },
     # ---------------------------------------------------------- 行情/防封
     "market": {
@@ -641,6 +642,28 @@ DEFAULTS: Dict[str, Any] = {
         "p0_gate_date": "2026-08-26",       # 突破+过热禁买后的可买样本起算日
         "t3_up_target": 0.60,               # 验收门槛：影子桶 T+3>0 目标胜率（不承诺收益）
         "shadow_min_samples": 15,           # 影子桶对照最少回填条数才谈「够不够」
+    },
+    # ---------------------------------------------------------- 观察池盘中提醒（F16）
+    "alert": {
+        "enabled": False,
+        "condition": "pullback_ready",
+        "include_eve": True,
+        "require_no_hard_veto": True,
+        "dedupe_per_day": True,
+    },
+    "notify": {
+        "email": {
+            "enabled": False,
+            # 163 邮箱默认 SMTP（授权码存 smtp_password，勿提交仓库）
+            "smtp_host": "smtp.163.com",
+            "smtp_port": 465,
+            "smtp_use_tls": True,
+            "smtp_user": "",
+            "smtp_password": "",
+            "from_addr": "",
+            "to_addrs": [],
+            "subject_prefix": "[TEA观察]",
+        },
     },
     # ---------------------------------------------------------- 观察池
     "watch": {

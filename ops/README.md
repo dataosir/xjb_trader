@@ -33,3 +33,19 @@ tail -20 logs/seed-cron.log
 - **只触发 `seed-plan`**：不自动 `plan-check` / `run` / 下单。
 - **机器须 14:30 在线**：合盖休眠会漏扫；见 ops 文档 §漏扫补救。
 - **周末脚本内跳过**；法定假日仍可能触发（exit 0），与 F11「不做进程内 cron」不冲突。
+
+## 观察池盘中提醒（F16）
+
+| 文件 | 用途 |
+|---|---|
+| [`watch-alert-cron.sh`](watch-alert-cron.sh) | wrapper：`python -m tea watch-alert` → `logs/watch-alert-cron.log` |
+| [`com.tea.watch-alert.plist.template`](com.tea.watch-alert.plist.template) | launchd 模板（`StartInterval=60`） |
+| [`install-launchd-watch-alert.sh`](install-launchd-watch-alert.sh) | 安装 `com.tea.watch-alert` |
+| [`uninstall-launchd-watch-alert.sh`](uninstall-launchd-watch-alert.sh) | 卸载 |
+
+SOP 见 [`docs/ops/06-watch-alert-scheduler.md`](../docs/ops/06-watch-alert-scheduler.md)。默认 SMTP 为 **163 邮箱**（`smtp.163.com:465`）。
+
+```bash
+chmod +x ops/*.sh
+./ops/install-launchd-watch-alert.sh
+```
