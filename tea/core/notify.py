@@ -63,6 +63,15 @@ def send_email(cfg: Optional[Config] = None, subject: str = "", body: str = "",
     return {"ok": True}
 
 
+def _ssl_context() -> ssl.SSLContext:
+    """macOS 自带 Python 常缺 CA 链；若已装 certifi 则优先用其 CA bundle。"""
+    try:
+        import certifi
+        return ssl.create_default_context(cafile=certifi.where())
+    except ImportError:
+        return ssl.create_default_context()
+
+
 def _smtp_send(host: str, port: int, use_tls: bool, user: str, password: str,
                from_addr: str, to_addrs: List[str], subject: str, body: str) -> None:
     msg = EmailMessage()
@@ -72,7 +81,7 @@ def _smtp_send(host: str, port: int, use_tls: bool, user: str, password: str,
     msg.set_content(body)
 
     if use_tls and port == 465:
-        ctx = ssl.create_default_context()
+        ctx = _ssl_context()
         with smtplib.SMTP_SSL(host, port, context=ctx, timeout=30) as smtp:
             smtp.login(user, password)
             smtp.send_message(msg)
@@ -80,8 +89,7 @@ def _smtp_send(host: str, port: int, use_tls: bool, user: str, password: str,
 
     with smtplib.SMTP(host, port, timeout=30) as smtp:
         if use_tls:
-            ctx = ssl.create_default_context()
-            smtp.starttls(context=ctx)
+            smtp.starttls(context=_ssl_context())
         smtp.login(user, password)
         smtp.send_message(msg)
 
