@@ -8,6 +8,7 @@
 """
 from __future__ import annotations
 
+import getpass
 from typing import Any, Dict, List, Optional
 
 from tea.core import utils
@@ -75,6 +76,22 @@ class IO:
                 continue
             return v
         return default
+
+    def ask_secret(self, prompt: str, key: Optional[str] = None,
+                   default: Optional[str] = None) -> Optional[str]:
+        """敏感输入（授权码等）：交互时用 getpass 不回显；非交互走 answers。"""
+        pre = self._preset(key)
+        if pre is not None:
+            self.say(f"{prompt} ****")
+            return str(pre)
+        if not self.interactive:
+            return default
+        try:
+            raw = getpass.getpass(f"{prompt}：")
+        except (EOFError, KeyboardInterrupt):
+            self.say("")
+            return None
+        return raw or default
 
     def ask_yes(self, prompt: str, key: Optional[str] = None, default: bool = False) -> bool:
         raw = self.ask(f"{prompt} [y/N]", key, "y" if default else "n")

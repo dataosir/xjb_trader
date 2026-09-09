@@ -81,7 +81,8 @@
 - `watch_pool.scan_alerts(cfg, market)` → `[{code, name, track, condition, detail, ev}]`  
 - `notify.send_email(cfg, subject, body)` → `bool`；密码不进日志  
 - `runner.watch_alert()`：Timing 守卫 → scan → dedupe(`watch_alert_state.json`) → send  
-- CLI：`tea watch-alert`（单次）；调度见 `ops/06-watch-alert-scheduler.md`
+- CLI：`tea watch-alert`（单次）；`tea setup-email`（163 邮箱引导 + 测试邮件）；`tea setup-email --test`（仅测 SMTP）  
+- 调度见 `ops/06-watch-alert-scheduler.md`
 
 ---
 

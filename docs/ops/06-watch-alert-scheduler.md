@@ -18,21 +18,34 @@
 
 ## 2. 前置：配置邮箱
 
-编辑 `$TEA_HOME/tea_config.json`（或 `config set`）：
+### 推荐：引导配置（163）
+
+```bash
+tea setup-email
+```
+
+向导会说明 163 授权码获取步骤，依次填写发件邮箱、授权码、收件人，并可发送测试邮件验证。
+
+仅测试当前配置（不发向导）：
+
+```bash
+tea setup-email --test
+```
+
+菜单路径：**配置与维护 → 邮件提醒邮箱配置**。
+
+### 手动：config set
 
 ```bash
 tea config set alert.enabled true
 tea config set notify.email.enabled true
-# 163 邮箱（默认 host/port 已是 smtp.163.com:465，可省略前两行）
-tea config set notify.email.smtp_host smtp.163.com
-tea config set notify.email.smtp_port 465
 tea config set notify.email.smtp_user yourname@163.com
 tea config set notify.email.smtp_password '你的163授权码'
 tea config set notify.email.from_addr yourname@163.com
 tea config set notify.email.to_addrs '["yourname@163.com"]'
 ```
 
-> 163 需在网页邮箱设置里开启 SMTP 并生成**授权码**（不是登录密码）。
+> 163 需在网页邮箱设置里开启 SMTP 并生成**授权码**（不是登录密码）。默认 `smtp_host`/`smtp_port` 已是 `smtp.163.com:465`。
 
 可选：
 

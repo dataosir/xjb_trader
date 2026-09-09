@@ -10,7 +10,7 @@
 
 - 14:30 `seed-plan` 后观察池新增 2 只，用户不想全天盯菜单 `7`。  
 - 安装 launchd 任务后，盘中每分钟自动 `tea watch-alert`；某只回踩就绪 → 邮件提醒「600xxx 回踩就绪，请 eval/run」。  
-- 用户在 `config set notify.email.enabled true` 并填 SMTP 后启用；未配置则扫描静默跳过发信。  
+- 用户运行 `tea setup-email` 引导配置 163 发件/收件邮箱与授权码；或手动 `config set`。未配置则扫描静默跳过发信。  
 - 同一标的同一交易日只提醒一次（防刷屏）；次日可再次提醒。
 
 ## 3. 功能范围
@@ -23,6 +23,7 @@
   - **`pullback_ready`**（默认）：`watch_pool.pullback_ready()` 三项全满足（回撤 ≥ 配置%、分时 ≤ 配置%、入池天数 ≤ 保留天数），且当日预审**无硬否决**、身份未降级杂毛  
   - **`preflight_pass`**：实时 `preflight.evaluate` 裁决 `PASS`（9 分共振 + 无硬否决 + R:R 达标 + 非杂毛 reject）  
 - 邮件通知：SMTP（标准库 `smtplib`），收件人/发件人/SMTP 均在配置  
+- 邮箱引导：`tea setup-email`（163 授权码步骤说明 + 测试邮件）；`tea setup-email --test` 仅测连通  
 - 去重状态：`data/watch_alert_state.json`（按 `(date, code, condition)` 记录已发）  
 - 时段守卫：非交易日 / 非盘中（`timing.session_*`）→ 退出 0，不发信、不打行情（或仅打日志一行 skip）  
 - 结构化日志：`logs/tea.log` 记 `tea.alert` 扫描摘要  
@@ -90,7 +91,8 @@ notify.send_email → 更新 state → 写 tea.log
 | `tea/portfolio/watch_pool.py` | `scan_alerts()`：逐只评估 + 返回待提醒列表 |
 | `tea/core/notify.py` | `send_email(cfg, subject, body)`：SMTP 发送 |
 | `tea/runtime/runner.py` | `watch_alert()`：编排扫描 / 去重 / 发信 |
-| `tea/runtime/cli.py` | `watch-alert` 子命令 |
+| `tea/runtime/cli.py` | `watch-alert` / `setup-email` 子命令 |
+| `tea/config/email_setup.py` | 邮箱配置向导 |
 | `tea/config/config_store.py` | `alert.*` / `notify.email.*` DEFAULTS |
 | `ops/watch-alert-cron.sh` | launchd wrapper |
 | `ops/com.tea.watch-alert.plist.template` | 每分钟 StartInterval=60 |

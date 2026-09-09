@@ -17,7 +17,7 @@ from typing import Any, Dict, List, Optional
 
 from .analysis import (expectancy as exp_mod, followthrough as ft_mod,
                        identity as ident_mod, sentiment as sent_mod)
-from .config import config_store
+from .config import config_store, email_setup
 from .config.config_store import Config
 from .core import paths, utils
 from .data import Market, MarketError, indicators
@@ -2417,8 +2417,9 @@ def check_menu(t: Suite, cfg: Config) -> None:
     expect = {"weather", "status", "seed-plan", "winrate-scan", "plan-check", "__plan__",
               "run", "pos", "__close__", "watch", "review", "accum", "trace",
               "followthrough", "trades", "stats", "weekly", "__pos_add__", "__pos_rm__",
-              "__confirm__", "__eval__", "config", "setup", "selftest", "plan-clear"}
-    t.eq("25 项功能一个不少", sorted(set(all_argv)), sorted(expect))
+              "__confirm__", "__eval__", "config", "setup", "setup-email", "selftest",
+              "plan-clear"}
+    t.eq("26 项功能一个不少", sorted(set(all_argv)), sorted(expect))
 
     # 时段→建议：每个时段都得有东西可做，且不超过四条（否则就又回到平铺）。
     real_now = utils.now
@@ -3112,6 +3113,54 @@ def check_watch_alert(t: Suite, c: Config) -> None:
         notify_mod.set_test_sender(None)
 
 
+# ==================================================================== F16 邮箱配置向导
+
+def check_email_setup(t: Suite, home: str) -> None:
+    """邮箱引导：写入配置 + 测试邮件 mock。"""
+    from .phases import IO
+
+    t.head("观察池 · 邮箱配置向导")
+
+    cfg_path = os.path.join(home, "email_wizard.json")
+    cfg = Config({"paths": {"data_dir": "email_wizard_data"}}, path=cfg_path)
+
+    sent_box: List[dict] = []
+
+    def _fake_sender(**kw) -> None:
+        sent_box.append(kw)
+
+    io = IO(answers={
+        "smtp_user": "sender@163.com",
+        "smtp_password": "authcode123",
+        "to_same_as_from": True,
+        "email_confirm": "y",
+        "send_test": True,
+    }, interactive=False, quiet=True)
+
+    res = email_setup.run_wizard(cfg=cfg, io=io, sender=_fake_sender)
+    t.eq("向导落盘", (res.get("mode"), res.get("saved")), ("saved", True))
+    t.ok("测试邮件已发", res.get("test_ok") is True and sent_box)
+    t.ok("email_configured", notify_mod.email_configured(cfg))
+    t.eq("发件人写入", cfg.get("notify.email.smtp_user"), "sender@163.com")
+    t.eq("收件人写入", cfg.get("notify.email.to_addrs"), ["sender@163.com"])
+    t.ok("alert 已开启", cfg.get("alert.enabled") is True)
+
+    sent_box.clear()
+    test_res = email_setup.run_wizard(cfg=cfg, io=IO(interactive=False, quiet=True),
+                                        test_only=True, sender=_fake_sender)
+    t.ok("test_only 成功", test_res.get("test_ok") is True)
+    t.ok("test_only 发了一封", len(sent_box) == 1)
+
+    cfg2 = Config({"paths": {"data_dir": "email_wizard_data2"}},
+                  path=os.path.join(home, "email_wizard2.json"))
+    abort = email_setup.run_wizard(cfg=cfg2, io=IO(
+        answers={"smtp_user": "a@163.com", "smtp_password": "x",
+                 "to_same_as_from": True, "email_confirm": "n"},
+        interactive=False, quiet=True))
+    t.eq("取消不写盘", (abort.get("mode"), abort.get("saved")), ("abort", False))
+    t.ok("取消后未配置", not notify_mod.email_configured(cfg2))
+
+
 # ==================================================================== 路径 / 打包
 
 def check_paths(t: Suite) -> None:
@@ -3313,6 +3362,7 @@ def main(verbose: bool = True, cfg: Optional[Config] = None) -> int:
         check_followthrough(t, c)
         check_pricetrack(t, c, mk)
         check_watch_alert(t, c)
+        check_email_setup(t, tmp)
         return t.report()
     finally:
         sent_mod.clear_cache()
