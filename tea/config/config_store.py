@@ -678,9 +678,30 @@ DEFAULTS: Dict[str, Any] = {
             "group": "TEA观察",
         },
     },
+    # ---------------------------------------------------------- launchd 外部调度（单一真相源，见 tea/config/schedules.py）
+    "scheduler": {
+        "seed_plan": {
+            "hour": 14,
+            "minute": 30,
+            "weekdays": [1, 2, 3, 4, 5],
+        },
+        "review": {
+            "hour": 15,
+            "minute": 1,
+            "weekdays": [1, 2, 3, 4, 5],
+        },
+        "watch_alert": {
+            "interval_sec": 60,
+        },
+        "weekly_email": {
+            "hour": 17,
+            "minute": 0,
+            "weekday": 5,
+        },
+    },
     # ---------------------------------------------------------- 盘后复核调度（F11 扩展）
     "review": {
-        "scheduled_enabled": True,           # launchd 工作日 15:35 自动全量 review
+        "scheduled_enabled": True,           # launchd 工作日自动全量 review（时刻见 scheduler.review）
     },
     # ---------------------------------------------------------- 每周选股周报邮件（F17）
     "weekly_email": {

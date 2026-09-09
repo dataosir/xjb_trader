@@ -4,13 +4,20 @@
 
 ## [Unreleased]
 
+### 工程（2026-09-09：launchd 调度统一配置 + review 15:01）
+
+- **统一调度**：新增 `tea/config/schedules.py` + `scheduler.*` 配置段；`tea launchd list` / `render-plist` 生成 plist。  
+- **review 时刻**：工作日自动 review 默认 **15:35 → 15:01**（收盘后尽快补 T+3）。  
+- **安装脚本**：`ops/_launchd-common.sh`；四个 `install-launchd-*.sh` 均从 `scheduler.*` 渲染 plist。  
+- **自测**：schedules 渲染 + review 默认时刻断言。
+
 ### 策略（2026-09-09：方案 A rank 5→3 + 方案 E 周报 T+3 + 自动 review）
 
 > 关联：[`archive/SHADOW_BUCKET_PLAN_2026-09-04.md`](archive/SHADOW_BUCKET_PLAN_2026-09-04.md) 方案 A/E；用户确认提前启动（原 ~09-18 复盘）。
 
 - **方案 A**：`strategy.seed_min_sector_rank` / `winrate_sector_rank_buyable_max` / `seed.sector_relax_rank_nozt` 默认 **5→3**（只做前三板块）。  
 - **方案 E**：周报新增「三日持有 T+3>0」段（萌芽专看 + rank/涨幅/影子桶）；`close_review` 打印 T+3 归因。  
-- **自动 review**：`tea review --scheduled` + launchd 工作日 **15:35**（`ops/08`）；F17 发周报前 `force` 再跑一遍。  
+- **自动 review**：`tea review --scheduled` + launchd 工作日 **15:01**（`ops/08`）；F17 发周报前 `force` 再跑一遍。  
 - **配置**：`review.scheduled_enabled`、`weekly_email.run_review_before`。  
 - **自测**：T+3 归因 + scheduled 守卫 + 周报正文含 T+3。
 

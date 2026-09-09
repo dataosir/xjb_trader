@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # 工作日盘后外部调度入口：调用 tea review --scheduled（F11 自动复核）。
 #
-# 供 macOS launchd（周一至五 15:35）或手动试跑。
+# 供 macOS launchd（周一至五，时刻见 scheduler.review，默认 15:01）或手动试跑。
 #
 # 用法：
 #   ./ops/review-cron.sh

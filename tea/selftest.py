@@ -3260,6 +3260,16 @@ def check_t3_attribution_and_scheduled_review(t: Suite, c: Config) -> None:
     t.eq("方案 A seed_min_sector_rank", c.get("strategy.seed_min_sector_rank"), 3)
     t.eq("方案 A sector_relax_rank_nozt", c.get("seed.sector_relax_rank_nozt"), 3)
     t.ok("review.scheduled_enabled 默认开", c.get("review.scheduled_enabled") is True)
+    from tea.config import schedules as sched_mod
+    t.eq("scheduler.review 默认 15:01",
+         sched_mod.format_hm(c.get("scheduler.review.hour"), c.get("scheduler.review.minute")), "15:01")
+    t.ok("seed_scan 与 scheduler.seed_plan 一致", sched_mod.seed_scan_should_match(c))
+    plist = sched_mod.render_plist("review", c.data_dir(), python_exe="python3", cfg=c)
+    t.ok("review plist 含 15:01",
+         "<key>Hour</key><integer>15</integer>" in plist
+         and "<key>Minute</key><integer>1</integer>" in plist
+         and "com.tea.review" in plist)
+    t.ok("launchd list 含 review", "review:" in sched_mod.trigger_summary(c))
 
     ft_mod.save_records([
         {"date": "2026-08-01", "code": "600001", "stage": "萌芽", "sector_rank": 2,

@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# 安装 macOS launchd 定时任务：每周五 17:00 跑 tea weekly-email
+# 安装 macOS launchd 定时任务：周五跑 tea weekly-email
+# 触发时刻见 scheduler.weekly_email（默认周五 17:00）
 #
 # 用法：
 #   ./ops/install-launchd-weekly-email.sh
@@ -18,42 +19,22 @@ TEA_HOME="${TEA_HOME:-$ROOT}"
 LABEL="com.tea.weekly-email"
 AGENT_DIR="${HOME}/Library/LaunchAgents"
 PLIST_DST="${AGENT_DIR}/${LABEL}.plist"
-TEMPLATE="${ROOT}/ops/com.tea.weekly-email.plist.template"
 
-if [ ! -f "$TEMPLATE" ]; then
-    echo "找不到模板：$TEMPLATE" >&2
-    exit 1
-fi
+# shellcheck source=_launchd-common.sh
+source "${ROOT}/ops/_launchd-common.sh"
 
 chmod +x "${ROOT}/ops/weekly-email-cron.sh"
 mkdir -p "$AGENT_DIR" "${TEA_HOME}/logs"
 
-PY="${TEA_PYTHON:-}"
-if [ -z "$PY" ]; then
-    for cand in python3 python; do
-        if command -v "$cand" >/dev/null 2>&1; then PY="$cand"; break; fi
-    done
-fi
-if [ -z "$PY" ]; then
-    echo "找不到 python3，请设置 TEA_PYTHON" >&2
-    exit 1
-fi
-
-if launchctl list 2>/dev/null | grep -q "$LABEL"; then
-    launchctl bootout "gui/$(id -u)/${LABEL}" 2>/dev/null \
-        || launchctl unload "$PLIST_DST" 2>/dev/null \
-        || true
-fi
-
-sed -e "s|__TEA_HOME__|${TEA_HOME}|g" -e "s|__TEA_PYTHON__|${PY}|g" "$TEMPLATE" >"$PLIST_DST"
-
-launchctl bootstrap "gui/$(id -u)" "$PLIST_DST" 2>/dev/null \
-    || launchctl load "$PLIST_DST"
+launchd_find_python
+launchd_bootout_if_loaded "$LABEL" "$PLIST_DST"
+launchd_render_plist weekly_email "$PLIST_DST"
+launchd_bootstrap "$LABEL" "$PLIST_DST"
 
 echo "已安装 launchd：$PLIST_DST"
 echo "  TEA_HOME=$TEA_HOME"
 echo "  Python=$PY"
-echo "  触发：每周五 17:00（命令内守卫：交易日 + weekly_email.enabled + 邮箱已配）"
+echo "  触发：$("$PY" -c "from tea.config.schedules import trigger_summary; print(trigger_summary(None, 'weekly_email'))")"
 echo "  日志：${TEA_HOME}/logs/tea.log（tea.weekly_email） / weekly-email-cron.log（手动 wrapper）"
 echo "  验证：launchctl list | grep ${LABEL}"
 echo "  配置：tea config set weekly_email.enabled true  （SMTP 见 tea setup-email）"

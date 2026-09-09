@@ -27,7 +27,7 @@ from typing import List, Optional
 from tea import __version__
 from tea.analysis import followthrough as ft_mod, pricetrack
 from tea.analysis.sentiment import clear_cache, format_weather
-from tea.config import config_store, email_setup, notify_setup, onboarding
+from tea.config import config_store, email_setup, notify_setup, onboarding, schedules
 from tea.config.config_store import Config, load_config
 from tea.core import logger as logger_mod, utils
 from tea.core.timing import Timing
@@ -425,6 +425,38 @@ def cmd_setup_notify(args, cfg: Config) -> int:
     if args.test:
         return 0 if res.get("test_ok") else 1
     return 0 if res.get("saved") else 1
+
+
+def cmd_launchd(args, cfg: Config) -> int:
+    """launchd plist 生成与调度一览（时刻见 scheduler.* 配置）。"""
+    io = _io()
+    if args.action == "list":
+        for jid in sorted(schedules.JOBS):
+            job = schedules.get_job(jid)
+            io.say(f"{job.label}")
+            io.say(f"  触发：{schedules.trigger_summary(cfg, jid)}")
+            io.say(f"  配置：{job.config_prefix}.*")
+        return 0
+    if args.action == "render-plist":
+        if not args.job:
+            io.err("请指定任务名，例如：tea launchd render-plist review")
+            return 2
+        tea_home = args.tea_home or config_store.home_dir()
+        py = args.python or "python3"
+        try:
+            xml = schedules.render_plist(args.job, tea_home, python_exe=py, cfg=cfg)
+        except KeyError as exc:
+            io.err(str(exc))
+            return 2
+        if args.output:
+            with open(args.output, "w", encoding="utf-8") as fh:
+                fh.write(xml)
+            io.say(f"已写入：{args.output}")
+        else:
+            print(xml, end="")
+        return 0
+    io.err(f"未知子命令：{args.action}")
+    return 2
 
 
 def cmd_selftest(args, cfg: Config) -> int:
@@ -949,6 +981,18 @@ def build_parser() -> argparse.ArgumentParser:
     sn = sub.add_parser("setup-notify", help="观察池提醒通道（macOS 弹窗 + Bark Push）")
     sn.add_argument("--test", action="store_true", help="仅测试当前通知通道，不发向导")
     sn.set_defaults(func=cmd_setup_notify)
+
+    ld = sub.add_parser("launchd", help="launchd 调度一览 / 生成 plist（时刻见 scheduler.*）")
+    ld_sub = ld.add_subparsers(dest="action")
+    ld_list = ld_sub.add_parser("list", help="列出所有 launchd 任务与触发时刻")
+    ld_list.set_defaults(func=cmd_launchd)
+    ld_render = ld_sub.add_parser("render-plist", help="按 scheduler.* 生成 plist XML")
+    ld_render.add_argument("job", choices=list(schedules.JOBS.keys()),
+                           help="任务名（seed_plan / review / watch_alert / weekly_email）")
+    ld_render.add_argument("--tea-home", help="TEA_HOME（默认当前配置目录）")
+    ld_render.add_argument("--python", help="Python 解释器路径（默认 python3）")
+    ld_render.add_argument("-o", "--output", help="写入文件（默认 stdout）")
+    ld_render.set_defaults(func=cmd_launchd)
 
     mn = sub.add_parser("menu", help="进入数字菜单")
     mn.set_defaults(func=None)

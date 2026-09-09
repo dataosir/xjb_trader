@@ -55,7 +55,8 @@ chmod +x ops/*.sh
 | 文件 | 用途 |
 |---|---|
 | [`review-cron.sh`](review-cron.sh) | wrapper：`python -m tea review --scheduled` |
-| [`com.tea.review.plist.template`](com.tea.review.plist.template) | launchd 模板（工作日 15:35） |
+| [`_launchd-common.sh`](_launchd-common.sh) | launchd 安装公共函数（`tea launchd render-plist`） |
+| [`com.tea.review.plist.template`](com.tea.review.plist.template) | 参考模板（安装脚本以 `scheduler.*` 动态生成为准） |
 | [`install-launchd-review.sh`](install-launchd-review.sh) | 安装 `com.tea.review` |
 | [`uninstall-launchd-review.sh`](uninstall-launchd-review.sh) | 卸载 |
 

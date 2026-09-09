@@ -223,7 +223,7 @@ def render_md(wk: Optional[dict] = None, cfg: Optional[Config] = None) -> str:
     t3 = wk.get("t3_attribution") or {}
     lines += ["## 三日持有 T+3>0（方案 E，只读对照）", ""]
     if not t3.get("total_n"):
-        lines.append("尚无 T+3 回填样本；工作日 15:35 自动 review 或菜单 `8` 手动复核。")
+        lines.append("尚无 T+3 回填样本；工作日盘后自动 review（scheduler.review，默认 15:01）或菜单 `8` 手动复核。")
     else:
         tr = t3.get("total_rate") or 0.0
         lines.append(f"- **全样本**：{t3.get('total_up', 0)}/{t3['total_n']} = **{tr:.0%}**")

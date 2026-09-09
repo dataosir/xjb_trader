@@ -1,4 +1,5 @@
 <?xml version="1.0" encoding="UTF-8"?>
+<!-- 参考模板；安装请用 ./ops/install-launchd-review.sh（从 scheduler.review 动态生成） -->
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
@@ -22,27 +23,27 @@
         <dict>
             <key>Weekday</key><integer>1</integer>
             <key>Hour</key><integer>15</integer>
-            <key>Minute</key><integer>35</integer>
+            <key>Minute</key><integer>1</integer>
         </dict>
         <dict>
             <key>Weekday</key><integer>2</integer>
             <key>Hour</key><integer>15</integer>
-            <key>Minute</key><integer>35</integer>
+            <key>Minute</key><integer>1</integer>
         </dict>
         <dict>
             <key>Weekday</key><integer>3</integer>
             <key>Hour</key><integer>15</integer>
-            <key>Minute</key><integer>35</integer>
+            <key>Minute</key><integer>1</integer>
         </dict>
         <dict>
             <key>Weekday</key><integer>4</integer>
             <key>Hour</key><integer>15</integer>
-            <key>Minute</key><integer>35</integer>
+            <key>Minute</key><integer>1</integer>
         </dict>
         <dict>
             <key>Weekday</key><integer>5</integer>
             <key>Hour</key><integer>15</integer>
-            <key>Minute</key><integer>35</integer>
+            <key>Minute</key><integer>1</integer>
         </dict>
     </array>
     <key>StandardOutPath</key>

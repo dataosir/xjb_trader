@@ -4,7 +4,7 @@
 
 ## 1. 做什么
 
-工作日 **15:35** 自动跑 `tea review --scheduled`：
+工作日 **15:01**（可配置 `scheduler.review.*`）自动跑 `tea review --scheduled`：
 
 1. 回填种子 `seed_records` 的 T+1/T+2/T+3/T+5
 2. 观察池复核 + 超时清理
@@ -18,7 +18,7 @@
 |---|---|---|
 | `seed-plan` 收尾 `maybe_auto_backfill` | 14:30 | 轻量 `update_results`（后台） |
 | 进菜单 `maybe_auto_backfill(menu)` | 盘后/隔夜，每天 1 次 | 轻量（后台） |
-| **本 launchd `review --scheduled`** | **15:35** | **全量 `close_review`** |
+| **本 launchd `review --scheduled`** | **15:01**（`scheduler.review`） | **全量 `close_review`** |
 | 菜单 **8 · 盘后复核** | 手动 | 全量（随时） |
 | F17 `weekly-email` | 周五 17:00 | 发信前 `force` 再跑一遍 review |
 
@@ -31,6 +31,15 @@ cd /path/to/tea
 chmod +x ops/*.sh
 ./ops/install-launchd-review.sh
 tea config set review.scheduled_enabled true
+```
+
+改触发时刻（改完须重装 launchd）：
+
+```bash
+tea config set scheduler.review.hour 15
+tea config set scheduler.review.minute 1
+./ops/install-launchd-review.sh
+tea launchd list    # 核对四个任务的 scheduler.* 时刻
 ```
 
 手动试跑（忽略时段/去重）：
