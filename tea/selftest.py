@@ -17,7 +17,7 @@ from typing import Any, Dict, List, Optional
 
 from .analysis import (expectancy as exp_mod, followthrough as ft_mod,
                        identity as ident_mod, sentiment as sent_mod)
-from .config import config_store, email_setup
+from .config import config_store, email_setup, notify_setup as notify_setup_mod
 from .config.config_store import Config
 from .core import paths, utils
 from .data import Market, MarketError, indicators
@@ -2418,9 +2418,9 @@ def check_menu(t: Suite, cfg: Config) -> None:
               "run", "pos", "__close__", "watch", "review", "accum", "trace",
               "followthrough", "trades", "stats", "weekly", "weekly-email",
               "__pos_add__", "__pos_rm__",
-              "__confirm__", "__eval__", "config", "setup", "setup-email", "selftest",
-              "plan-clear"}
-    t.eq("27 项功能一个不少", sorted(set(all_argv)), sorted(expect))
+              "__confirm__", "__eval__", "config", "setup", "setup-email", "setup-notify",
+              "selftest", "plan-clear"}
+    t.eq("28 项功能一个不少", sorted(set(all_argv)), sorted(expect))
 
     # 时段→建议：每个时段都得有东西可做，且不超过四条（否则就又回到平铺）。
     real_now = utils.now
@@ -3052,6 +3052,8 @@ def check_watch_alert(t: Suite, c: Config) -> None:
 
     c.set("alert.enabled", True)
     c.set("alert.condition", wp_mod.CONDITION_PULLBACK)
+    c.set("notify.macos.enabled", False)
+    c.set("notify.bark.enabled", False)
     c.set("notify.email.enabled", True)
     c.set("notify.email.smtp_host", "smtp.163.com")
     c.set("notify.email.smtp_user", "test@163.com")
@@ -3164,6 +3166,85 @@ def check_email_setup(t: Suite, home: str) -> None:
         interactive=False, quiet=True))
     t.eq("取消不写盘", (abort.get("mode"), abort.get("saved")), ("abort", False))
     t.ok("取消后未配置", not notify_mod.email_configured(cfg2))
+
+
+# ==================================================================== F18 多通道 Push
+
+def check_notify_push(t: Suite, c: Config) -> None:
+    """macOS / Bark / 多通道 send_alert。"""
+    t.head("观察池 · 多通道 Push")
+
+    macos_box: List[dict] = []
+    bark_box: List[dict] = []
+
+    def _macos(**kw) -> None:
+        macos_box.append(kw)
+
+    def _bark(**kw) -> None:
+        bark_box.append(kw)
+
+    notify_mod.set_test_macos(_macos)
+    notify_mod.set_test_bark(_bark)
+    try:
+        c.set("alert.enabled", True)
+        c.set("notify.email.enabled", False)
+        c.set("notify.macos.enabled", True)
+        c.set("notify.bark.enabled", True)
+        c.set("notify.bark.key", "testkey123")
+        c.save()
+
+        chs = notify_mod.active_channels(c)
+        t.ok("活跃通道含 macos+bark", "macos" in chs and "bark" in chs)
+
+        res = notify_mod.send_alert(c, subject="测", body="正文\n第二行")
+        t.ok("双通道至少一个成功", res.get("ok") is True)
+        t.ok("macos mock 收到", macos_box and macos_box[0].get("title") == "测")
+        t.ok("bark mock 收到", bark_box and bark_box[0].get("key") == "testkey123")
+
+        esc = notify_mod._escape_applescript('a"b\\c')
+        t.ok("AppleScript 转义", '\\' in esc and '"' in esc)
+
+        notify_mod.set_test_bark(lambda **kw: (_ for _ in ()).throw(RuntimeError("bark fail")))
+        macos_box.clear()
+        bark_box.clear()
+        partial = notify_mod.send_alert(c, subject="部分", body="x")
+        t.ok("单通道失败仍 ok", partial.get("ok") is True)
+        t.ok("macos 仍发出", macos_box)
+
+        notify_mod.set_test_macos(lambda **kw: (_ for _ in ()).throw(RuntimeError("mac fail")))
+        notify_mod.set_test_bark(lambda **kw: (_ for _ in ()).throw(RuntimeError("bark fail")))
+        all_fail = notify_mod.send_alert(c, subject="全灭", body="x")
+        t.ok("全通道失败", all_fail.get("ok") is False)
+    finally:
+        notify_mod.set_test_macos(None)
+        notify_mod.set_test_bark(None)
+
+
+def check_notify_setup(t: Suite, home: str) -> None:
+    """setup-notify 向导落盘。"""
+    from .phases import IO
+
+    t.head("观察池 · 通知通道向导")
+
+    cfg_path = os.path.join(home, "notify_wizard.json")
+    cfg = Config({"paths": {"data_dir": "notify_wizard_data"}}, path=cfg_path)
+    macos_box: List[dict] = []
+
+    notify_mod.set_test_macos(lambda **kw: macos_box.append(kw))
+    try:
+        io = IO(answers={
+            "macos_enable": "y",
+            "bark_enable": "y",
+            "bark_key": "mybarkkey",
+            "send_test": "y",
+        }, interactive=False, quiet=True)
+        res = notify_setup_mod.run_wizard(cfg=cfg, io=io)
+        t.ok("向导落盘", res.get("saved") is True)
+        t.ok("Bark key 写入", cfg.get("notify.bark.key") == "mybarkkey")
+        t.ok("alert 开启", cfg.get("alert.enabled") is True)
+        t.ok("测试推送 mock", res.get("test_ok") is True and macos_box)
+    finally:
+        notify_mod.set_test_macos(None)
 
 
 # ==================================================================== F17 周报邮件
@@ -3424,6 +3505,8 @@ def main(verbose: bool = True, cfg: Optional[Config] = None) -> int:
         check_pricetrack(t, c, mk)
         check_watch_alert(t, c)
         check_email_setup(t, tmp)
+        check_notify_push(t, c)
+        check_notify_setup(t, tmp)
         check_weekly_email(t, c)
         return t.report()
     finally:

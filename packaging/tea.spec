@@ -68,6 +68,7 @@ HIDDEN = [
     "tea.config.config_store",
     "tea.config.onboarding",
     "tea.config.email_setup",
+    "tea.config.notify_setup",
     # 基础层
     "tea.core",
     "tea.core.logger",

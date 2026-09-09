@@ -651,6 +651,8 @@ DEFAULTS: Dict[str, Any] = {
         "include_eve": True,
         "require_no_hard_veto": True,
         "dedupe_per_day": True,
+        # 空列表 = 自动推断：各 notify.* 通道 enabled 且配置齐全即参与
+        "channels": [],
     },
     "notify": {
         "email": {
@@ -664,6 +666,16 @@ DEFAULTS: Dict[str, Any] = {
             "from_addr": "",
             "to_addrs": [],
             "subject_prefix": "[TEA观察]",
+        },
+        "macos": {
+            "enabled": True,
+            "sound": "default",
+        },
+        "bark": {
+            "enabled": False,
+            "key": "",
+            "server": "https://api.day.app",
+            "group": "TEA观察",
         },
     },
     # ---------------------------------------------------------- 每周选股周报邮件（F17）

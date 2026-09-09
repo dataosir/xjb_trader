@@ -13,6 +13,7 @@
   tea status / weather / pos / trades / stats / weekly
   tea setup                配置向导（首次启动自动进入）
   tea setup-email          观察池邮件提醒邮箱配置（163 SMTP）
+  tea setup-notify         观察池提醒通道（macOS 弹窗 + Bark Push）
   tea selftest             离线自测（公式对齐验证，不联网）
 """
 from __future__ import annotations
@@ -26,7 +27,7 @@ from typing import List, Optional
 from tea import __version__
 from tea.analysis import followthrough as ft_mod, pricetrack
 from tea.analysis.sentiment import clear_cache, format_weather
-from tea.config import config_store, email_setup, onboarding
+from tea.config import config_store, email_setup, notify_setup, onboarding
 from tea.config.config_store import Config, load_config
 from tea.core import logger as logger_mod, utils
 from tea.core.timing import Timing
@@ -415,6 +416,14 @@ def cmd_setup_email(args, cfg: Config) -> int:
     return 0 if res.get("saved") else 1
 
 
+def cmd_setup_notify(args, cfg: Config) -> int:
+    """观察池提醒通道配置（macOS 弹窗 + Bark Push）。"""
+    res = notify_setup.run_wizard(cfg=cfg, io=_io(), test_only=args.test)
+    if args.test:
+        return 0 if res.get("test_ok") else 1
+    return 0 if res.get("saved") else 1
+
+
 def cmd_selftest(args, cfg: Config) -> int:
     from tea import selftest
     return selftest.main(verbose=not args.quiet, cfg=cfg)
@@ -482,7 +491,8 @@ SUBMENUS = {
         ("1", "配置一览", ["config", "list"]),
         ("2", "配置向导（重新配置）", ["setup"]),
         ("3", "邮件提醒邮箱配置", ["setup-email"]),
-        ("4", "离线自测", ["selftest"]),
+        ("4", "即时提醒通道（macOS / Bark）", ["setup-notify"]),
+        ("5", "离线自测", ["selftest"]),
     ],
 }
 
@@ -929,6 +939,10 @@ def build_parser() -> argparse.ArgumentParser:
     se = sub.add_parser("setup-email", help="观察池邮件提醒邮箱配置（163 SMTP 引导）")
     se.add_argument("--test", action="store_true", help="仅测试当前 SMTP 配置，不发向导")
     se.set_defaults(func=cmd_setup_email)
+
+    sn = sub.add_parser("setup-notify", help="观察池提醒通道（macOS 弹窗 + Bark Push）")
+    sn.add_argument("--test", action="store_true", help="仅测试当前通知通道，不发向导")
+    sn.set_defaults(func=cmd_setup_notify)
 
     mn = sub.add_parser("menu", help="进入数字菜单")
     mn.set_defaults(func=None)

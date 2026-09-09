@@ -4,6 +4,16 @@
 
 ## [Unreleased]
 
+### 功能（2026-09-09：F18 观察池即时 Push）
+
+> 关联：F16 扫描逻辑不变；盘中 macOS 弹窗 + Bark iPhone Push，与邮件并行。
+
+- **多通道** `notify.send_alert()`：`email` / `macos` / `bark`；任一通道成功即记为已提醒。  
+- **新增** `tea setup-notify`：macOS + Bark 引导；`--test` 仅测推送。  
+- **配置**：`notify.macos.*`、`notify.bark.*`、`alert.channels`（空 = 自动推断）。  
+- **自测**：mock macOS/Bark + 部分失败 / 全失败 + 向导落盘。  
+- **文档**：F18 PRD、tech 02 已对齐。
+
 ### 功能（2026-09-09：F17 每周选股周报邮件）
 
 > 关联：F12 `weekly` 报告 / F16 SMTP 配置；默认 **每周五 17:00** launchd 触发。

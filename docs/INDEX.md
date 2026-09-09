@@ -43,6 +43,7 @@
 | [`prd/03-features/F15-quality-selftest.md`](prd/03-features/F15-quality-selftest.md) | 自测 / CI | F15 |
 | [`prd/03-features/F16-watch-alert-notify.md`](prd/03-features/F16-watch-alert-notify.md) | 观察池盘中邮件提醒 | F16 |
 | [`prd/03-features/F17-weekly-email-summary.md`](prd/03-features/F17-weekly-email-summary.md) | 每周选股周报邮件 | F17 |
+| [`prd/03-features/F18-push-notify.md`](prd/03-features/F18-push-notify.md) | 观察池即时 Push（macOS / Bark） | F18 |
 | [`prd/04-nfr-constraints.md`](prd/04-nfr-constraints.md) | 非功能硬约束 | NFR |
 | [`prd/05-roadmap-backlog.md`](prd/05-roadmap-backlog.md) | 现行迭代 backlog | backlog |
 

@@ -685,9 +685,10 @@ def watch_alert(cfg: Optional[Config] = None, market: Optional[Market] = None,
         out["skip"] = "off_session"
         return out
 
-    if not force and not notify.email_configured(cfg):
-        log.info("tea.alert skip: email_not_configured")
-        out["skip"] = "email_not_configured"
+    if not force and not notify.alert_notify_ready(cfg):
+        log.info("tea.alert skip: notify_not_configured channels=%s",
+                 notify.active_channels(cfg))
+        out["skip"] = "notify_not_configured"
         return out
 
     active = watch_pool.active_items(cfg)
@@ -711,17 +712,21 @@ def watch_alert(cfg: Optional[Config] = None, market: Optional[Market] = None,
             continue
 
         subject = f"{cand.get('name') or code} {condition} 提醒"
-        res = notify.send_email(cfg, subject=subject, body=cand.get("body") or "")
+        res = notify.send_alert(cfg, subject=subject, body=cand.get("body") or "")
         if not res.get("ok"):
-            out["failed"].append({"code": code, "error": res.get("error")})
-            log.error("tea.alert send failed %s: %s", code, res.get("error"))
+            ch_err = {k: v.get("error") for k, v in (res.get("channels") or {}).items()
+                      if not v.get("ok")}
+            out["failed"].append({"code": code, "error": ch_err or res.get("error")})
+            log.error("tea.alert send failed %s: %s", code, ch_err or res.get("error"))
             continue
 
+        ok_ch = [k for k, v in (res.get("channels") or {}).items() if v.get("ok")]
         watch_pool.mark_alert_sent(today, code, condition, cfg,
-                                   meta={"track": cand.get("track"), "condition": condition})
+                                   meta={"track": cand.get("track"), "condition": condition,
+                                         "channels": ok_ch})
         out["sent"].append(code)
-        log.info("tea.alert sent %s condition=%s", code, condition)
-        io.say(f"  ✓ 已发邮件：{code} {cand.get('name')}（{condition}）")
+        log.info("tea.alert sent %s condition=%s channels=%s", code, condition, ok_ch)
+        io.say(f"  ✓ 已提醒：{code} {cand.get('name')}（{condition}）→ {','.join(ok_ch)}")
 
     summary = (f"扫描 {scan.get('scanned', 0)} 只，待发 {len(scan.get('candidates') or [])}，"
                f"已发 {len(out['sent'])}，去重跳过 {len(out['skipped'])}，失败 {len(out['failed'])}")

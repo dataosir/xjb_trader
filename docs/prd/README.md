@@ -14,13 +14,13 @@
 1. [`00-product-overview.md`](00-product-overview.md) — 定位、用户、非目标  
 2. [`01-domain-model.md`](01-domain-model.md) — 核心概念与状态对象  
 3. [`02-daily-workflow.md`](02-daily-workflow.md) — 日/周时间线与命令映射  
-4. [`03-features/`](03-features/) — 功能拆解（F01–F17，可独立开 PR）  
+4. [`03-features/`](03-features/) — 功能拆解（F01–F18，可独立开 PR）  
 5. [`04-nfr-constraints.md`](04-nfr-constraints.md) — 非功能与硬约束  
 6. [`05-roadmap-backlog.md`](05-roadmap-backlog.md) — 迭代 backlog（链到胜率/低吸路线图）  
 
 ---
 
-## 功能索引（F01–F17）
+## 功能索引（F01–F18）
 
 | 编号 | 文档 | 一层摘要 | 主命令 / 入口 |
 |---|---|---|---|
@@ -41,6 +41,7 @@
 | F15 | [质量自测](03-features/F15-quality-selftest.md) | selftest / CI / 零依赖 | `selftest` |
 | F16 | [观察池盘中提醒](03-features/F16-watch-alert-notify.md) | 观察池每分钟扫描 + SMTP 邮件 | `watch-alert` |
 | F17 | [每周选股周报邮件](03-features/F17-weekly-email-summary.md) | 周五收盘后周报 SMTP | `weekly-email` |
+| F18 | [观察池即时 Push](03-features/F18-push-notify.md) | macOS 弹窗 + Bark iPhone Push | `setup-notify` / `watch-alert` |
 
 **迭代约定**：改某能力时，PR / CHANGELOG 注明功能号（如「改 F03」），并同步对应 PRD 的「已知缺口」与验收标准。
 

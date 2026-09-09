@@ -51,6 +51,8 @@ tea config set notify.email.to_addrs '["yourname@163.com"]'
 
 ```bash
 tea config set alert.condition preflight_pass   # 默认 pullback_ready
+tea setup-notify                                # macOS 弹窗 + Bark Push（F18）
+tea setup-notify --test                         # 仅测 Push 通道
 tea config set alert.include_eve false          # 不扫前夕观察轨
 ```
 

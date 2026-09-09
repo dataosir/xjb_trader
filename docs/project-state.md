@@ -37,7 +37,7 @@
 
 **以攒证据为主**：缺口看板盯 T+1/T+3；影子桶（萌芽∪前三非突破）对照 **T+3>0≥60%**（验收门槛，非收益承诺）；巩固可买硬闸；低吸空池只观察。
 
-已落地（代码）：突破/过热禁买、`winrate_score`、板块一致性、**自动轻量回填（默认后台异步）**、候选否决原因必展示、**样本缺口看板**、**`shadow_tag` 落盘对照**、大盘指数超时修复 + MA20 跨源补全 + `tea.data` 运行日志**、**共振分/行情关键节点 `tea.log` 追溯 + launchd 直调 python 修复**、**东财 K 线会话熔断（push2his 封禁时直切腾讯）+ 缺口横幅误报修复**、**布林线观测因子（只算不落闸，落盘+控制台）**、**F16 观察池盘中邮件提醒**（`tea watch-alert` + launchd 每分钟 + 163 SMTP 默认 + `tea setup-email` 引导配置）、**F17 每周选股周报邮件**（`tea weekly-email` + launchd 周五 17:00 + 复用 F12 周报）。
+已落地（代码）：突破/过热禁买、`winrate_score`、板块一致性、**自动轻量回填（默认后台异步）**、候选否决原因必展示、**样本缺口看板**、**`shadow_tag` 落盘对照**、大盘指数超时修复 + MA20 跨源补全 + `tea.data` 运行日志**、**共振分/行情关键节点 `tea.log` 追溯 + launchd 直调 python 修复**、**东财 K 线会话熔断（push2his 封禁时直切腾讯）+ 缺口横幅误报修复**、**布林线观测因子（只算不落闸，落盘+控制台）**、**F16 观察池盘中邮件提醒**（`tea watch-alert` + launchd 每分钟 + 163 SMTP 默认 + `tea setup-email` 引导配置）、**F17 每周选股周报邮件**（`tea weekly-email` + launchd 周五 17:00 + 复用 F12 周报）、**F18 即时 Push**（`notify.send_alert` macOS 弹窗 + Bark + 邮件并行 + `tea setup-notify`）。
 
 ## 进行中
 
@@ -76,7 +76,7 @@
 |---|---|
 | `docs/INDEX.md` | **权威清单**（增删改 docs 内 md 必同步维护） |
 | `docs/README.md` | 入口 + 4 步闭环（明细见 INDEX） |
-| `docs/prd/` | 完整（F01–F17） |
+| `docs/prd/` | 完整（F01–F18） |
 | `docs/tech/` | 框架已建（00–03） |
 | `docs/ops/` | 框架已建（00–03；Ops-1 日 SOP + 两帽） |
 | `docs/archive/` | 历史策略/评审已迁入 |
