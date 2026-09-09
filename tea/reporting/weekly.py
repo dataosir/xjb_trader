@@ -11,7 +11,7 @@ from typing import Any, Dict, List, Optional
 
 from tea.analysis import followthrough, stats
 from tea.config.config_store import Config, load_config
-from tea.core import utils
+from tea.core import notify, utils
 from tea.portfolio import accumulator, trades as trades_mod, watch_pool
 
 
@@ -242,6 +242,116 @@ def write_report(days: int = 7, cfg: Optional[Config] = None) -> str:
     path = cfg.report_file(f"{prefix}_{utils.stamp()}.md")
     out = utils.atomic_write(path, render_md(wk, cfg))
     utils.cleanup_reports(cfg)
+    return out
+
+
+# ------------------------------------------------------------------ 周报邮件（F17）
+
+def _state_path(cfg: Config) -> str:
+    return cfg.data_file("weekly_email_state_file")
+
+
+def _load_state(cfg: Config) -> dict:
+    return utils.read_json(_state_path(cfg), default={}) or {}
+
+
+def _save_state(state: dict, cfg: Config) -> None:
+    utils.write_json(_state_path(cfg), state)
+
+
+def iso_week_key(d: Optional[Any] = None) -> str:
+    """ISO 年-周键，用于去重（如 2026-W36）。"""
+    dt = d if hasattr(d, "isocalendar") else utils.now().date()
+    iso = dt.isocalendar()
+    return f"{iso[0]}-W{iso[1]:02d}"
+
+
+def is_sent_this_week(cfg: Optional[Config] = None, week_key: Optional[str] = None) -> bool:
+    """本周是否已发送周报邮件。"""
+    cfg = cfg or load_config()
+    key = week_key or iso_week_key()
+    return (_load_state(cfg).get("last_week") or "") == key
+
+
+def mark_sent(cfg: Optional[Config] = None, week_key: Optional[str] = None,
+              meta: Optional[dict] = None) -> None:
+    """记录本周已发送。"""
+    cfg = cfg or load_config()
+    key = week_key or iso_week_key()
+    state = _load_state(cfg)
+    state["last_week"] = key
+    state["last_sent_date"] = utils.today_str()
+    if meta:
+        state["last_meta"] = meta
+    _save_state(state, cfg)
+
+
+def email_subject(wk: dict, cfg: Optional[Config] = None) -> str:
+    """邮件主题（不含前缀，前缀由 notify.send_email 拼接）。"""
+    return f"选股周报 {wk.get('since')} ~ {wk.get('until')}"
+
+
+def email_body(wk: dict, cfg: Optional[Config] = None) -> str:
+    """邮件正文：摘要 + 完整 Markdown 周报。"""
+    cfg = cfg or load_config()
+    summary = format_weekly(wk, cfg)
+    md = render_md(wk, cfg)
+    return (
+        "以下为 TEA 当周选股复盘摘要（引擎不自动下单，请结合盘面人工决策）。\n\n"
+        f"{summary}\n\n"
+        "======== 完整周报 ========\n\n"
+        f"{md}\n"
+    )
+
+
+def send_email_report(days: int = 7, cfg: Optional[Config] = None,
+                      force: bool = False,
+                      sender: Optional[Any] = None) -> Dict[str, Any]:
+    """生成周报并发送邮件。返回 {ok, skip?, error?, report_path?, week_key?}。"""
+    cfg = cfg or load_config()
+    days = int(days or cfg.get("weekly_email.days") or 7)
+    week_key = iso_week_key()
+    out: Dict[str, Any] = {"week_key": week_key, "days": days}
+
+    if not force and not cfg.get("weekly_email.enabled", False):
+        out["skip"] = "weekly_email_disabled"
+        return out
+
+    if not notify.smtp_ready(cfg):
+        out["skip"] = "email_not_configured"
+        return out
+
+    today = utils.now().date()
+    if not force and bool(cfg.get("weekly_email.require_friday", True)):
+        if today.weekday() != 4:
+            out["skip"] = "not_friday"
+            return out
+
+    if not force and not utils.is_trading_day(today):
+        out["skip"] = "not_trading_day"
+        return out
+
+    if not force and bool(cfg.get("weekly_email.dedupe_per_week", True)):
+        if is_sent_this_week(cfg, week_key):
+            out["skip"] = "already_sent"
+            return out
+
+    wk = collect(days, cfg)
+    path = write_report(days, cfg)
+    out["report_path"] = path
+
+    prefix = str(cfg.get("weekly_email.subject_prefix") or "[TEA周报]")
+    res = notify.send_email(cfg, subject=email_subject(wk, cfg),
+                            body=email_body(wk, cfg),
+                            subject_prefix=prefix, sender=sender)
+    if not res.get("ok"):
+        out["ok"] = False
+        out["error"] = res.get("error")
+        return out
+
+    mark_sent(cfg, week_key, meta={"since": wk.get("since"), "until": wk.get("until"),
+                                    "report_path": path})
+    out["ok"] = True
     return out
 
 

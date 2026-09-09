@@ -19,11 +19,11 @@ def _email_cfg(cfg: Config) -> dict:
     return cfg.get("notify.email") or {}
 
 
-def email_configured(cfg: Optional[Config] = None) -> bool:
-    """邮件通道已启用且必填项齐全。"""
+def smtp_ready(cfg: Optional[Config] = None) -> bool:
+    """SMTP 必填项齐全（不检查 alert / weekly 业务开关）。"""
     cfg = cfg or load_config()
     ec = _email_cfg(cfg)
-    if not cfg.get("alert.enabled") or not ec.get("enabled"):
+    if not ec.get("enabled"):
         return False
     if not ec.get("smtp_host") or not ec.get("smtp_user"):
         return False
@@ -33,8 +33,17 @@ def email_configured(cfg: Optional[Config] = None) -> bool:
     return bool(to)
 
 
+def email_configured(cfg: Optional[Config] = None) -> bool:
+    """观察池提醒（F16）邮件通道已启用且必填项齐全。"""
+    cfg = cfg or load_config()
+    if not cfg.get("alert.enabled"):
+        return False
+    return smtp_ready(cfg)
+
+
 def send_email(cfg: Optional[Config] = None, subject: str = "", body: str = "",
                to_addrs: Optional[List[str]] = None,
+               subject_prefix: Optional[str] = None,
                sender: Optional[Callable[..., Dict[str, Any]]] = None) -> Dict[str, Any]:
     """发送纯文本邮件。成功返回 ``{ok: True}``；失败 ``{ok: False, error: ...}``。"""
     cfg = cfg or load_config()
@@ -50,7 +59,7 @@ def send_email(cfg: Optional[Config] = None, subject: str = "", body: str = "",
     if not (host and user and password and from_addr):
         return {"ok": False, "error": "SMTP 配置不完整"}
 
-    prefix = str(ec.get("subject_prefix") or "[TEA观察]")
+    prefix = str(subject_prefix or ec.get("subject_prefix") or "[TEA观察]")
     full_subject = f"{prefix} {subject}".strip()
 
     fn = sender or _TEST_SENDER or _smtp_send

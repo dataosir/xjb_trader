@@ -314,6 +314,13 @@ def cmd_weekly(args, cfg: Config) -> int:
     return 0
 
 
+def cmd_weekly_email(args, cfg: Config) -> int:
+    res = runner.weekly_email(days=args.days, cfg=cfg, io=_io(), force=args.force)
+    if res.get("skip"):
+        return 0
+    return 0 if res.get("ok") else 1
+
+
 def cmd_accum(args, cfg: Config) -> int:
     io = _io()
     if args.days and args.days > 1:
@@ -469,6 +476,7 @@ SUBMENUS = {
         ("5", "交易流水", ["trades"]),
         ("6", "统计与归因", ["stats"]),
         ("7", "周复盘报告", ["weekly"]),
+        ("8", "周报邮件（周五自动发）", ["weekly-email"]),
     ],
     "配置与维护": [
         ("1", "配置一览", ["config", "list"]),
@@ -880,6 +888,11 @@ def build_parser() -> argparse.ArgumentParser:
     wk.add_argument("--days", type=int, default=7)
     wk.add_argument("--no-write", action="store_true")
     wk.set_defaults(func=cmd_weekly)
+
+    we = sub.add_parser("weekly-email", help="每周选股周报邮件（周五 launchd）")
+    we.add_argument("--days", type=int, default=7, help="汇总天数（默认 7）")
+    we.add_argument("--force", action="store_true", help="忽略周五/去重守卫（演练）")
+    we.set_defaults(func=cmd_weekly_email)
 
     au = sub.add_parser("accum", help="当日/区间累积（为什么今天没交易）")
     au.add_argument("--date", help="YYYY-MM-DD，默认今天")

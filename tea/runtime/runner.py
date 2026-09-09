@@ -8,6 +8,7 @@
     maybe_auto_backfill()  轻量/全量自动回填（seed / menu 触发）
     close_review()  盘后复核：T+1 回填 / 观察池复核 / 当日累积
     watch_alert()   盘中观察池扫描 + 邮件提醒（launchd 每分钟）
+    weekly_email()  每周五选股周报邮件（launchd 周五 17:00）
     daily_status()  今日状态（门禁计数 / 计划 / 持仓）
 
 设计约束：这里只做编排与落盘，所有公式都在各自模块里，runner 不重算任何一个分数。
@@ -778,6 +779,33 @@ def weekly_report(days: int = 7, cfg: Optional[Config] = None,
         wk["report_path"] = path
         io.say(f"  报告已存档：{path}")
     return wk
+
+
+def weekly_email(days: int = 7, cfg: Optional[Config] = None,
+                 io: Optional[IO] = None, force: bool = False) -> dict:
+    """每周选股周报邮件（F17）：生成报告 + SMTP 投递，不自动下单。"""
+    cfg = cfg or load_config()
+    io = io or IO()
+    log = logger_mod.get_logger("weekly_email")
+    days = int(days or cfg.get("weekly_email.days") or 7)
+
+    res = weekly.send_email_report(days=days, cfg=cfg, force=force)
+    if res.get("skip"):
+        log.info("tea.weekly_email skip: %s", res.get("skip"))
+        return res
+
+    if not res.get("ok"):
+        log.error("tea.weekly_email send failed: %s", res.get("error"))
+        if io:
+            io.say(f"  ✗ 周报邮件发送失败：{res.get('error')}")
+        return res
+
+    log.info("tea.weekly_email sent week=%s path=%s", res.get("week_key"),
+             res.get("report_path"))
+    if io:
+        io.say(f"  ✓ 周报邮件已发送（{res.get('week_key')}）")
+        io.say(f"  报告已存档：{res.get('report_path')}")
+    return res
 
 
 # ==================================================================== 持仓动作

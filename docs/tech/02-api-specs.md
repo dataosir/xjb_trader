@@ -28,6 +28,7 @@
 | `run` / `eval` | gates → phases Phase1–4；`eval` 不落仓 | `run` 可登记灰度仓 |
 | `review` | followthrough 回填 + watch 复核 + 缺口/影子看板 | 写 seed_records / 报告 |
 | `watch-alert` | `watch_pool.scan_alerts` → `notify.send_email`；launchd 每分钟 | 写 `watch_alert_state.json`；**不发计划、不下单** |
+| `weekly-email` | `weekly.send_email_report` → `notify.send_email`；launchd 周五 17:00 | 写 `WEEKLY_*.md` + `weekly_email_state.json`；**不发计划、不下单** |
 | `followthrough` | 跟涨胜率 + 样本缺口 + 影子桶 T+3 对照 | 只读（`--update` 可写回填） |
 | （进菜单） | `maybe_auto_backfill(menu)` | 盘后/隔夜窗每天最多 1 次轻量回填（**默认后台**） |
 | `selftest` | `tea/selftest.py` | 临时 `$TEA_HOME` 沙箱，不碰真实数据 |

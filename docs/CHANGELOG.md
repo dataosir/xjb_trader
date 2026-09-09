@@ -4,6 +4,17 @@
 
 ## [Unreleased]
 
+### 功能（2026-09-09：F17 每周选股周报邮件）
+
+> 关联：F12 `weekly` 报告 / F16 SMTP 配置；默认 **每周五 17:00** launchd 触发。
+
+- **新增** `tea weekly-email`：交易日周五生成当周选股周报（与 `tea weekly` 同源）并 SMTP 投递；同 ISO 周去重，**不自动下单**。  
+- **模块**：`weekly.send_email_report`、`notify.smtp_ready` / `send_email(subject_prefix=...)`、`runner.weekly_email`。  
+- **调度**：`ops/weekly-email-cron.sh` + `install-launchd-weekly-email.sh`（周五 17:00）。  
+- **配置**：`weekly_email.*`；`tea setup-email` 完成后默认同时开启 `weekly_email.enabled`。  
+- **自测**：mock SMTP + 周五守卫 + 去重 + 发信失败不 advance state。  
+- **文档**：F17 PRD、`ops/07`、tech 02/03 已对齐。
+
 ### 功能（2026-09-09：F16 观察池盘中邮件提醒）
 
 > 关联：F10 观察池 / F11 launchd 方案 A；默认 SMTP **163 邮箱**（`smtp.163.com:465`）。

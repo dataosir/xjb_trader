@@ -65,6 +65,7 @@ DEFAULTS: Dict[str, Any] = {
         "ztpool_cache_file": ".tea_ztpool_cache.json",
         "shadow_pool_file": "shadow_pool.json",
         "watch_alert_state_file": "watch_alert_state.json",
+        "weekly_email_state_file": "weekly_email_state.json",
     },
     # ---------------------------------------------------------- 行情/防封
     "market": {
@@ -664,6 +665,14 @@ DEFAULTS: Dict[str, Any] = {
             "to_addrs": [],
             "subject_prefix": "[TEA观察]",
         },
+    },
+    # ---------------------------------------------------------- 每周选股周报邮件（F17）
+    "weekly_email": {
+        "enabled": False,
+        "days": 7,
+        "dedupe_per_week": True,
+        "require_friday": True,
+        "subject_prefix": "[TEA周报]",
     },
     # ---------------------------------------------------------- 观察池
     "watch": {

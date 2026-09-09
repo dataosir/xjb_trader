@@ -2416,10 +2416,11 @@ def check_menu(t: Suite, cfg: Config) -> None:
         all_argv += [av[0] for _, _, av in sub]
     expect = {"weather", "status", "seed-plan", "winrate-scan", "plan-check", "__plan__",
               "run", "pos", "__close__", "watch", "review", "accum", "trace",
-              "followthrough", "trades", "stats", "weekly", "__pos_add__", "__pos_rm__",
+              "followthrough", "trades", "stats", "weekly", "weekly-email",
+              "__pos_add__", "__pos_rm__",
               "__confirm__", "__eval__", "config", "setup", "setup-email", "selftest",
               "plan-clear"}
-    t.eq("26 项功能一个不少", sorted(set(all_argv)), sorted(expect))
+    t.eq("27 项功能一个不少", sorted(set(all_argv)), sorted(expect))
 
     # 时段→建议：每个时段都得有东西可做，且不超过四条（否则就又回到平铺）。
     real_now = utils.now
@@ -3147,6 +3148,7 @@ def check_email_setup(t: Suite, home: str) -> None:
     t.eq("发件人写入", cfg.get("notify.email.smtp_user"), "sender@163.com")
     t.eq("收件人写入", cfg.get("notify.email.to_addrs"), ["sender@163.com"])
     t.ok("alert 已开启", cfg.get("alert.enabled") is True)
+    t.ok("weekly_email 已开启", cfg.get("weekly_email.enabled") is True)
 
     sent_box.clear()
     test_res = email_setup.run_wizard(cfg=cfg, io=IO(interactive=False, quiet=True),
@@ -3162,6 +3164,62 @@ def check_email_setup(t: Suite, home: str) -> None:
         interactive=False, quiet=True))
     t.eq("取消不写盘", (abort.get("mode"), abort.get("saved")), ("abort", False))
     t.ok("取消后未配置", not notify_mod.email_configured(cfg2))
+
+
+# ==================================================================== F17 周报邮件
+
+def check_weekly_email(t: Suite, c: Config) -> None:
+    """每周选股周报：发送 / 去重 / 失败不 advance state。"""
+    from tea.reporting import weekly as weekly_mod
+
+    t.head("周报 · 选股邮件")
+
+    sent_box: List[dict] = []
+
+    def _fake_sender(**kw) -> None:
+        sent_box.append(kw)
+
+    state_path = c.data_file("weekly_email_state_file")
+    if os.path.exists(state_path):
+        os.remove(state_path)
+
+    c.set("weekly_email.enabled", True)
+    c.set("notify.email.enabled", True)
+    c.set("notify.email.smtp_host", "smtp.163.com")
+    c.set("notify.email.smtp_user", "test@163.com")
+    c.set("notify.email.smtp_password", "secret")
+    c.set("notify.email.from_addr", "test@163.com")
+    c.set("notify.email.to_addrs", ["recv@163.com"])
+    c.save()
+
+    skip = weekly_mod.send_email_report(cfg=c, force=False)
+    t.ok("非周五跳过", skip.get("skip") in ("not_friday", "not_trading_day"))
+
+    res = weekly_mod.send_email_report(cfg=c, force=True, sender=_fake_sender)
+    t.ok("force 发信成功", res.get("ok") is True)
+    t.ok("邮件已 mock", len(sent_box) == 1)
+    t.ok("主题含选股周报", "选股周报" in (sent_box[0].get("subject") or ""))
+    t.ok("正文含纪律自查", "纪律自查" in (sent_box[0].get("body") or ""))
+    t.ok("state 已记录", weekly_mod.is_sent_this_week(c))
+
+    c.set("weekly_email.require_friday", False)
+    c.save()
+    sent_box.clear()
+    res2 = weekly_mod.send_email_report(cfg=c, force=False, sender=_fake_sender)
+    t.eq("同周去重", res2.get("skip"), "already_sent")
+    t.ok("去重后无新邮件", not sent_box)
+
+    notify_mod.set_test_sender(lambda **kw: (_ for _ in ()).throw(RuntimeError("smtp fail")))
+    os.remove(state_path)
+    fail = weekly_mod.send_email_report(cfg=c, force=True)
+    t.ok("发信失败不写 state", fail.get("ok") is False)
+    t.ok("失败后可重试", not weekly_mod.is_sent_this_week(c))
+    notify_mod.set_test_sender(None)
+
+    c.set("weekly_email.enabled", False)
+    c.save()
+    off = weekly_mod.send_email_report(cfg=c, force=False)
+    t.eq("weekly_email 关闭跳过", off.get("skip"), "weekly_email_disabled")
 
 
 # ==================================================================== 路径 / 打包
@@ -3366,6 +3424,7 @@ def main(verbose: bool = True, cfg: Optional[Config] = None) -> int:
         check_pricetrack(t, c, mk)
         check_watch_alert(t, c)
         check_email_setup(t, tmp)
+        check_weekly_email(t, c)
         return t.report()
     finally:
         sent_mod.clear_cache()

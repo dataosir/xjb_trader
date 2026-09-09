@@ -46,7 +46,7 @@
 - `tea/screening/seed_report.py`  
 - `tea/analysis/stats.py`  
 - `tea/runtime/runner.py` · `daily_status` / `stats_report` / `weekly_report`  
-- CLI：`status` / `stats` / `weekly` / `accum` / `trace` / `trades`
+- CLI：`status` / `stats` / `weekly` / `weekly-email`（F17 邮件投递） / `accum` / `trace` / `trades`
 
 ## 7. 验收标准
 

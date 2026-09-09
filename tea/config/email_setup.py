@@ -60,7 +60,8 @@ def format_status(cfg: Config) -> str:
         f"  授权码 smtp_password：{_mask_secret(ec.get('smtp_password') or '')}",
         f"  发件人 from_addr：{ec.get('from_addr') or '（未填）'}",
         f"  收件人 to_addrs：{', '.join(to) if to else '（未填）'}",
-        f"  配置完整：{'是' if notify.email_configured(cfg) else '否'}",
+        f"  周报邮件 weekly_email.enabled：{'开' if cfg.get('weekly_email.enabled') else '关'}",
+        f"  配置完整：{'是' if notify.smtp_ready(cfg) else '否'}",
     ]
     return "\n".join(lines)
 
@@ -190,6 +191,7 @@ def format_summary(values: Dict[str, Any]) -> str:
         "===== 即将写入 =====",
         f"  alert.enabled：开",
         f"  notify.email.enabled：开",
+        f"  weekly_email.enabled：开",
         f"  SMTP：smtp.163.com:465（SSL）",
         f"  发件邮箱：{values.get('smtp_user')}",
         f"  授权码：{_mask_secret(values.get('smtp_password') or '')}",
@@ -202,6 +204,7 @@ def apply_values(values: Dict[str, Any], cfg: Config) -> str:
     """写入配置并开启提醒开关。"""
     cfg.set("alert.enabled", True)
     cfg.set("notify.email.enabled", True)
+    cfg.set("weekly_email.enabled", True)
     cfg.set("notify.email.smtp_host", "smtp.163.com")
     cfg.set("notify.email.smtp_port", 465)
     cfg.set("notify.email.smtp_use_tls", True)
@@ -218,7 +221,7 @@ def send_test_email(cfg: Config, io: Optional[IO] = None,
                     sender: Optional[Callable[..., Any]] = None) -> Dict[str, Any]:
     """发送测试邮件；sender 可注入 mock（selftest 用）。"""
     io = io or IO()
-    if not notify.email_configured(cfg):
+    if not notify.smtp_ready(cfg):
         return {"ok": False, "error": "邮件配置不完整，请先完成向导"}
     body = (
         "这是一封 TEA 观察池提醒测试邮件。\n\n"

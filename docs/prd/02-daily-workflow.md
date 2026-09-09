@@ -35,7 +35,7 @@
 | **每日** | `seed-plan`（含自动轻量回填） | 菜单 `3` |
 | **每周 ≥1 次** | 全量 `review`：回填 + 观察池；看**样本缺口看板**与影子桶 T+3 | 菜单 `8` / `tea review` |
 | 持续 | 跟涨经验 + 缺口/影子对照 | `followthrough` / 复盘工具▸ |
-| 每周五（建议） | 纪律自查 + 归因 | `weekly` |
+| 每周五（建议） | 纪律自查 + 归因（可自动发邮件） | `weekly` / `weekly-email`（launchd 17:00） |
 | 策略迭代前 | 对齐 backlog 样本门槛（影子 T+3>0≥60%；低吸≥30） | `05-roadmap-backlog.md` |
 
 ### 攒数据运营清单（A 轮）
@@ -59,6 +59,7 @@
 | `pos` / `pos-add` / `pos-rm` / `capital` / `add-confirm` / `close` | F09 |
 | `watch` | F10 |
 | `watch-alert` | F16（+ F10） |
+| `weekly-email` | F17（+ F12） |
 | `review` / `followthrough` | F11 |
 | `stats` / `weekly` / `accum` / `trace` / `trades` | F12 |
 | `setup` / `config` | F13 |

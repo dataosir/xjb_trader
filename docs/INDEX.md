@@ -42,6 +42,7 @@
 | [`prd/03-features/F14-data-providers.md`](prd/03-features/F14-data-providers.md) | 行情源降级链 | F14 |
 | [`prd/03-features/F15-quality-selftest.md`](prd/03-features/F15-quality-selftest.md) | 自测 / CI | F15 |
 | [`prd/03-features/F16-watch-alert-notify.md`](prd/03-features/F16-watch-alert-notify.md) | 观察池盘中邮件提醒 | F16 |
+| [`prd/03-features/F17-weekly-email-summary.md`](prd/03-features/F17-weekly-email-summary.md) | 每周选股周报邮件 | F17 |
 | [`prd/04-nfr-constraints.md`](prd/04-nfr-constraints.md) | 非功能硬约束 | NFR |
 | [`prd/05-roadmap-backlog.md`](prd/05-roadmap-backlog.md) | 现行迭代 backlog | backlog |
 
@@ -71,6 +72,7 @@
 | [`ops/03-operator-daily-sop.md`](ops/03-operator-daily-sop.md) | 交易运营日 SOP（MIT / 晨晚间 checklist；命令见 prd/02） |
 | [`ops/05-seed-plan-scheduler.md`](ops/05-seed-plan-scheduler.md) | 种子扫描外部调度（launchd 方案 A：安装 / 日志 / 漏扫补救） |
 | [`ops/06-watch-alert-scheduler.md`](ops/06-watch-alert-scheduler.md) | 观察池盘中提醒 launchd（每分钟 `watch-alert` + SMTP） |
+| [`ops/07-weekly-email-scheduler.md`](ops/07-weekly-email-scheduler.md) | 每周五选股周报邮件 launchd（`weekly-email` + SMTP） |
 
 ---
 
