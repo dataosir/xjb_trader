@@ -63,13 +63,29 @@ def send_email(cfg: Optional[Config] = None, subject: str = "", body: str = "",
     return {"ok": True}
 
 
-def _ssl_context() -> ssl.SSLContext:
-    """macOS 自带 Python 常缺 CA 链；若已装 certifi 则优先用其 CA bundle。"""
+def _ca_bundle_paths() -> List[str]:
+    """候选 CA bundle 路径（按优先级）。macOS 自带 Python 常缺默认 CA 链。"""
+    paths: List[str] = []
     try:
         import certifi
-        return ssl.create_default_context(cafile=certifi.where())
+        paths.append(certifi.where())
     except ImportError:
-        return ssl.create_default_context()
+        pass
+    paths.extend([
+        "/etc/ssl/cert.pem",
+        "/private/etc/ssl/cert.pem",
+    ])
+    return paths
+
+
+def _ssl_context() -> ssl.SSLContext:
+    """构建 SMTP TLS 上下文；依次尝试 certifi / 系统 CA bundle。"""
+    for cafile in _ca_bundle_paths():
+        try:
+            return ssl.create_default_context(cafile=cafile)
+        except (OSError, ssl.SSLError):
+            continue
+    return ssl.create_default_context()
 
 
 def _smtp_send(host: str, port: int, use_tls: bool, user: str, password: str,

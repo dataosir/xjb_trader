@@ -229,7 +229,12 @@ def send_test_email(cfg: Config, io: Optional[IO] = None,
     if res.get("ok"):
         io.say("  ✓ 测试邮件已发送，请查收收件箱（含垃圾箱）")
     else:
-        io.say(f"  ✗ 测试邮件发送失败：{res.get('error')}")
+        err = str(res.get("error") or "")
+        io.say(f"  ✗ 测试邮件发送失败：{err}")
+        if "CERTIFICATE_VERIFY_FAILED" in err:
+            io.say("    提示：macOS 可执行 pip3 install certifi，或确认 /etc/ssl/cert.pem 存在")
+        elif "authentication failed" in err.lower() or "535" in err:
+            io.say("    提示：请检查 163 授权码是否正确（不是登录密码）；可重新运行向导填写")
     return res
 
 

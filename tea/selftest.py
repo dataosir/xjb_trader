@@ -3121,6 +3121,9 @@ def check_email_setup(t: Suite, home: str) -> None:
 
     t.head("观察池 · 邮箱配置向导")
 
+    t.ok("SMTP SSL 上下文可创建", notify_mod._ssl_context() is not None)
+    t.ok("CA bundle 候选非空", len(notify_mod._ca_bundle_paths()) >= 1)
+
     cfg_path = os.path.join(home, "email_wizard.json")
     cfg = Config({"paths": {"data_dir": "email_wizard_data"}}, path=cfg_path)
 
