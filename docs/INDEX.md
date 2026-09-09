@@ -74,6 +74,7 @@
 | [`ops/05-seed-plan-scheduler.md`](ops/05-seed-plan-scheduler.md) | 种子扫描外部调度（launchd 方案 A：安装 / 日志 / 漏扫补救） |
 | [`ops/06-watch-alert-scheduler.md`](ops/06-watch-alert-scheduler.md) | 观察池盘中提醒 launchd（每分钟 `watch-alert` + SMTP） |
 | [`ops/07-weekly-email-scheduler.md`](ops/07-weekly-email-scheduler.md) | 每周五选股周报邮件 launchd（`weekly-email` + SMTP） |
+| [`ops/08-review-scheduler.md`](ops/08-review-scheduler.md) | 盘后复核自动调度（工作日 15:35 `review --scheduled` + T+3 回填） |
 
 ---
 

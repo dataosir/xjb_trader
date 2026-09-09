@@ -49,3 +49,18 @@ SOP 见 [`docs/ops/06-watch-alert-scheduler.md`](../docs/ops/06-watch-alert-sche
 chmod +x ops/*.sh
 ./ops/install-launchd-watch-alert.sh
 ```
+
+## 盘后复核自动回填（F11 扩展）
+
+| 文件 | 用途 |
+|---|---|
+| [`review-cron.sh`](review-cron.sh) | wrapper：`python -m tea review --scheduled` |
+| [`com.tea.review.plist.template`](com.tea.review.plist.template) | launchd 模板（工作日 15:35） |
+| [`install-launchd-review.sh`](install-launchd-review.sh) | 安装 `com.tea.review` |
+| [`uninstall-launchd-review.sh`](uninstall-launchd-review.sh) | 卸载 |
+
+SOP 见 [`docs/ops/08-review-scheduler.md`](../docs/ops/08-review-scheduler.md)。菜单 **8** 仍为手动全量复核；本任务自动补 T+3。
+
+```bash
+./ops/install-launchd-review.sh
+```

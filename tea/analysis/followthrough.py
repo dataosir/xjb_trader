@@ -550,6 +550,116 @@ def shadow_t3_stats(cfg: Optional[Config] = None) -> dict:
     }
 
 
+def _t3_bucket_rank(rank: Optional[int]) -> str:
+    if rank is None:
+        return "rank未知"
+    if rank <= 3:
+        return "rank≤3"
+    if rank <= 5:
+        return "rank4-5"
+    return "rank>5"
+
+
+def _t3_bucket_chg(chg: Optional[float]) -> str:
+    if chg is None:
+        return "涨幅未知"
+    if chg < 5.5:
+        return "3~5.5%"
+    if chg < 7.5:
+        return "5.5~7.5%"
+    return ">7.5%"
+
+
+def t3_attribution(cfg: Optional[Config] = None) -> dict:
+    """多维 T+3>0 归因（方案 E：只读报告，不改闸门）。
+
+    维度：板块排名 / 阶段 / 涨幅桶 / 轨道 + 影子桶摘要。
+    """
+    cfg = cfg or load_config()
+    dims: Dict[str, Dict[str, dict]] = {
+        "rank": {}, "stage": {}, "chg": {}, "track": {},
+    }
+    total_n = total_up = 0
+    mengya_n = mengya_up = 0
+    for r in load_records(cfg):
+        if r.get("chg_t3") is None:
+            continue
+        up = float(r["chg_t3"]) > 0
+        total_n += 1
+        total_up += 1 if up else 0
+
+        def _slot(bucket_map: Dict[str, dict], key: str) -> dict:
+            return bucket_map.setdefault(key, {"n": 0, "up": 0})
+
+        rk = _t3_bucket_rank(r.get("sector_rank"))
+        _slot(dims["rank"], rk)["n"] += 1
+        _slot(dims["rank"], rk)["up"] += 1 if up else 0
+
+        stage = str(r.get("stage") or "-")
+        _slot(dims["stage"], stage)["n"] += 1
+        _slot(dims["stage"], stage)["up"] += 1 if up else 0
+        if stage == "萌芽":
+            mengya_n += 1
+            mengya_up += 1 if up else 0
+
+        chg_b = _t3_bucket_chg(r.get("chg_pct"))
+        _slot(dims["chg"], chg_b)["n"] += 1
+        _slot(dims["chg"], chg_b)["up"] += 1 if up else 0
+
+        track = str(r.get("track") or "-")
+        _slot(dims["track"], track)["n"] += 1
+        _slot(dims["track"], track)["up"] += 1 if up else 0
+
+    def _finalize(bucket_map: Dict[str, dict]) -> Dict[str, dict]:
+        out: Dict[str, dict] = {}
+        for k, v in bucket_map.items():
+            n, up = v["n"], v["up"]
+            out[k] = {"n": n, "up": up, "rate": (up / n) if n else None}
+        return out
+
+    shadow = shadow_t3_stats(cfg)
+    return {
+        "total_n": total_n,
+        "total_up": total_up,
+        "total_rate": (total_up / total_n) if total_n else None,
+        "mengya_n": mengya_n,
+        "mengya_up": mengya_up,
+        "mengya_rate": (mengya_up / mengya_n) if mengya_n else None,
+        "rank": _finalize(dims["rank"]),
+        "stage": _finalize(dims["stage"]),
+        "chg": _finalize(dims["chg"]),
+        "track": _finalize(dims["track"]),
+        "shadow": shadow,
+        "gap": sample_gap_stats(cfg),
+    }
+
+
+def format_t3_attribution(cfg: Optional[Config] = None, compact: bool = False) -> str:
+    """T+3 归因可读文案（review / 周报摘要用）。"""
+    st = t3_attribution(cfg)
+    if st["total_n"] == 0:
+        return "T+3 归因：尚无回填样本（跑 review 补 T+3）"
+    rate = st["total_rate"] or 0.0
+    lines = [
+        f"T+3>0 全样本：{st['total_up']}/{st['total_n']} = {rate:.0%}",
+    ]
+    if st["mengya_n"]:
+        mr = st["mengya_rate"] or 0.0
+        lines.append(f"  萌芽专看 T+3>0：{st['mengya_up']}/{st['mengya_n']} = {mr:.0%}")
+    gap = st.get("gap") or {}
+    lines.append(f"  待回填：T+1 {gap.get('pending_t1', 0)}｜T+3 {gap.get('pending_t3', 0)}")
+    if not compact:
+        for dim, title in (("rank", "板块排名"), ("chg", "涨幅桶"), ("stage", "阶段")):
+            parts = []
+            for k, v in sorted((st.get(dim) or {}).items(), key=lambda x: -x[1]["n"]):
+                rr = v["rate"]
+                parts.append(f"{k} {v['up']}/{v['n']}={rr:.0%}" if rr is not None else f"{k} n={v['n']}")
+            if parts:
+                lines.append(f"  {title}：" + "；".join(parts))
+        lines.append("  " + format_shadow_status(cfg).replace("\n", " "))
+    return "\n".join(lines)
+
+
 def format_shadow_status(cfg: Optional[Config] = None) -> str:
     """影子桶 T+3 对照文案：对照验收门槛，不暗示可买。"""
     st = shadow_t3_stats(cfg)

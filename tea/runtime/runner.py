@@ -7,6 +7,7 @@
     plan_check()    次日 09:35 计划复核（任一变动整单作废）
     maybe_auto_backfill()  轻量/全量自动回填（seed / menu 触发）
     close_review()  盘后复核：T+1 回填 / 观察池复核 / 当日累积
+    scheduled_review()  launchd 盘后自动复核（交易日 + 收盘后 + 每日去重）
     watch_alert()   盘中观察池扫描 + 邮件提醒（launchd 每分钟）
     weekly_email()  每周五选股周报邮件（launchd 周五 17:00）
     daily_status()  今日状态（门禁计数 / 计划 / 持仓）
@@ -634,6 +635,7 @@ def close_review(cfg: Optional[Config] = None, market: Optional[Market] = None,
     io.say(ft_mod.format_followthrough(cfg))
     io.say(ft_mod.format_sample_gap(cfg))
     io.say(ft_mod.format_shadow_status(cfg))
+    io.say(ft_mod.format_t3_attribution(cfg))
     io.say(ft_mod.format_stage_b_status(cfg))
     io.say(ft_mod.format_lowbuy_status(cfg))
 
@@ -657,6 +659,62 @@ def close_review(cfg: Optional[Config] = None, market: Optional[Market] = None,
     out["digest"] = dg
     io.say(accumulator.format_day(dg))
     io.say(seed_trace.format_trace_summary(cfg))
+    return out
+
+
+def _review_state_path(cfg: Config) -> str:
+    return cfg.data_file("review_scheduled_state_file")
+
+
+def _load_review_state(cfg: Config) -> dict:
+    return utils.read_json(_review_state_path(cfg), default={}) or {}
+
+
+def _save_review_state(cfg: Config, state: dict) -> None:
+    utils.write_json(_review_state_path(cfg), state)
+
+
+def scheduled_review(cfg: Optional[Config] = None, market: Optional[Market] = None,
+                     io: Optional[IO] = None, force: bool = False) -> dict:
+    """launchd 盘后自动全量复核：交易日 + 收盘后 + 每日去重一次。
+
+    与 maybe_auto_backfill（轻量 T+N）互补：本函数跑完整 close_review。
+    """
+    cfg = cfg or load_config()
+    io = io or IO(interactive=False, quiet=True)
+    log = logger_mod.get_logger("review")
+    today = utils.today_str()
+    out: Dict[str, Any] = {"date": today}
+
+    if not force and not cfg.get("review.scheduled_enabled", True):
+        log.info("tea.review skip: scheduled_disabled")
+        out["skip"] = "scheduled_disabled"
+        return out
+
+    if not force and not utils.is_trading_day(utils.now().date()):
+        log.info("tea.review skip: not_trading_day")
+        out["skip"] = "not_trading_day"
+        return out
+
+    tm = Timing(cfg)
+    if not force and not tm.is_after_close():
+        log.info("tea.review skip: before_close phase=%s", tm.phase())
+        out["skip"] = "before_close"
+        return out
+
+    state = _load_review_state(cfg)
+    if not force and state.get("last_date") == today:
+        log.info("tea.review skip: already_done")
+        out["skip"] = "already_done"
+        return out
+
+    log.info("tea.review scheduled start date=%s force=%s", today, force)
+    result = close_review(cfg=cfg, market=market, io=io)
+    out.update(result)
+    _save_review_state(cfg, {"last_date": today, "last_run": utils.now().isoformat(timespec="seconds")})
+    ft = result.get("followthrough") or {}
+    log.info("tea.review scheduled done updated=%s pending=%s",
+             ft.get("updated"), ft.get("pending"))
     return out
 
 
@@ -793,6 +851,11 @@ def weekly_email(days: int = 7, cfg: Optional[Config] = None,
     io = io or IO()
     log = logger_mod.get_logger("weekly_email")
     days = int(days or cfg.get("weekly_email.days") or 7)
+
+    if cfg.get("weekly_email.run_review_before", True):
+        rev = scheduled_review(cfg=cfg, io=IO(interactive=False, quiet=True), force=True)
+        log.info("tea.weekly_email pre_review skip=%s updated=%s",
+                 rev.get("skip"), (rev.get("followthrough") or {}).get("updated"))
 
     res = weekly.send_email_report(days=days, cfg=cfg, force=force)
     if res.get("skip"):

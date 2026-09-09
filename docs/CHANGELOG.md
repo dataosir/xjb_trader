@@ -4,6 +4,16 @@
 
 ## [Unreleased]
 
+### 策略（2026-09-09：方案 A rank 5→3 + 方案 E 周报 T+3 + 自动 review）
+
+> 关联：[`archive/SHADOW_BUCKET_PLAN_2026-09-04.md`](archive/SHADOW_BUCKET_PLAN_2026-09-04.md) 方案 A/E；用户确认提前启动（原 ~09-18 复盘）。
+
+- **方案 A**：`strategy.seed_min_sector_rank` / `winrate_sector_rank_buyable_max` / `seed.sector_relax_rank_nozt` 默认 **5→3**（只做前三板块）。  
+- **方案 E**：周报新增「三日持有 T+3>0」段（萌芽专看 + rank/涨幅/影子桶）；`close_review` 打印 T+3 归因。  
+- **自动 review**：`tea review --scheduled` + launchd 工作日 **15:35**（`ops/08`）；F17 发周报前 `force` 再跑一遍。  
+- **配置**：`review.scheduled_enabled`、`weekly_email.run_review_before`。  
+- **自测**：T+3 归因 + scheduled 守卫 + 周报正文含 T+3。
+
 ### 功能（2026-09-09：F18 观察池即时 Push）
 
 > 关联：F16 扫描逻辑不变；盘中 macOS 弹窗 + Bark iPhone Push，与邮件并行。

@@ -1827,8 +1827,8 @@ def check_winrate_gate(t: Suite, cfg: Config, mk: FakeMarket) -> None:
             ev["winrate_score"] = wr_score
         return sc._winrate_gate(ev)
 
-    t.ok("板块排名 6 > 5 → 降级", bool(gate(6, "萌芽", wr_score=5)))
-    t.ok("板块排名 5 ≤ 5 → 放行（胜率分达标）", gate(5, "萌芽", wr_score=5) is None)
+    t.ok("板块排名 4 > 3 → 降级（方案 A）", bool(gate(4, "萌芽", wr_score=5)))
+    t.ok("板块排名 3 ≤ 3 → 放行（胜率分达标）", gate(3, "萌芽", wr_score=5) is None)
     t.ok("突破一律降级（即使排名 1）", bool(gate(1, "突破", wr_score=5)))
     t.ok("突破一律降级（排名 3）", bool(gate(3, "突破", wr_score=5)))
     t.ok("过热一律降级（即使排名 1）", bool(gate(1, "过热", wr_score=5)))
@@ -1849,8 +1849,8 @@ def check_winrate_gate(t: Suite, cfg: Config, mk: FakeMarket) -> None:
         }
         return sc._winrate_gate(ev)
 
-    t.ok("入选板块排名 11 > 5 → 降级",
-         bool(gate_pick(3, "萌芽", pick_rank=11, pick_bk="BK1", cur_bk="BK1")))
+    t.ok("入选板块排名 4 > 3 → 降级（方案 A）",
+         bool(gate_pick(2, "萌芽", pick_rank=4, pick_bk="BK1", cur_bk="BK1")))
     t.ok("入选/预审板块 bk 不一致 → 降级",
          bool(gate_pick(2, "萌芽", pick_rank=2, pick_bk="BK_A", cur_bk="BK_B",
                         pick_name="强板块", cur_name="弱板块")))
@@ -1870,8 +1870,8 @@ def check_winrate_gate(t: Suite, cfg: Config, mk: FakeMarket) -> None:
     old_oh = cfg.get("strategy.winrate_overheat_block")
     cfg.set("strategy.winrate_overheat_block", False)
     try:
-        t.ok("关闭过热禁买后排名5+胜率分达标 → 放行",
-             gate(5, "过热", wr_score=5) is None)
+        t.ok("关闭过热禁买后排名3+胜率分达标 → 放行",
+             gate(3, "过热", wr_score=5) is None)
     finally:
         cfg.set("strategy.winrate_overheat_block", old_oh)
 
@@ -3247,6 +3247,56 @@ def check_notify_setup(t: Suite, home: str) -> None:
         notify_mod.set_test_macos(None)
 
 
+# ==================================================================== 方案 E / 自动 review
+
+def check_t3_attribution_and_scheduled_review(t: Suite, c: Config) -> None:
+    """T+3 归因（方案 E）+ scheduled_review 守卫。"""
+    from tea.phases import IO
+    from tea.reporting import weekly as weekly_mod
+
+    t.head("归因 · T+3 周报 + 自动 review")
+
+    t.eq("方案 A 默认 rank 上限", c.get("strategy.winrate_sector_rank_buyable_max"), 3)
+    t.eq("方案 A seed_min_sector_rank", c.get("strategy.seed_min_sector_rank"), 3)
+    t.eq("方案 A sector_relax_rank_nozt", c.get("seed.sector_relax_rank_nozt"), 3)
+    t.ok("review.scheduled_enabled 默认开", c.get("review.scheduled_enabled") is True)
+
+    ft_mod.save_records([
+        {"date": "2026-08-01", "code": "600001", "stage": "萌芽", "sector_rank": 2,
+         "chg_pct": 4.0, "track": "可买", "result": "win", "next_chg": 3.5,
+         "chg_t3": 2.0},
+        {"date": "2026-08-02", "code": "600002", "stage": "萌芽", "sector_rank": 4,
+         "chg_pct": 6.0, "track": "观察", "result": "loss", "next_chg": -1.0,
+         "chg_t3": -2.0},
+        {"date": "2026-08-03", "code": "600003", "stage": "突破", "sector_rank": 1,
+         "chg_pct": 8.0, "track": "观察", "result": None},
+    ], c)
+
+    st = ft_mod.t3_attribution(c)
+    t.eq("T+3 回填 2 条", st["total_n"], 2)
+    t.eq("萌芽 T+3 样本", st["mengya_n"], 2)
+    t.ok("format_t3 含萌芽", "萌芽专看" in ft_mod.format_t3_attribution(c))
+
+    md = weekly_mod.render_md(cfg=c)
+    t.ok("周报含三日持有段", "三日持有 T+3>0" in md)
+    t.ok("周报含萌芽专看", "萌芽专看" in md)
+
+    c.set("review.scheduled_enabled", False)
+    skip = runner_mod.scheduled_review(cfg=c, force=False)
+    t.eq("关 scheduled 跳过", skip.get("skip"), "scheduled_disabled")
+    c.set("review.scheduled_enabled", True)
+
+    state_path = c.data_file("review_scheduled_state_file")
+    if os.path.exists(state_path):
+        os.remove(state_path)
+    mk = FakeMarket(c)
+    done = runner_mod.scheduled_review(cfg=c, market=mk,
+                                       io=IO(interactive=False, quiet=True), force=True)
+    t.ok("force review 无 skip", "skip" not in done)
+    t.ok("state 已写入", os.path.exists(state_path))
+    t.ok("state 记录今日", bool(utils.read_json(state_path, default={}).get("last_date")))
+
+
 # ==================================================================== F17 周报邮件
 
 def check_weekly_email(t: Suite, c: Config) -> None:
@@ -3281,6 +3331,7 @@ def check_weekly_email(t: Suite, c: Config) -> None:
     t.ok("邮件已 mock", len(sent_box) == 1)
     t.ok("主题含选股周报", "选股周报" in (sent_box[0].get("subject") or ""))
     t.ok("正文含纪律自查", "纪律自查" in (sent_box[0].get("body") or ""))
+    t.ok("正文含 T+3 段", "三日持有 T+3>0" in (sent_box[0].get("body") or ""))
     t.ok("state 已记录", weekly_mod.is_sent_this_week(c))
 
     c.set("weekly_email.require_friday", False)
@@ -3507,6 +3558,7 @@ def main(verbose: bool = True, cfg: Optional[Config] = None) -> int:
         check_email_setup(t, tmp)
         check_notify_push(t, c)
         check_notify_setup(t, tmp)
+        check_t3_attribution_and_scheduled_review(t, c)
         check_weekly_email(t, c)
         return t.report()
     finally:

@@ -175,7 +175,10 @@ def cmd_plan_clear(args, cfg: Config) -> int:
 
 
 def cmd_review(args, cfg: Config) -> int:
-    runner.close_review(cfg=cfg, io=_io(), prune=not args.no_prune)
+    if args.scheduled:
+        runner.scheduled_review(cfg=cfg, io=_io(), force=args.force)
+    else:
+        runner.close_review(cfg=cfg, io=_io(), prune=not args.no_prune)
     return 0
 
 
@@ -829,6 +832,9 @@ def build_parser() -> argparse.ArgumentParser:
 
     rv = sub.add_parser("review", help="盘后复核：跟涨回填 + 观察池 + 当日累积")
     rv.add_argument("--no-prune", action="store_true", help="不自动清理超时观察项")
+    rv.add_argument("--scheduled", action="store_true",
+                    help="launchd 模式：交易日收盘后 + 每日去重（见 ops/08）")
+    rv.add_argument("--force", action="store_true", help="忽略时段/去重守卫")
     rv.set_defaults(func=cmd_review)
 
     st = sub.add_parser("status", help="今日状态（门禁计数 / 计划 / 持仓）")

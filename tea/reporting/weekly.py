@@ -41,6 +41,7 @@ def collect(days: int = 7, cfg: Optional[Config] = None) -> Dict[str, Any]:
         "decisions": decisions,
         "forced_n": len(forced),
         "followthrough": followthrough.aggregate(cfg),
+        "t3_attribution": followthrough.t3_attribution(cfg),
         "watch_items": watch_pool.items(cfg),
         "empty_days": (rd.get("verdicts") or {}).get("EMPTY", 0)
                       + (rd.get("verdicts") or {}).get("NO_SCAN", 0),
@@ -127,6 +128,25 @@ def check_discipline(wk: dict, cfg: Optional[Config] = None) -> List[dict]:
         "ok": over <= max_size,
         "advice": "记得跑收盘复核剔除超时项" if over else "观察池为空",
     })
+
+    t3 = wk.get("t3_attribution") or {}
+    gap = t3.get("gap") or {}
+    pending_t3 = gap.get("pending_t3", 0)
+    total_n = t3.get("total_n") or 0
+    total_rate = t3.get("total_rate")
+    mengya_rate = t3.get("mengya_rate")
+    mengya_n = t3.get("mengya_n") or 0
+    t3_val = (f"全样本 {total_rate * 100:.0f}%（{t3.get('total_up', 0)}/{total_n}）"
+              if total_rate is not None else "尚无 T+3 回填")
+    if mengya_n and mengya_rate is not None:
+        t3_val += f"；萌芽 {mengya_rate * 100:.0f}%（{t3.get('mengya_up', 0)}/{mengya_n}）"
+    out.append({
+        "item": "T+3 上涨率（方案 E）",
+        "value": t3_val,
+        "ok": pending_t3 == 0,
+        "advice": (f"待 T+3 回填 {pending_t3} 条，周五周报前会自动 review"
+                   if pending_t3 else "T+3 已齐，看周报「三日持有」段对照 rank≤3 / 影子桶"),
+    })
     return out
 
 
@@ -198,6 +218,36 @@ def render_md(wk: Optional[dict] = None, cfg: Optional[Config] = None) -> str:
 
     # ---- 累计统计与归因
     lines.append(stats.render_md(wk.get("overall"), cfg))
+
+    # ---- T+3 三日持有（方案 E：突出萌芽 / rank / 影子桶）
+    t3 = wk.get("t3_attribution") or {}
+    lines += ["## 三日持有 T+3>0（方案 E，只读对照）", ""]
+    if not t3.get("total_n"):
+        lines.append("尚无 T+3 回填样本；工作日 15:35 自动 review 或菜单 `8` 手动复核。")
+    else:
+        tr = t3.get("total_rate") or 0.0
+        lines.append(f"- **全样本**：{t3.get('total_up', 0)}/{t3['total_n']} = **{tr:.0%}**")
+        if t3.get("mengya_n"):
+            mr = t3.get("mengya_rate") or 0.0
+            lines.append(f"- **萌芽专看**（方案 E）：{t3.get('mengya_up', 0)}/{t3['mengya_n']} = **{mr:.0%}**")
+        gap = t3.get("gap") or {}
+        lines.append(f"- 待回填：T+1 {gap.get('pending_t1', 0)}｜T+3 {gap.get('pending_t3', 0)}")
+        for dim, title in (("rank", "板块排名"), ("chg", "涨幅桶"), ("stage", "阶段"), ("track", "轨道")):
+            bucket = t3.get(dim) or {}
+            if not bucket:
+                continue
+            lines += ["", f"### {title}", "", "| 分组 | 样本 | T+3>0 | 胜率 |", "| --- | --- | --- | --- |"]
+            for k, v in sorted(bucket.items(), key=lambda x: -x[1]["n"]):
+                rr = v.get("rate")
+                lines.append(f"| {k} | {v['n']} | {v['up']} | {stats.fmt_wr(rr)} |")
+        shadow = t3.get("shadow") or {}
+        if shadow.get("n_t3"):
+            sr = shadow.get("t3_up_rate") or 0.0
+            flag = "✅" if shadow.get("ready") else "对照中"
+            lines += ["", f"### 影子桶（萌芽∪前三非突破） {flag}",
+                      f"- T+3>0：{shadow.get('t3_up', 0)}/{shadow['n_t3']} = **{sr:.0%}**"
+                      f"（门槛 ≥{shadow.get('target', 0.6):.0%}，n≥{shadow.get('min_samples', 15)}）"]
+    lines.append("")
 
     # ---- 跟涨经验
     agg = wk.get("followthrough") or {}
@@ -385,4 +435,15 @@ def format_weekly(wk: Optional[dict] = None, cfg: Optional[Config] = None) -> st
         lines.append("  ---- 落选原因累计 TOP ----")
         for k, v in list(reasons.items())[:10]:
             lines.append(f"    {v:>4}  {k}")
+    t3 = wk.get("t3_attribution") or {}
+    if t3.get("total_n"):
+        tr = t3.get("total_rate") or 0.0
+        lines.append(f"  ---- T+3 三日持有（方案 E）----")
+        lines.append(f"    全样本 T+3>0 {tr:.0%}（{t3.get('total_up', 0)}/{t3['total_n']}）")
+        if t3.get("mengya_n"):
+            mr = t3.get("mengya_rate") or 0.0
+            lines.append(f"    萌芽 T+3>0 {mr:.0%}（{t3.get('mengya_up', 0)}/{t3['mengya_n']}）")
+        gap = t3.get("gap") or {}
+        if gap.get("pending_t3"):
+            lines.append(f"    待 T+3 回填 {gap['pending_t3']} 条")
     return "\n".join(lines)

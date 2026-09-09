@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.tea.review</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>__TEA_HOME__/ops/review-cron.sh</string>
+    </array>
+    <key>WorkingDirectory</key>
+    <string>__TEA_HOME__</string>
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>TEA_HOME</key>
+        <string>__TEA_HOME__</string>
+        <key>PATH</key>
+        <string>/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin</string>
+    </dict>
+    <key>StartCalendarInterval</key>
+    <array>
+        <dict>
+            <key>Weekday</key><integer>1</integer>
+            <key>Hour</key><integer>15</integer>
+            <key>Minute</key><integer>35</integer>
+        </dict>
+        <dict>
+            <key>Weekday</key><integer>2</integer>
+            <key>Hour</key><integer>15</integer>
+            <key>Minute</key><integer>35</integer>
+        </dict>
+        <dict>
+            <key>Weekday</key><integer>3</integer>
+            <key>Hour</key><integer>15</integer>
+            <key>Minute</key><integer>35</integer>
+        </dict>
+        <dict>
+            <key>Weekday</key><integer>4</integer>
+            <key>Hour</key><integer>15</integer>
+            <key>Minute</key><integer>35</integer>
+        </dict>
+        <dict>
+            <key>Weekday</key><integer>5</integer>
+            <key>Hour</key><integer>15</integer>
+            <key>Minute</key><integer>35</integer>
+        </dict>
+    </array>
+    <key>StandardOutPath</key>
+    <string>__TEA_HOME__/logs/launchd-review.stdout.log</string>
+    <key>StandardErrorPath</key>
+    <string>__TEA_HOME__/logs/launchd-review.stderr.log</string>
+    <key>RunAtLoad</key>
+    <false/>
+</dict>
+</plist>

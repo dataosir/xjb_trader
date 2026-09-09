@@ -37,16 +37,16 @@
 
 **以攒证据为主**：缺口看板盯 T+1/T+3；影子桶（萌芽∪前三非突破）对照 **T+3>0≥60%**（验收门槛，非收益承诺）；巩固可买硬闸；低吸空池只观察。
 
-已落地（代码）：突破/过热禁买、`winrate_score`、板块一致性、**自动轻量回填（默认后台异步）**、候选否决原因必展示、**样本缺口看板**、**`shadow_tag` 落盘对照**、大盘指数超时修复 + MA20 跨源补全 + `tea.data` 运行日志**、**共振分/行情关键节点 `tea.log` 追溯 + launchd 直调 python 修复**、**东财 K 线会话熔断（push2his 封禁时直切腾讯）+ 缺口横幅误报修复**、**布林线观测因子（只算不落闸，落盘+控制台）**、**F16 观察池盘中邮件提醒**（`tea watch-alert` + launchd 每分钟 + 163 SMTP 默认 + `tea setup-email` 引导配置）、**F17 每周选股周报邮件**（`tea weekly-email` + launchd 周五 17:00 + 复用 F12 周报）、**F18 即时 Push**（`notify.send_alert` macOS 弹窗 + Bark + 邮件并行 + `tea setup-notify`）。
+已落地（代码）：突破/过热禁买、`winrate_score`、板块一致性、**自动轻量回填（默认后台异步）**、**盘后全量 review launchd（15:35，补 T+3）**、候选否决原因必展示、**样本缺口看板**、**`shadow_tag` 落盘对照**、**方案 E 周报 T+3 突出**、**方案 A rank 5→3**、大盘指数超时修复 + MA20 跨源补全 + `tea.data` 运行日志**、**共振分/行情关键节点 `tea.log` 追溯 + launchd 直调 python 修复**、**东财 K 线会话熔断（push2his 封禁时直切腾讯）+ 缺口横幅误报修复**、**布林线观测因子（只算不落闸，落盘+控制台）**、**F16 观察池盘中邮件提醒**（`tea watch-alert` + launchd 每分钟 + 163 SMTP 默认 + `tea setup-email` 引导配置）、**F17 每周选股周报邮件**（`tea weekly-email` + launchd 周五 17:00 + 发信前 force review）、**F18 即时 Push**（`notify.send_alert` macOS 弹窗 + Bark + 邮件并行 + `tea setup-notify`）。
 
 ## 进行中
 
 | ID | 事项 | 说明 |
 |---|---|---|
-| B-P0-01 | 每日 `seed-plan` + 适时全量 `review` | 运营；**launchd 方案 A 已落地**（`ops/05` 种子 + `ops/06` 观察提醒 + `ops/07` 周五周报）；看缺口看板补 T+3 |
+| B-P0-01 | 每日 `seed-plan` + 全量 `review` | 运营；launchd 已落地（`ops/05` 种子 + `06` 观察 + `07` 周五周报 + **`08` 盘后 review**）；菜单 8 可手动补跑 |
 | B-P0-02 / 07 | 因子与 `lowbuy` 样本积累 | 低吸**先观察**空池 diag，不放宽、不买入 |
 | B-P1-01 | rule vs winrate 影子对照 | 1–2 周，不写计划 |
-| B-P1-06 | `shadow_tag` T+3 对照 | **T+3 69% 已达标**（32 条）；**方案 0 已确认**（维持 2 周攒样本）— [`archive/SHADOW_BUCKET_PLAN_2026-09-04.md`](archive/SHADOW_BUCKET_PLAN_2026-09-04.md) |
+| B-P1-06 | `shadow_tag` T+3 对照 | T+3 69% 已达标；**方案 A rank 5→3 已启动**（2026-09-09）；方案 E 周报 T+3 已落地 — [`archive/SHADOW_BUCKET_PLAN_2026-09-04.md`](archive/SHADOW_BUCKET_PLAN_2026-09-04.md) |
 | B-P1-04 | 逐因子归因 | **草稿已写** [`archive/FACTOR_ATTRIB_2026-09-04.md`](archive/FACTOR_ATTRIB_2026-09-04.md)；技术因子 n&lt;30 未定稿 |
 
 ## 明确不做（现在）
@@ -63,8 +63,8 @@
 
 ## 下一步计划
 
-1. 日循环：`seed-plan`（launchd 14:30 或手动；自动回填）+ 每周至少一次菜单 `8` 全量 `review`，看缺口看板把待 T+3 压下去；**人**侧按 [`ops/03-operator-daily-sop.md`](ops/03-operator-daily-sop.md) 晨晚间 checklist。  
-2. **方案 0 执行中**（~2026-09-18 复盘）：维持闸门不变；日 `seed-plan` + 补 T+1/T+3；目标新闸后可买 ≥10、rank≤3 n≥30、技术因子 ≥30。2 周后达标再议方案 A（rank 5→3）。归因草稿见 `archive/FACTOR_ATTRIB_2026-09-04.md`。  
+1. 日循环：`seed-plan`（14:30）+ **自动 review**（15:35 launchd）+ 菜单 `8` 可随时补跑；周五 `weekly-email` 发信前再 force review。  
+2. **方案 A 已启动**（rank 5→3）：攒 post-change 样本；盯 rank≤3 T+3、新闸后可买 n≥10；~09-18 复盘对照。归因见 `archive/FACTOR_ATTRIB_2026-09-04.md`。  
 3. 低吸：空池只读 diag；`lowbuy` 回填 ≥30 前不上买入。  
 4. **Ops-2（待做）**：证据周 scorecard + 里程碑/Kill 表（`ops/04`–`05`）。
 

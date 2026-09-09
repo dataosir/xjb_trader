@@ -66,6 +66,7 @@ DEFAULTS: Dict[str, Any] = {
         "shadow_pool_file": "shadow_pool.json",
         "watch_alert_state_file": "watch_alert_state.json",
         "weekly_email_state_file": "weekly_email_state.json",
+        "review_scheduled_state_file": "review_scheduled_state.json",
     },
     # ---------------------------------------------------------- 行情/防封
     "market": {
@@ -397,7 +398,7 @@ DEFAULTS: Dict[str, Any] = {
         # 胜率因子门槛（阶段 A 硬规则）：历史胜率低的特征强制降级观察，不参与可买。
         # 依据 62 条回填样本：板块排名 1-3 胜率 50%、6~15 仅 0~17%；突破阶段仅 6%。
         "winrate_gate_enabled": True,
-        "winrate_sector_rank_buyable_max": 5,
+        "winrate_sector_rank_buyable_max": 3,  # 方案 A（2026-09-09）：5→3，对齐 rank≤3 T+3 65%
         # 突破阶段一律不得可买（历史 T+1 仅 6%）；旧键 winrate_breakout_sector_rank_max
         # 保留兼容，仅在 breakout_block=False 时回退为「突破+排名>N」逻辑。
         "winrate_breakout_block": True,
@@ -424,9 +425,8 @@ DEFAULTS: Dict[str, Any] = {
         "seed_max_output": 2,
         "seed_min_identity": 70,
         "seed_min_pick_score": 60,
-        # 板块硬门槛排名上限，收紧 10→5：排名 6~15 的板块 T+1 胜率 0~17%，
-        # 是当前 19% 总胜率的最大拖累，只做最强前 5 板块。
-        "seed_min_sector_rank": 5,
+        # 板块硬门槛排名上限：方案 A（2026-09-09）5→3，只做前三板块（T+3 65% vs 4-5 35%）。
+        "seed_min_sector_rank": 3,
         "seed_min_sector_limit_up": 2,
         "seed_cap_max": 300,
         "seed_rank_pct": 0.35,
@@ -504,8 +504,8 @@ DEFAULTS: Dict[str, Any] = {
         # 无涨停通道：弱市好板块常无涨停，阈值从 70 下调到 65 扩容
         # 排名上限收紧 12→6：无涨停板块本就更弱，再放排名 7~12 的中游板块只会拉低胜率。
         "sector_relax_score_nozt": 65.0,
-        # 无涨停通道排名上限：与「只做前 5」对齐（原 12→6→5）。
-        "sector_relax_rank_nozt": 5,
+        # 无涨停通道排名上限：方案 A（2026-09-09）5→3，与 seed_min_sector_rank 对齐。
+        "sector_relax_rank_nozt": 3,
         "diversify_replace_last": True,
         "shadow_bonus": 18.0,
         "shadow_near_rank": 6,
@@ -678,6 +678,10 @@ DEFAULTS: Dict[str, Any] = {
             "group": "TEA观察",
         },
     },
+    # ---------------------------------------------------------- 盘后复核调度（F11 扩展）
+    "review": {
+        "scheduled_enabled": True,           # launchd 工作日 15:35 自动全量 review
+    },
     # ---------------------------------------------------------- 每周选股周报邮件（F17）
     "weekly_email": {
         "enabled": False,
@@ -685,6 +689,7 @@ DEFAULTS: Dict[str, Any] = {
         "dedupe_per_week": True,
         "require_friday": True,
         "subject_prefix": "[TEA周报]",
+        "run_review_before": True,           # 发周报前先跑 close_review，确保 T+3 最新
     },
     # ---------------------------------------------------------- 观察池
     "watch": {
