@@ -36,6 +36,13 @@ if [ -z "$PY" ]; then
     exit 1
 fi
 
+_on_fail() {
+    local rc="$1"
+    if [ "$rc" -ne 0 ]; then
+        error_log_append "weekly-email-cron" "weekly-email failed exit=$rc (see logs/daily/weekly_email/$(date +%Y-%m-%d).log)"
+    fi
+}
+
 LOG_FILE="$(daily_log_resolve weekly_email)"
 daily_log_ensure_dir "$LOG_FILE"
 daily_log_prune weekly_email
@@ -47,4 +54,5 @@ if "$PY" -m tea weekly-email >>"$LOG_FILE" 2>&1; then
 fi
 rc=$?
 echo "$(ts) done weekly-email exit=$rc" >>"$LOG_FILE"
+_on_fail "$rc"
 exit "$rc"

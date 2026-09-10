@@ -11,11 +11,18 @@ launchd_find_python() {
     PY="${TEA_PYTHON:-}"
     if [ -z "$PY" ]; then
         for cand in python3 python; do
-            if command -v "$cand" >/dev/null 2>&1; then PY="$cand"; break; fi
+            if command -v "$cand" >/dev/null 2>&1; then
+                PY="$(command -v "$cand")"
+                break
+            fi
         done
     fi
     if [ -z "$PY" ]; then
         echo "找不到 python3，请设置 TEA_PYTHON" >&2
+        exit 1
+    fi
+    if ! "$PY" -c "import tea" >/dev/null 2>&1; then
+        echo "Python $PY 无法 import tea，请设置 TEA_PYTHON 为已安装本项目的解释器" >&2
         exit 1
     fi
 }

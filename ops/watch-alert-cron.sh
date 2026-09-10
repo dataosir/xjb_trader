@@ -36,6 +36,11 @@ if [ -z "$PY" ]; then
     exit 1
 fi
 
+_on_fail() {
+    local rc="$1"
+    error_log_append "watch-alert-cron" "watch-alert failed exit=$rc"
+}
+
 # 静默 skip 不落盘；有输出（发信/失败/候选）时 Python 写入 logs/daily/watch_alert/日期.log
 OUT="$("$PY" -m tea watch-alert 2>&1)" || rc=$?
 rc=${rc:-0}
@@ -46,5 +51,8 @@ if [ -n "$OUT" ]; then
     echo "$(ts) watch-alert" >>"$LOG_FILE"
     echo "$OUT" >>"$LOG_FILE"
     echo "$(ts) done watch-alert exit=$rc" >>"$LOG_FILE"
+fi
+if [ "$rc" -ne 0 ]; then
+    _on_fail "$rc"
 fi
 exit "$rc"

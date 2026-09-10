@@ -11,6 +11,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from tea.config.config_store import Config, load_config
 from tea.core import utils
 from tea.data import Market
+from tea.screening.scan_anchor import ANCHOR_PRIMARY, anchor_rank
 
 KEY_SEP = "|"
 
@@ -38,6 +39,39 @@ _TRACK_PRIORITY = {
 
 def _track_rank(track: Optional[str]) -> int:
     return _TRACK_PRIORITY.get(track, -1)
+
+
+def _should_replace_record(old: dict, new_rec: dict, new_anchor: str) -> bool:
+    """同日同票是否用新快照覆盖（保留已回填 T+N）。
+
+    锚点 primary > manual > winrate；rule 通道优先于 winrate；同锚点内按轨道升级。
+    primary 同轨道可刷新快照（漏扫重跑）。
+    """
+    old_mode = old.get("mode") or "rule"
+    new_mode = new_rec.get("mode") or "rule"
+    if old_mode == "rule" and new_mode == "winrate":
+        return False
+    if old_mode == "winrate" and new_mode == "rule":
+        new_r = anchor_rank(new_anchor)
+        old_r = anchor_rank(old.get("scan_anchor"))
+        if new_r > old_r:
+            return True
+        return _track_rank(new_rec.get("track")) > _track_rank(old.get("track"))
+
+    new_r = anchor_rank(new_anchor)
+    old_r = anchor_rank(old.get("scan_anchor"))
+    if new_r > old_r:
+        return True
+    if new_r < old_r:
+        return False
+
+    new_tr = _track_rank(new_rec.get("track"))
+    old_tr = _track_rank(old.get("track"))
+    if new_tr > old_tr:
+        return True
+    if new_tr < old_tr:
+        return False
+    return new_anchor == ANCHOR_PRIMARY
 
 
 # ------------------------------------------------------------------ 影子对照标签（不驱动计划）
@@ -72,12 +106,16 @@ def resolve_shadow_tag(rec: dict) -> Optional[str]:
 
 
 def record_seed(entries: List[dict], cfg: Optional[Config] = None,
-                date: Optional[str] = None) -> dict:
+                date: Optional[str] = None,
+                scan_anchor: Optional[str] = None) -> dict:
     """落盘当日种子记录（供次日回填 T+1 结果），按 (date, code) 去重。
 
     seed-plan 一天可能跑多次，同一标的会被重复 append，导致 T+1 样本翻倍、胜率
     失真。这里以 (date, code) 去重，但同一天内同一标的的轨道可能升级（观察→启动
     待定→可买），只记首条会把「可买」漏掉——所以按轨道优先级升级保留更高者。
+
+    幂等锚点 ``scan_anchor``（primary/manual/winrate）：14:30 主扫描可覆盖早盘
+    manual 快照；manual 不能覆盖 primary；winrate 不覆盖 rule。
     返回 {"added": n, "skipped": m, "updated": k}。
     """
     cfg = cfg or load_config()
@@ -122,6 +160,7 @@ def record_seed(entries: List[dict], cfg: Optional[Config] = None,
             "lowbuy": bool(e.get("lowbuy")),
             "winrate_score": e.get("winrate_score"),
             "mode": e.get("mode", "rule"),
+            "scan_anchor": scan_anchor or e.get("scan_anchor"),
             "pick_sector_bk": e.get("pick_sector_bk"),
             "pick_sector_name": e.get("pick_sector_name"),
             "pick_sector_rank": e.get("pick_sector_rank"),
@@ -140,10 +179,12 @@ def record_seed(entries: List[dict], cfg: Optional[Config] = None,
             continue
         idx = by_key[key]
         old = recs[idx]
-        if _track_rank(rec.get("track")) > _track_rank(old.get("track")):
-            # 用更高优先级轨道的新快照覆盖，但保留已回填的 T+1 结果（若有）。
+        if _should_replace_record(old, rec, scan_anchor or ""):
             rec["next_chg"] = old.get("next_chg")
             rec["result"] = old.get("result")
+            rec["chg_t2"] = old.get("chg_t2")
+            rec["chg_t3"] = old.get("chg_t3")
+            rec["chg_t5"] = old.get("chg_t5")
             recs[idx] = rec
             updated += 1
             changed = True

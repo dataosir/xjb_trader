@@ -10,6 +10,7 @@ from typing import Dict, List, Optional
 from tea.config.config_store import Config, load_config
 from tea.core import utils
 from tea.reporting import seed_trace
+from tea.screening.scan_anchor import ANCHOR_PRIMARY
 
 KIND_SEED = "seed_scan"
 KIND_EVAL = "evaluation"
@@ -129,6 +130,8 @@ def day_digest(date: Optional[str] = None, cfg: Optional[Config] = None) -> dict
     date = date or utils.today_str()
     recs = load_log(cfg, date=date)
     seeds = [r for r in recs if r.get("kind") == KIND_SEED]
+    primary_seeds = [s for s in seeds if s.get("scan_anchor") == ANCHOR_PRIMARY]
+    digest_seeds = primary_seeds if primary_seeds else seeds
     evals = [r for r in recs if r.get("kind") == KIND_EVAL]
     sessions = [r for r in recs if r.get("kind") == KIND_SESSION]
     trades = [r for r in recs if r.get("kind") == KIND_TRADE]
@@ -138,9 +141,9 @@ def day_digest(date: Optional[str] = None, cfg: Optional[Config] = None) -> dict
         d = e.get("decision") or "?"
         decisions[d] = decisions.get(d, 0) + 1
 
-    last_seed = seeds[-1] if seeds else {}
+    last_seed = digest_seeds[-1] if digest_seeds else {}
     last_sess = sessions[-1] if sessions else {}
-    traces = seed_trace.load_traces(cfg, date)
+    traces = seed_trace.load_traces(cfg, date, scan_anchor=ANCHOR_PRIMARY)
     reasons: Dict[str, int] = {}
     for t in traces:
         reasons[t.get("reason", "?")] = reasons.get(t.get("reason", "?"), 0) + 1
@@ -150,7 +153,8 @@ def day_digest(date: Optional[str] = None, cfg: Optional[Config] = None) -> dict
         "sentiment_score": last_sess.get("sentiment_score") or last_seed.get("sentiment_score"),
         "cycle": last_sess.get("cycle") or last_seed.get("cycle"),
         "stance": last_sess.get("stance") or last_seed.get("stance"),
-        "scans": len(seeds), "verdict": last_seed.get("verdict"),
+        "scans": len(digest_seeds), "scans_total": len(seeds),
+        "verdict": last_seed.get("verdict"),
         "tier": last_seed.get("tier"),
         "candidates_n": last_seed.get("candidates_n"),
         "veto_passed_n": last_seed.get("veto_passed_n"),

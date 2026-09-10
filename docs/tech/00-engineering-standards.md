@@ -111,7 +111,19 @@ utils.hl("可买", utils.COLOR_SEED)                    # 种子选中标品红
 
 API：`tea/core/logger.py` 的 `daily_log_path` / `append_daily_log` / `write_daily_transcript` / `daily_log_session` / `prune_daily_logs`。`logs/tea.log` 仍作全量汇总（按日轮转），与日录互补。
 
-**保留策略**：操作日录默认保留 **7 天**（`logs.daily_backup_days`，含当天共 7 个自然日）；写入或 cron 启动时自动 `prune_daily_logs` 删除更早文件。汇总 `tea.log` 仍走 `logs.backup_days`（默认 30）。
+### 集中错误日志（`logs/error.log`）
+
+所有 **ERROR** 及以上写入 `logs/error.log`（与 `tea.log` 同按日轮转，保留 `logs.backup_days` 天）：
+
+| 来源 | 示例 |
+| --- | --- |
+| Python `logger.error` / 未捕获异常 | 邮件发送失败、CLI 崩溃 |
+| cron `error_log_append` | `review-cron` exit≠0、launchd 调度后进程异常退出 |
+| `append_error_log` | shell 显式落盘 |
+
+**每日排查**：`tail -20 logs/error.log` 或 `grep "$(date +%Y-%m-%d)" logs/error.log`。
+
+**保留策略**：操作日录默认保留 **7 天**（`logs.daily_backup_days`，含当天共 7 个自然日）；写入或 cron 启动时自动 `prune_daily_logs` 删除更早文件。汇总 `tea.log` / `error.log` 仍走 `logs.backup_days`（默认 30）。
 
 ## 新增模块放哪里
 

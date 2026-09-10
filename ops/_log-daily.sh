@@ -25,3 +25,14 @@ daily_log_prune() {
     fi
     "$PY" -c "from tea.core.logger import prune_daily_logs; prune_daily_logs('${category}')"
 }
+
+# 集中错误日志 logs/error.log（cron/launchd 失败、Python 未捕获异常等）
+error_log_append() {
+    local source="$1"
+    shift
+    if [ -z "${PY:-}" ]; then
+        echo "error_log_append: PY not set" >&2
+        return 1
+    fi
+    "$PY" -c "import sys; from tea.core.logger import append_error_log; append_error_log(sys.argv[2], source=sys.argv[1])" _ "$source" "$*"
+}

@@ -4,8 +4,10 @@
 不同，这里记的是「程序运行过程」：谁在何时、以什么参数、走了哪条分支、算出什么
 结果。用于日后**根据日志迭代程序**，不直接参与选股决策。
 
-- ``init_logging(cfg)``：进程启动时调用一次，把 root 日志落到 ``logs/tea.log``。
+- ``init_logging(cfg)``：进程启动时调用一次，把 root 日志落到 ``logs/tea.log``，
+  ERROR 及以上同步写入 ``logs/error.log``。
 - ``get_logger(name)``：取 ``tea`` 命名空间下的 logger，直接 ``.info/.warning/.error``。
+- ``append_error_log``：shell/cron 或需显式落盘的错误（如 launchd 调度失败）。
 - ``daily_log_path`` / ``append_daily_log``：按**操作类型**分目录的日录日志
   （``logs/daily/{category}/YYYY-MM-DD.log``）；当天无写入则**不创建**文件；
   超过 ``logs.daily_backup_days``（默认 7）自动清理。
@@ -40,6 +42,29 @@ DAILY_CATEGORIES: Dict[str, Tuple[str, ...]] = {
 _LOG_FMT = "%(asctime)s %(levelname)s [%(name)s] %(message)s"
 
 
+def error_log_path(cfg: Optional[Config] = None) -> str:
+    """集中错误日志路径 ``logs/error.log``。"""
+    cfg = cfg or load_config()
+    return os.path.join(cfg.logs_dir(), "error.log")
+
+
+def append_error_log(message: str, source: str = "", cfg: Optional[Config] = None) -> bool:
+    """追加一行到 ``error.log``（cron/launchd 或需显式落盘的错误）。失败返回 False。"""
+    if not message:
+        return False
+    try:
+        cfg = cfg or load_config()
+        path = error_log_path(cfg)
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        ts = utils.now().strftime("%Y-%m-%d %H:%M:%S %z")
+        src = f" [{source}]" if source else ""
+        with open(path, "a", encoding="utf-8") as fh:
+            fh.write(f"{ts} ERROR{src} {message.rstrip()}\n")
+        return True
+    except OSError:
+        return False
+
+
 def init_logging(cfg: Optional[Config] = None, level: int = logging.INFO) -> logging.Logger:
     """初始化运行日志（幂等），返回 root logger。
 
@@ -61,9 +86,17 @@ def init_logging(cfg: Optional[Config] = None, level: int = logging.INFO) -> log
             encoding="utf-8")
         handler.suffix = "%Y-%m-%d"
         handler.setFormatter(logging.Formatter(_LOG_FMT))
+        err_handler = logging.handlers.TimedRotatingFileHandler(
+            error_log_path(cfg),
+            when="midnight", backupCount=int(cfg.get("logs.backup_days", 30)),
+            encoding="utf-8")
+        err_handler.suffix = "%Y-%m-%d"
+        err_handler.setLevel(logging.ERROR)
+        err_handler.setFormatter(logging.Formatter(_LOG_FMT))
         logger.setLevel(level)
         logger.propagate = False
         logger.addHandler(handler)
+        logger.addHandler(err_handler)
     except Exception:
         # 目录建不出来 / handler 装不上：不落文件，退回默认，不打断主流程。
         logger.propagate = True

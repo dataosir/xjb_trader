@@ -2715,6 +2715,37 @@ def check_followthrough(t: Suite, cfg: Config) -> None:
     up2 = next(r for r in ft_mod.load_records(cfg) if r.get("code") == "600888")
     t.eq("轨道仍为可买", up2.get("track"), "可买")
 
+    # scan_anchor 幂等：manual 首扫 → primary 同轨道应覆盖；primary 不被 manual 覆盖
+    from tea.screening.scan_anchor import (
+        ANCHOR_MANUAL, ANCHOR_PRIMARY, ANCHOR_WINRATE,
+        should_write_canonical_scan_details,
+    )
+    r_am = ft_mod.record_seed([{"code": "601001", "name": "锚点票", "price": 9.0,
+                                "track": "观察轨"}],
+                              cfg, date="2026-08-14", scan_anchor=ANCHOR_MANUAL)
+    t.eq("manual 首扫落盘", r_am, {"added": 1, "skipped": 0, "updated": 0})
+    r_ap = ft_mod.record_seed([{"code": "601001", "name": "锚点票", "price": 9.5,
+                                "track": "观察轨"}],
+                              cfg, date="2026-08-14", scan_anchor=ANCHOR_PRIMARY)
+    t.eq("primary 覆盖 manual 同轨道", r_ap, {"added": 0, "skipped": 0, "updated": 1})
+    ap = next(r for r in ft_mod.load_records(cfg) if r.get("code") == "601001")
+    t.eq("primary 快照价", ap.get("close"), 9.5)
+    t.eq("scan_anchor 落盘", ap.get("scan_anchor"), ANCHOR_PRIMARY)
+    r_am2 = ft_mod.record_seed([{"code": "601001", "name": "锚点票", "price": 8.0,
+                                 "track": "观察轨"}],
+                               cfg, date="2026-08-14", scan_anchor=ANCHOR_MANUAL)
+    t.eq("manual 不能覆盖 primary", r_am2, {"added": 0, "skipped": 1, "updated": 0})
+    r_wr = ft_mod.record_seed([{"code": "601001", "name": "锚点票", "price": 7.0,
+                                "track": "可买", "mode": "winrate"}],
+                              cfg, date="2026-08-14", scan_anchor=ANCHOR_WINRATE)
+    t.eq("winrate 不能覆盖 rule", r_wr, {"added": 0, "skipped": 1, "updated": 0})
+    rich = {"candidates": [{}], "buyable": [{}], "candidates_n": 1, "veto_passed_n": 1}
+    empty = {"candidates": [], "buyable": [], "candidates_n": 0}
+    t.ok("空扫不覆盖有效 scan_details",
+         not should_write_canonical_scan_details(empty, rich, ANCHOR_MANUAL))
+    t.ok("primary 可覆盖 manual scan_details",
+         should_write_canonical_scan_details(rich, empty, ANCHOR_PRIMARY))
+
     # 新字段：市场天气 + 六维共振拆解随样本落盘（供「选了3天全跌」归因）
     r4 = ft_mod.record_seed([{
         "code": "600787", "name": "字段票", "price": 6.0, "track": "可买",
@@ -3447,6 +3478,11 @@ def check_t3_attribution_and_scheduled_review(t: Suite, c: Config) -> None:
          "<key>Hour</key><integer>15</integer>" in plist
          and "<key>Minute</key><integer>1</integer>" in plist
          and "com.tea.review" in plist)
+    t.ok("review plist 直调 python -m tea review --scheduled",
+         "<string>-m</string>" in plist
+         and "<string>review</string>" in plist
+         and "<string>--scheduled</string>" in plist
+         and "review-cron.sh" not in plist)
     t.ok("launchd list 含 review", "review:" in sched_mod.trigger_summary(c))
 
     ft_mod.save_records([
@@ -3672,6 +3708,22 @@ def check_daily_logs(t: Suite, cfg: Config) -> None:
     t.ok("超期文件已删", not os.path.exists(logger_mod.daily_log_path("seed", cfg, day=prune_day)))
 
 
+def check_error_log(t: Suite, cfg: Config) -> None:
+    """集中错误日志：Python ERROR 与 cron 显式落盘均写入 logs/error.log。"""
+    t.head("日志 · error.log")
+    path = logger_mod.error_log_path(cfg)
+    t.ok("error 路径", path.endswith(os.path.join("logs", "error.log")))
+    t.ok("append 成功", logger_mod.append_error_log("probe-error", source="selftest", cfg=cfg))
+    t.ok("写入后文件存在", os.path.exists(path))
+    with open(path, "r", encoding="utf-8") as fh:
+        body = fh.read()
+    t.ok("含 source 标记", "[selftest]" in body and "probe-error" in body)
+    logger_mod.get_logger("selftest").error("handler-probe")
+    with open(path, "r", encoding="utf-8") as fh:
+        body2 = fh.read()
+    t.ok("logging.ERROR 同步落盘", "handler-probe" in body2)
+
+
 def check_packaging(t: Suite) -> None:
     """打包规格的隐式导入清单必须盖住磁盘上所有模块。
 
@@ -3777,6 +3829,7 @@ def main(verbose: bool = True, cfg: Optional[Config] = None) -> int:
         check_onboarding(t, tmp)
         check_paths(t)
         check_daily_logs(t, c)
+        check_error_log(t, c)
         check_packaging(t)
         check_end_to_end(t, c, mk, sent)
         check_followthrough(t, c)

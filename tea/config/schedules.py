@@ -37,6 +37,7 @@ class LaunchdJob:
     config_prefix: str
     kind: str  # calendar | interval | shell_calendar
     tea_command: Optional[str] = None
+    tea_argv: Tuple[str, ...] = ()
     shell_script: Optional[str] = None
     stdout_log: str = ""
     stderr_log: str = ""
@@ -45,8 +46,10 @@ class LaunchdJob:
     def __post_init__(self) -> None:
         if self.kind == "interval" and not self.tea_command:
             raise ValueError(f"{self.job_id}: interval 任务需要 tea_command")
-        if self.kind in ("calendar", "shell_calendar") and not (self.tea_command or self.shell_script):
-            raise ValueError(f"{self.job_id}: calendar 任务需要 tea_command 或 shell_script")
+        if self.kind in ("calendar", "shell_calendar") and not (
+            self.tea_command or self.tea_argv or self.shell_script
+        ):
+            raise ValueError(f"{self.job_id}: calendar 任务需要 tea_command、tea_argv 或 shell_script")
 
 
 # 注册表：新增 launchd 任务只改此处 + config_store.scheduler + install 脚本
@@ -65,8 +68,8 @@ JOBS: Dict[str, LaunchdJob] = {
         job_id="review",
         label="com.tea.review",
         config_prefix="scheduler.review",
-        kind="shell_calendar",
-        shell_script="ops/review-cron.sh",
+        kind="calendar",
+        tea_argv=("review", "--scheduled"),
         stdout_log="launchd-review.stdout.log",
         stderr_log="launchd-review.stderr.log",
         description="盘后全量 review（T+3 回填）",
@@ -181,6 +184,8 @@ def _xml(s: str) -> str:
 def _program_args(job: LaunchdJob, tea_home: str, python_exe: str) -> List[str]:
     if job.shell_script:
         return [f"{tea_home.rstrip('/')}/{job.shell_script}"]
+    if job.tea_argv:
+        return [python_exe, "-m", "tea", *job.tea_argv]
     return [python_exe, "-m", "tea", job.tea_command or ""]
 
 

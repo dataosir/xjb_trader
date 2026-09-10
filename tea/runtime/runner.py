@@ -168,7 +168,10 @@ def seed_plan(cfg: Optional[Config] = None, market: Optional[Market] = None,
         sent = sent if sent is not None else weather(cfg, mk, io=io)
         io.say(format_weather(sent))
 
-        result = sc.seed_scan(sent=sent, include_eve=include_eve, io=io)
+        from tea.screening.scan_anchor import resolve_seed_anchor
+        scan_anchor = resolve_seed_anchor()
+        result = sc.seed_scan(sent=sent, include_eve=include_eve, io=io,
+                              scan_anchor=scan_anchor)
         # 运行日志留痕：每次扫描的漏斗结果，供日后按日志复盘「为什么没票」。
         logger_mod.get_logger("scan").info(
             "扫描完成 %s | 裁决 %s | 档位 %s | 初筛 %s | VETO过 %s | 可买 %d | 观察 %d | 近失 %d",
@@ -230,7 +233,8 @@ def seed_plan(cfg: Optional[Config] = None, market: Optional[Market] = None,
             io.say(f"  观察池新增/续期 {len(added)} 项：" + "、".join(added))
 
         entries = _ft_entries(result)
-        ft_res = ft_mod.record_seed(entries, cfg) if entries else {"added": 0, "skipped": 0, "updated": 0}
+        ft_res = (ft_mod.record_seed(entries, cfg, scan_anchor=scan_anchor)
+                  if entries else {"added": 0, "skipped": 0, "updated": 0})
         logger_mod.get_logger("scan").info("跟涨样本落盘 %s | 新增 %d | 升级 %d | 去重跳过 %d",
                                            result.get("scan_id"),
                                            ft_res.get("added"), ft_res.get("updated"),
@@ -309,7 +313,9 @@ def winrate_plan(cfg: Optional[Config] = None, market: Optional[Market] = None,
     sent = sent if sent is not None else weather(cfg, mk, io=io)
     io.say(format_weather(sent))
 
+    from tea.screening.scan_anchor import ANCHOR_WINRATE
     result = sc.winrate_scan(sent=sent, io=io)
+    result["scan_anchor"] = ANCHOR_WINRATE
     net = mk.stats_line() if hasattr(mk, "stats_line") else ""
     io.say(f"  ✓ 胜率选股扫描完成 ({time.time() - t_start:.1f}s)" + (f"，{net}" if net else ""))
     gap_banner = format_data_gap_banner(sent, net)
@@ -322,7 +328,8 @@ def winrate_plan(cfg: Optional[Config] = None, market: Optional[Market] = None,
 
     # 跟涨样本落盘（mode=winrate，与 rule 通道区分）
     entries = _ft_entries(result)
-    ft_res = ft_mod.record_seed(entries, cfg) if entries else {"added": 0, "skipped": 0, "updated": 0}
+    ft_res = (ft_mod.record_seed(entries, cfg, scan_anchor=ANCHOR_WINRATE)
+              if entries else {"added": 0, "skipped": 0, "updated": 0})
     if ft_res.get("added") or ft_res.get("updated"):
         io.say(f"  跟涨样本落盘 {ft_res.get('added') + ft_res.get('updated')} 条（mode=winrate），"
                f"跑 `tea review` 回填 T+N")

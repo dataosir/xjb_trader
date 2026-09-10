@@ -41,7 +41,7 @@
 
 | 字段组 | 示例键 | 用途 |
 |---|---|---|
-| 身份 | `code` `name` `date` `mode`（`rule`/`winrate`） | 主键与通道区分 |
+| 身份 | `code` `name` `date` `mode`（`rule`/`winrate`）`scan_anchor`（`primary`/`manual`/`winrate`） | 主键与通道区分；锚点幂等 |
 | 板块 | `sector_*`、`pick_sector_bk/name/rank` | 入选一致性归因 |
 | 评分 | `score` `winrate_score` `tier` | 共振 vs 胜率 |
 | 标签 | `lowbuy` `buyable` / 观察原因 / `shadow_tag` | 低吸、可买分流、影子对照桶 |

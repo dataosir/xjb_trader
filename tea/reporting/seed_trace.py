@@ -18,9 +18,11 @@ STEP_PREFLIGHT = "第4步-预审"
 class Tracer:
     """一次扫描的落选记录器。"""
 
-    def __init__(self, cfg: Optional[Config] = None, scan_id: Optional[str] = None):
+    def __init__(self, cfg: Optional[Config] = None, scan_id: Optional[str] = None,
+                 scan_anchor: Optional[str] = None):
         self.cfg = cfg or load_config()
         self.scan_id = scan_id or utils.stamp()
+        self.scan_anchor = scan_anchor
         self.records: List[dict] = []
         self.notes: List[str] = []
 
@@ -29,6 +31,7 @@ class Tracer:
             **extra: Any) -> dict:
         rec = {
             "scan_id": self.scan_id, "date": utils.today_str(),
+            "scan_anchor": self.scan_anchor,
             "ts": utils.now().strftime("%H:%M:%S"),
             "step": step, "code": code, "name": name,
             "reason": reason, "detail": detail,
@@ -95,11 +98,16 @@ class Tracer:
         return "\n".join(lines)
 
 
-def load_traces(cfg: Optional[Config] = None, date: Optional[str] = None) -> List[dict]:
+def load_traces(cfg: Optional[Config] = None, date: Optional[str] = None,
+                scan_anchor: Optional[str] = None) -> List[dict]:
     cfg = cfg or load_config()
     recs = utils.read_jsonl(cfg.data_file("seed_trace_jsonl"))
     if date:
         recs = [r for r in recs if r.get("date") == date]
+    if scan_anchor:
+        prim = [r for r in recs if r.get("scan_anchor") == scan_anchor]
+        if prim:
+            recs = prim
     return recs
 
 

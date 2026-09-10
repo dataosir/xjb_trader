@@ -1069,6 +1069,11 @@ def main(argv: Optional[List[str]] = None) -> int:
     except KeyboardInterrupt:
         print("\n已中断")
         return 130
+    except Exception as exc:
+        logger_mod.get_logger("cli").error(
+            "未捕获异常 cmd=%s: %s", getattr(args, "cmd", "?"), exc, exc_info=True)
+        print(f"\n错误：{exc}")
+        return 1
 
 
 if __name__ == "__main__":

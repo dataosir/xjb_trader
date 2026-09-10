@@ -68,3 +68,4 @@ tea review --scheduled --force
 | 待 T+3 一直不降 | 确认 launchd 已装；手动 `tea review --force` |
 | 周五周报 T+3 仍旧 | `weekly_email.run_review_before` 默认 true；查 `tea.weekly_email pre_review` 日志 |
 | 与菜单 8 重复 | 正常；去重保证每天自动只跑 1 次，菜单 8 可随时补跑 |
+| launchd 报 `Operation not permitted` | 旧版 plist 通过 bash 脚本触发时，若仓库在 **Downloads** 目录，macOS 可能拦截。新版 plist 直调 `python3 -m tea review --scheduled`，需重装：`./ops/install-launchd-review.sh`。若仍失败：将仓库移出 Downloads，或给 `python3` 开「完全磁盘访问权限」。 |

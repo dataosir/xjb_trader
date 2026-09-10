@@ -959,14 +959,24 @@ class Screener:
         return out
 
     # ============================================================== 每日扫描明细日志
-    def _write_scan_log(self, result: dict) -> None:
-        """将本次扫描的完整候选明细写入 data/ 目录，供周度复盘使用。"""
+    def _write_scan_log(self, result: dict, scan_anchor: str = "primary") -> None:
+        """将本次扫描的完整候选明细写入 data/ 目录，供周度复盘使用。
+
+        主文件 ``scan_details_{date}.json`` 仅接受锚点更高或同锚点且信息量不降级
+        的写入；否则落 sidecar，避免早盘多次空扫覆盖 14:30 快照。
+        """
+        from tea.screening.scan_anchor import (
+            ANCHOR_WINRATE, should_write_canonical_scan_details,
+            sidecar_scan_details_name,
+        )
+
         cfg = self.cfg
         today = utils.today_str()
-        path = os.path.join(cfg.data_dir(), f"scan_details_{today}.json")
+        canonical = os.path.join(cfg.data_dir(), f"scan_details_{today}.json")
         payload = {
             "scan_date": today,
             "scan_id": result.get("scan_id"),
+            "scan_anchor": scan_anchor,
             "timestamp": result.get("at"),
             "verdict": result.get("verdict"),
             "tier": result.get("tier"),
@@ -980,17 +990,31 @@ class Screener:
         }
         utils.ensure_dir(cfg.data_dir())
         try:
-            utils.write_json(path, payload)
+            if scan_anchor == ANCHOR_WINRATE:
+                return
+            existing = None
+            if os.path.isfile(canonical):
+                existing = utils.read_json(canonical)
+            if should_write_canonical_scan_details(result, existing, scan_anchor):
+                utils.write_json(canonical, payload)
+            else:
+                side = sidecar_scan_details_name(
+                    today, scan_anchor, str(result.get("scan_id") or ""))
+                utils.write_json(os.path.join(cfg.data_dir(), side), payload)
         except Exception:
             # 日志写入失败不中断主流程
             pass
 
     # ============================================================== 主流程
     def seed_scan(self, sent: Optional[dict] = None, include_eve: bool = True,
-                  write_trace: bool = True, io: Any = None) -> dict:
+                  write_trace: bool = True, io: Any = None,
+                  scan_anchor: Optional[str] = None) -> dict:
         """种子扫描四步流总入口。"""
+        from tea.screening.scan_anchor import resolve_seed_anchor
+
         cfg = self.cfg
-        tracer = seed_trace.Tracer(cfg)
+        anchor = scan_anchor or resolve_seed_anchor()
+        tracer = seed_trace.Tracer(cfg, scan_anchor=anchor)
         sent = sent if sent is not None else get_sentiment(self.mk, cfg, io=io)
 
         # 大盘趋势不再用硬闸提前短路（原 seed.require_market_uptrend）：弱势市不是
@@ -1002,6 +1026,7 @@ class Screener:
         eve_p = tier_params(TIER_EVE, cfg, strongest)
         result: Dict[str, Any] = {
             "at": utils.now().strftime("%Y-%m-%d %H:%M"), "scan_id": tracer.scan_id,
+            "scan_anchor": anchor,
             "sentiment": sent, "sectors": [{k: v for k, v in s.items() if k != "members"} for s in sectors],
             "sector_pool": [{k: v for k, v in s.items() if k != "members"} for s in step1["qualified"][:10]],
             "max_sector_chg": step1["max_sector_chg"],
@@ -1072,7 +1097,7 @@ class Screener:
         watch_pool.attach_output_order_hints(result, cfg)
 
         # 将本次详细扫描日志写入 data/ 目录，供周末复盘
-        self._write_scan_log(result)
+        self._write_scan_log(result, scan_anchor=anchor)
 
         return result
 

@@ -554,6 +554,7 @@ def summarize(result: dict) -> Dict[str, Any]:
                          "track": e.get("track")} for e in (evs or [])]
     return {
         "date": utils.today_str(), "at": result.get("at"), "scan_id": result.get("scan_id"),
+        "scan_anchor": result.get("scan_anchor"),
         "verdict": result.get("verdict"), "tier": result.get("tier"),
         "sentiment_score": (result.get("sentiment") or {}).get("score"),
         "cycle": (result.get("sentiment") or {}).get("cycle"),

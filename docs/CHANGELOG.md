@@ -4,13 +4,28 @@
 
 ## [Unreleased]
 
+### 修复（2026-09-10：review launchd Downloads 权限）
+
+- **review plist**：改直调 `python3 -m tea review --scheduled`（绕过 Downloads 下 bash 脚本 `Operation not permitted`）；与 seed-plan 修复一致。  
+- **launchd 安装**：`ops/_launchd-common.sh` 解析 Python **绝对路径**并校验 `import tea`；重装 `./ops/install-launchd-review.sh` 生效。  
+- **文档**：`ops/08-review-scheduler.md` 排障表同步。
+
+### 数据（2026-09-10：scan_anchor 主样本幂等）
+
+- **锚点维度**：`scan_anchor` = `primary`（launchd 14:30）/ `manual`（`--force`）/ `winrate`（菜单 4）；写入 `seed_records`、`scan_details`、`accumulator`、`seed_trace`。  
+- **seed_records**：primary 覆盖 manual 同轨道快照；manual 不能覆盖 primary；winrate 不覆盖 rule。  
+- **scan_details**：主文件仅接受锚点更高或同锚点信息量不降级；降级写入 `scan_details_{date}_{anchor}_{id}.json` sidecar。  
+- **日积累**：`day_digest` 漏斗统计优先 `primary` 扫描；`seed_trace` 可按锚点过滤。  
+- **自测**：锚点覆盖 / scan_details 防降级断言；773/773。
+
 ### 可观测（2026-09-10：操作日录分文件 + 7 天保留）
 
 - **日录日志**：`logs/daily/{seed|review|watch_alert|weekly_email}/YYYY-MM-DD.log`；当天无操作则不创建文件。  
 - **保留**：`logs.daily_backup_days` 默认 **7**；`prune_daily_logs` 在写入 / `daily_log_session` / cron `daily_log_prune` 时自动清理超期文件。  
 - **接入点**：`seed_plan` / `scheduled_review` / `watch_alert` / `weekly_email` + `ops/*-cron.sh`（`ops/_log-daily.sh` 公共路径解析）。  
 - **观察池提醒**：仅发信/失败/有候选时落盘，避免每分钟空跑刷日志。  
-- **文档**：`ops/03`–`08`、`tech/00` 日志路径同步；自测 `check_daily_logs`。
+- **集中错误**：`logs/error.log` 汇聚 Python `ERROR`、CLI 未捕获异常、cron 失败（`error_log_append`）；按日轮转保留 `logs.backup_days`。  
+- **文档**：`ops/03`–`08`、`tech/00` 日志路径同步；自测 `check_daily_logs` / `check_error_log`。
 
 ### 运营（2026-09-10：菜单去掉手动种子扫描）
 
