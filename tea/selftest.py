@@ -1342,6 +1342,30 @@ def check_sentiment(t: Suite, cfg: Config, mk: FakeMarket) -> dict:
     t.eq("无缺口返回空串", sent_mod.format_data_gap_banner({"errors": []}, ""), "")
     t.eq("仅 HTTP 失败、无数据缺口 → 不报警",
          sent_mod.format_data_gap_banner({"errors": []}, "网络请求 70 次｜失败 12"), "")
+
+    # 市场天气控制台语义色：热点/情绪/涨跌比等走统一 ANSI 方案
+    w = dict(sent, score=51.0, stance=sent_mod.STANCE_DEFEND,
+             hot_sectors=[{"name": "教育运营及其他", "chg": 6.12, "rank": 1},
+                          {"name": "卫浴电器", "chg": 4.73, "rank": 2}],
+             notes=["姿态=防守：情绪分 51.0 < 55"],
+             errors=[], cached=False)
+    w_fmt = sent_mod.format_weather(w)
+    t.ok("天气屏含 ANSI 高亮", "\033[" in w_fmt, w_fmt[:200])
+    t.ok("热点板块名称+涨幅均高亮",
+         "教育运营及其他" in w_fmt and "+6.12%" in w_fmt and "\033[" in w_fmt,
+         w_fmt.split("热点")[-1][:120])
+    hot_item = sent_mod.format_hot_sector({"name": "测试", "chg": 6.12}, "console")
+    t.ok("热点涨幅走 sign_color（绿）", "\033[1;32m" in hot_item, hot_item)
+    t.ok("情绪分着色随分值变化",
+         sent_mod.weather_score_color(75) == utils.COLOR_PROFIT
+         and sent_mod.weather_score_color(45) == utils.COLOR_WARN
+         and sent_mod.weather_score_color(30) == utils.COLOR_LOSS)
+    t.ok("周期/姿态语义色",
+         sent_mod.weather_cycle_color(sent_mod.CYCLE_ICE) == utils.COLOR_LOSS
+         and sent_mod.weather_stance_color(sent_mod.STANCE_ATTACK) == utils.COLOR_PROFIT)
+    t.ok("单行天气摘要复用 format_sentiment_summary",
+         "\033[" in sent_mod.format_sentiment_summary(w, style="console")
+         and "51.0" in sent_mod.format_sentiment_summary(w, style="console"))
     return sent
 
 

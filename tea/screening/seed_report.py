@@ -9,7 +9,7 @@ import sys
 from typing import Any, Dict, List, Optional
 
 from tea.config.config_store import Config, load_config
-from tea.analysis.sentiment import allow_new_label
+from tea.analysis.sentiment import format_sentiment_summary
 from tea.core import utils
 from tea.data.indicators import format_bollinger
 from . import preflight
@@ -70,13 +70,8 @@ VERDICT_LABEL = {
 
 # ------------------------------------------------------------------ 小工具
 
-def _sent_line(sent: Optional[dict]) -> str:
-    if not sent:
-        return "情绪数据缺失"
-    return (f"情绪 {utils.num(sent.get('score'), 1)} 分 · {sent.get('cycle')} · "
-            f"姿态 {sent.get('stance')} · 半仓基数 ×{utils.num(sent.get('base_pos_mult'), 2)}"
-            + ("（冰点降仓）" if sent.get("ice_cut") else "")
-            + f" · 新开 {allow_new_label(sent)}")
+def _sent_line(sent: Optional[dict], style: str = "console") -> str:
+    return format_sentiment_summary(sent, style=style)
 
 
 def _tech_indicators_line(ev: dict) -> Optional[str]:

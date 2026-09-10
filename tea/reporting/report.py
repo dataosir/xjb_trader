@@ -8,7 +8,7 @@ from typing import Any, Dict, List, Optional
 
 from tea.config.config_store import Config, load_config
 from tea.core import utils
-from tea.analysis.sentiment import allow_new_label
+from tea.analysis.sentiment import allow_new_label, format_hot_sector
 from tea.screening import preflight
 from tea.data.indicators import format_bollinger
 
@@ -50,23 +50,33 @@ def _sentiment_block(sent: Optional[dict]) -> List[str]:
     if not sent:
         lines += ["情绪数据缺失。", ""]
         return lines
-    lines += [
-        f"- 情绪分：**{utils.num(sent.get('score'), 1)}** / 100",
-        f"- 周期：{sent.get('cycle')}　姿态：**{sent.get('stance')}**",
-        f"- 半仓基数：×{utils.num(sent.get('base_pos_mult'), 2)}"
-        + ("（冰点降仓生效）" if sent.get("ice_cut") else ""),
-        f"- 新开：{allow_new_label(sent)}",
-    ]
+    score = sent.get("score")
+    mult = sent.get("base_pos_mult")
     br = sent.get("breadth") or {}
     idx = sent.get("index") or {}
-    lines.append(f"- 涨停 {sent.get('limit_up_count')} 家　最高板 {sent.get('max_boards')}　"
-                 f"上涨占比 {('%.1f%%' % (sent['advance_ratio'] * 100)) if sent.get('advance_ratio') is not None else '—'}"
-                 f"（涨 {br.get('rising')} / 跌 {br.get('falling')}）　"
-                 f"上证 {utils.num(idx.get('point'))}（{utils.pct(idx.get('chg_pct'))}，"
-                 f"MA20 {'上方' if sent.get('ma20_above') else '下方'}）")
-    lines.append(f"- 热点板块 {sent.get('hot_n')} 个　前 5 板块均涨 {utils.pct(sent.get('avg5'))}")
+    ratio = sent.get("advance_ratio")
+    ratio_s = f"{ratio * 100:.1f}%" if ratio is not None else "—"
+    ma20_lbl = ("上方" if sent.get("ma20_above") else "下方") if sent.get("ma20_known") else "未知"
+    lines += [
+        f"- 情绪分：**{utils.num(score, 1)}** / 100",
+        f"- 周期：**{sent.get('cycle')}**　姿态：**{sent.get('stance')}**",
+        f"- 半仓基数：×**{utils.num(mult, 2)}**"
+        + ("（冰点降仓生效）" if sent.get("ice_cut") else ""),
+        f"- 新开：**{allow_new_label(sent)}**",
+    ]
+    lines.append(
+        f"- 涨停 **{sent.get('limit_up_count')}** 家　最高板 **{sent.get('max_boards')}**　"
+        f"上涨占比 **{ratio_s}**"
+        f"（涨 {br.get('rising')} / 跌 {br.get('falling')}）　"
+        f"上证 **{utils.num(idx.get('point'))}**（**{utils.pct(idx.get('chg_pct'))}**，"
+        f"MA20 **{ma20_lbl}**）"
+    )
+    lines.append(
+        f"- 热点板块 **{sent.get('hot_n')}** 个　前 5 板块均涨 **{utils.pct(sent.get('avg5'))}**"
+    )
     if sent.get("hot_sectors"):
-        lines.append("- 热点：" + "　".join(f"{x['name']} {x['chg']:+.2f}%" for x in sent["hot_sectors"][:6]))
+        hot = "　".join(format_hot_sector(x, style="md") for x in sent["hot_sectors"][:6])
+        lines.append(f"- **热点：** {hot}")
     if sent.get("deltas"):
         lines += ["", "| 情绪加减项 | 分值 | 依据 |", "| --- | --- | --- |"]
         for d in sent["deltas"]:

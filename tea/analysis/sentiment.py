@@ -345,39 +345,198 @@ def allow_new_label(s: dict) -> str:
     return "未硬禁"
 
 
-def format_weather(s: dict) -> str:
-    """CLI 单屏市场天气。"""
+# ------------------------------------------------------------------ 展示（语义色，见 docs/tech/00-engineering-standards.md）
+
+def weather_score_color(score: Optional[float]) -> str:
+    """情绪分：≥70 绿、55–69 青、40–54 黄、<40 红。"""
+    if score is None:
+        return utils.COLOR_WARN
+    if score >= 70:
+        return utils.COLOR_PROFIT
+    if score >= 55:
+        return utils.COLOR_INFO
+    if score >= 40:
+        return utils.COLOR_WARN
+    return utils.COLOR_LOSS
+
+
+def weather_cycle_color(cycle: str) -> str:
+    return {
+        CYCLE_ICE: utils.COLOR_LOSS,
+        CYCLE_REPAIR: utils.COLOR_WARN,
+        CYCLE_FERMENT: utils.COLOR_INFO,
+        CYCLE_MAIN: utils.COLOR_PROFIT,
+        CYCLE_CLIMAX: utils.COLOR_WARN,
+        CYCLE_EBB: utils.COLOR_LOSS,
+    }.get(cycle or "", utils.COLOR_NEUTRAL)
+
+
+def weather_stance_color(stance: str) -> str:
+    return {
+        STANCE_EMPTY: utils.COLOR_LOSS,
+        STANCE_DEFEND: utils.COLOR_WARN,
+        STANCE_ATTACK: utils.COLOR_PROFIT,
+    }.get(stance or "", utils.COLOR_NEUTRAL)
+
+
+def weather_new_color(s: dict) -> str:
+    if not s.get("allow_new", True):
+        return utils.COLOR_LOSS
+    if s.get("stance") == STANCE_DEFEND:
+        return utils.COLOR_WARN
+    return utils.COLOR_PROFIT
+
+
+def weather_advance_color(ratio: Optional[float]) -> str:
+    if ratio is None:
+        return utils.COLOR_WARN
+    if ratio < 0.35:
+        return utils.COLOR_LOSS
+    if ratio >= 0.55:
+        return utils.COLOR_PROFIT
+    return utils.COLOR_NEUTRAL
+
+
+def weather_avg5_color(avg5: Optional[float]) -> str:
+    if avg5 is None:
+        return utils.COLOR_WARN
+    if avg5 >= 6.0:
+        return utils.COLOR_WARN
+    return utils.sign_color(avg5)
+
+
+def weather_pos_mult_color(mult: Optional[float]) -> str:
+    if mult is None:
+        return utils.COLOR_WARN
+    if mult < 1.0:
+        return utils.COLOR_WARN
+    return utils.COLOR_NEUTRAL
+
+
+def weather_ma20_label_color(s: dict) -> str:
+    if not s.get("ma20_known"):
+        return utils.COLOR_WARN
+    return utils.COLOR_PROFIT if s.get("ma20_above") else utils.COLOR_LOSS
+
+
+def _weather_em(text: str, color: str, style: str) -> str:
+    if style == "console":
+        return utils.hl(text, color)
+    if style == "md":
+        return f"**{text}**" if text and text != "—" else (text or "—")
+    return text
+
+
+def format_hot_sector(x: dict, style: str = "console") -> str:
+    """单个热点板块：名称（青）+ 涨幅（sign_color）。"""
+    name = x.get("name") or "?"
+    chg = x.get("chg")
+    chg_s = f"{chg:+.2f}%" if chg is not None else "—"
+    if style == "console":
+        return utils.hl(name, utils.COLOR_INFO) + utils.hl(chg_s, utils.sign_color(chg))
+    if style == "md":
+        return f"**{name}** **{chg_s}**"
+    return f"{name}{chg_s}"
+
+
+def format_sentiment_summary(s: Optional[dict], style: str = "console") -> str:
+    """单行天气摘要（种子结果头 / 报告复用）。"""
+    if not s:
+        miss = "情绪数据缺失"
+        return _weather_em(miss, utils.COLOR_WARN, style) if style != "plain" else miss
+    score, mult = s.get("score"), s.get("base_pos_mult")
+    new_l = allow_new_label(s)
+    ice = "（冰点降仓）" if s.get("ice_cut") else ""
+    if style == "plain":
+        return (f"情绪 {utils.num(score, 1)} 分 · {s.get('cycle')} · "
+                f"姿态 {s.get('stance')} · 半仓基数 ×{utils.num(mult, 2)}{ice} · 新开 {new_l}")
+    cycle, stance = s.get("cycle") or "—", s.get("stance") or "—"
+    return (f"情绪 {_weather_em(utils.num(score, 1), weather_score_color(score), style)} 分 · "
+            f"{_weather_em(cycle, weather_cycle_color(cycle), style)} · "
+            f"姿态 {_weather_em(stance, weather_stance_color(stance), style)} · "
+            f"半仓基数 ×{_weather_em(utils.num(mult, 2), weather_pos_mult_color(mult), style)}{ice} · "
+            f"新开 {_weather_em(new_l, weather_new_color(s), style)}")
+
+
+def format_weather(s: dict, style: str = "console") -> str:
+    """CLI 单屏市场天气（style: console=ANSI / plain=纯文本 / md=Markdown 加粗）。"""
     idx = s.get("index") or {}
-    lines = [
-        "===== 道 · 市场天气 =====",
-        f"情绪分 {s['score']}  周期 {s['cycle']}  姿态 {s['stance']}  "
-        f"新开 {allow_new_label(s)}",
-        f"上证 {utils.num(idx.get('point'))} ({utils.pct(idx.get('chg_pct'))})  "
-        f"MA20 {utils.num(idx.get('ma20'))} → "
-        f"{('上方' if s.get('ma20_above') else '下方') if s.get('ma20_known') else '未知'}",
-        f"涨跌比 {('%.1f%%' % (s['advance_ratio'] * 100)) if s.get('advance_ratio') is not None else '—'}"
-        f"（涨 {utils.num((s.get('breadth') or {}).get('rising'), 0)} / 跌 {utils.num((s.get('breadth') or {}).get('falling'), 0)}）  "
-        f"最高连板 {utils.num(s.get('max_boards'), 0)}  涨停 {utils.num(s.get('limit_up_count'), 0)} 家",
-        f"热点板块 {s.get('hot_n')} 个  前5板块均涨 {utils.pct(s.get('avg5'))}  "
-        f"半仓乘数(情绪) {s.get('base_pos_mult')}",
-    ]
+    em = _weather_em
+    title = "===== 道 · 市场天气 ====="
+    if style == "console":
+        title = em(title, utils.COLOR_INFO, style)
+
+    score = s.get("score")
+    cycle = s.get("cycle") or "—"
+    stance = s.get("stance") or "—"
+    new_l = allow_new_label(s)
+    ma20_lbl = ("上方" if s.get("ma20_above") else "下方") if s.get("ma20_known") else "未知"
+    ratio = s.get("advance_ratio")
+    ratio_s = f"{ratio * 100:.1f}%" if ratio is not None else "—"
+    br = s.get("breadth") or {}
+    hot_n = s.get("hot_n")
+    avg5 = s.get("avg5")
+    mult = s.get("base_pos_mult")
+    boards = utils.num(s.get("max_boards"), 0)
+    zt_n = utils.num(s.get("limit_up_count"), 0)
+
+    if style == "plain":
+        line1 = (f"情绪分 {score}  周期 {cycle}  姿态 {stance}  新开 {new_l}")
+        line2 = (f"上证 {utils.num(idx.get('point'))} ({utils.pct(idx.get('chg_pct'))})  "
+                 f"MA20 {utils.num(idx.get('ma20'))} → {ma20_lbl}")
+        line3 = (f"涨跌比 {ratio_s}（涨 {utils.num(br.get('rising'), 0)} / 跌 {utils.num(br.get('falling'), 0)}）  "
+                 f"最高连板 {boards}  涨停 {zt_n} 家")
+        line4 = (f"热点板块 {hot_n} 个  前5板块均涨 {utils.pct(avg5)}  "
+                 f"半仓乘数(情绪) {mult}")
+    else:
+        line1 = (f"情绪分 {em(utils.num(score, 1), weather_score_color(score), style)}  "
+                 f"周期 {em(cycle, weather_cycle_color(cycle), style)}  "
+                 f"姿态 {em(stance, weather_stance_color(stance), style)}  "
+                 f"新开 {em(new_l, weather_new_color(s), style)}")
+        ichg = idx.get("chg_pct")
+        line2 = (f"上证 {em(utils.num(idx.get('point')), utils.COLOR_NEUTRAL, style)} "
+                 f"({em(utils.pct(ichg), utils.sign_color(ichg), style)})  "
+                 f"MA20 {em(utils.num(idx.get('ma20')), utils.COLOR_INFO, style)} → "
+                 f"{em(ma20_lbl, weather_ma20_label_color(s), style)}")
+        line3 = (f"涨跌比 {em(ratio_s, weather_advance_color(ratio), style)}"
+                 f"（涨 {em(utils.num(br.get('rising'), 0), utils.COLOR_PROFIT, style)} / "
+                 f"跌 {em(utils.num(br.get('falling'), 0), utils.COLOR_LOSS, style)}）  "
+                 f"最高连板 {em(boards, utils.COLOR_INFO, style)}  "
+                 f"涨停 {em(zt_n, utils.COLOR_INFO, style)} 家")
+        line4 = (f"热点板块 {em(str(hot_n or '—'), utils.COLOR_INFO, style)} 个  "
+                 f"前5板块均涨 {em(utils.pct(avg5), weather_avg5_color(avg5), style)}  "
+                 f"半仓乘数(情绪) {em(utils.num(mult, 2), weather_pos_mult_color(mult), style)}")
+
+    lines = [title, line1, line2, line3, line4]
     if s.get("limit_up_error"):
-        lines.append(f"! 数据缺口 {s['limit_up_error']}")
+        msg = f"! 数据缺口 {s['limit_up_error']}"
+        lines.append(em(msg, utils.COLOR_WARN, style) if style != "plain" else msg)
     # 非交易日（或盘前）涨停池会回退到上一个交易日。不标出日子的话，屏上就是
     # 一个无法分辨的数字——而它和旁边的板块涨幅到底是不是同一天，直接影响周期判断。
     if s.get("limit_up_fallback") and s.get("limit_up_date"):
-        lines.append(f"· 涨停数据来自上一交易日 {s['limit_up_date']}")
-    if (s.get("breadth") or {}).get("exact") is False:
-        lines.append("· 涨跌家数探测预算用尽，上面的值是估值")
-    if (s.get("breadth") or {}).get("stale") or s.get("limit_up_stale"):
-        lines.append("· 涨跌家数/涨停池为缓存回退值（实时取数失败，非实时）")
+        msg = f"· 涨停数据来自上一交易日 {s['limit_up_date']}"
+        lines.append(em(msg, utils.COLOR_WARN, style) if style != "plain" else msg)
+    if br.get("exact") is False:
+        msg = "· 涨跌家数探测预算用尽，上面的值是估值"
+        lines.append(em(msg, utils.COLOR_WARN, style) if style != "plain" else msg)
+    if br.get("stale") or s.get("limit_up_stale"):
+        msg = "· 涨跌家数/涨停池为缓存回退值（实时取数失败，非实时）"
+        lines.append(em(msg, utils.COLOR_WARN, style) if style != "plain" else msg)
     if s.get("sector_stale"):
-        lines.append("⚠️  板块排名为磁盘兜底缓存（可能是昨日排序，板块强度不计入共振分，建议稍后重跑）")
+        msg = "⚠️  板块排名为磁盘兜底缓存（可能是昨日排序，板块强度不计入共振分，建议稍后重跑）"
+        lines.append(em(msg, utils.COLOR_WARN, style) if style != "plain" else msg)
     if s.get("hot_sectors"):
-        top = "  ".join(f"{x['name']}{x['chg']:+.2f}%" for x in s["hot_sectors"][:6])
-        lines.append(f"热点：{top}")
+        hot = "  ".join(format_hot_sector(x, style) for x in s["hot_sectors"][:6])
+        prefix = "热点："
+        if style == "console":
+            lines.append(em(prefix, utils.COLOR_INFO, style) + hot)
+        elif style == "md":
+            lines.append(f"- **热点：** {hot}")
+        else:
+            lines.append(f"{prefix}{hot}")
     for n in s.get("notes", []):
-        lines.append(f"· {n}")
+        msg = f"· {n}"
+        lines.append(em(msg, utils.COLOR_WARN, style) if style != "plain" else msg)
     # 数据缺口告警只在「本次真去取数且失败」时报：命中 120s 缓存的重复展示不
     # 再刷告警（否则一次失败后每次进菜单都跳一遍）；同一批错误按内容去重只提一次。
     if not s.get("cached"):
@@ -386,7 +545,8 @@ def format_weather(s: dict) -> str:
             if e in seen:
                 continue
             seen.add(e)
-            lines.append(f"! 数据缺口 {e}")
+            msg = f"! 数据缺口 {e}"
+            lines.append(em(msg, utils.COLOR_WARN, style) if style != "plain" else msg)
     return "\n".join(lines)
 
 
