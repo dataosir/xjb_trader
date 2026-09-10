@@ -5,7 +5,8 @@
 
   tea                      进入数字菜单
   tea run --code 600519    单标的准入评估（Phase1→4）
-  tea seed-plan            14:30 种子扫描 + 写次日计划
+  tea seed-plan            14:30 种子扫描（仅 launchd / --force）
+  tea seed-show            只读查看最新 SEED 报告
   tea plan-check           09:35 计划复核
   tea plan-clear           清除过期旧计划
   tea review               盘后复核（跟涨回填 + 观察池）
@@ -21,6 +22,7 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import os
 import sys
 from typing import List, Optional
 
@@ -35,7 +37,7 @@ from tea.data import Market
 from tea.phases import IO
 from tea.portfolio import accumulator, plan as plan_mod, portfolio, trades as trades_mod, watch_pool
 from tea.reporting import seed_trace
-from tea.screening import gates, preflight
+from tea.screening import gates, preflight, seed_report
 from . import runner
 
 PROG = "tea"
@@ -89,13 +91,26 @@ def cmd_run(args, cfg: Config) -> int:
 
 
 def cmd_seed_plan(args, cfg: Config) -> int:
-    res = runner.seed_plan(cfg=cfg, io=_io(), include_eve=not args.no_eve,
+    io = _io()
+    if not getattr(args, "force", False) and os.environ.get("TEA_LAUNCHD") != "1":
+        io.say("  种子扫描仅由 launchd 工作日 14:30 自动执行（避免早盘手动扫污染样本）")
+        io.say("  查看报告：菜单 3 或 tea seed-show")
+        io.say("  漏扫补救：./ops/seed-plan-cron.sh  或  tea seed-plan --force")
+        return 1
+    res = runner.seed_plan(cfg=cfg, io=io, include_eve=not args.no_eve,
                            write_plan=not args.no_plan, require_window=args.strict_window)
     return 0 if res.get("buyable") else 1
 
 
+def cmd_seed_show(args, cfg: Config) -> int:
+    return seed_report.show_latest(cfg=cfg, io=_io(), prefer_today=not args.all)
+
+
 def cmd_winrate_scan(args, cfg: Config) -> int:
-    res = runner.winrate_plan(cfg=cfg, io=_io())
+    io = _io()
+    io.say("  提示：胜率选股只落盘 mode=winrate 影子样本，不写计划、不入观察池；"
+           "主样本仍以 14:30 自动 seed-plan 为准。")
+    res = runner.winrate_plan(cfg=cfg, io=io)
     return 0 if res.get("buyable") else 1
 
 
@@ -484,17 +499,18 @@ def _normalize_choice(raw: str) -> str:
 MENU = [
     ("1", "市场天气（道）", ["weather"]),
     ("2", "今日状态（法）", ["status"]),
-    ("3", "种子扫描 + 写计划（14:30）", ["seed-plan"]),
-    ("4", "计划 ▸", ["__submenu__", "计划"]),
-    ("5", "准入 ▸", ["__submenu__", "准入"]),
-    ("6", "持仓 ▸", ["__submenu__", "持仓"]),
-    ("7", "观察池", ["watch"]),
-    ("8", "盘后复核（跟涨回填+观察池）", ["review"]),
-    ("9", "复盘工具 ▸", ["__submenu__", "复盘工具"]),
-    ("10", "配置与维护 ▸", ["__submenu__", "配置与维护"]),
+    ("3", "最新 SEED 报告（只读）", ["seed-show"]),
+    ("4", "胜率选股（盘面浏览，不写计划）", ["winrate-scan"]),
+    ("5", "计划 ▸", ["__submenu__", "计划"]),
+    ("6", "准入 ▸", ["__submenu__", "准入"]),
+    ("7", "持仓 ▸", ["__submenu__", "持仓"]),
+    ("8", "观察池", ["watch"]),
+    ("9", "盘后复核（跟涨回填+观察池）", ["review"]),
+    ("10", "复盘工具 ▸", ["__submenu__", "复盘工具"]),
+    ("11", "配置与维护 ▸", ["__submenu__", "配置与维护"]),
 ]
 
-# 二级子菜单：顶层压到约 10 项；低频（胜率选股等）收进复盘工具。
+# 二级子菜单：顶层约 11 项；胜率选股放顶层供盘中盘面浏览，复盘工具收低频项。
 SUBMENUS = {
     "计划": [
         ("1", "查看交易计划", ["__plan__"]),
@@ -513,14 +529,13 @@ SUBMENUS = {
         ("5", "补足确认仓（3/7 的 7）", ["__confirm__"]),
     ],
     "复盘工具": [
-        ("1", "胜率选股（数据型，只落盘对比）", ["winrate-scan"]),
-        ("2", "当日累积（为什么没交易）", ["accum"]),
-        ("3", "落选追溯", ["trace"]),
-        ("4", "跟涨经验", ["followthrough"]),
-        ("5", "交易流水", ["trades"]),
-        ("6", "统计与归因", ["stats"]),
-        ("7", "周复盘报告", ["weekly"]),
-        ("8", "周报邮件（周五自动发）", ["weekly-email"]),
+        ("1", "当日累积（为什么没交易）", ["accum"]),
+        ("2", "落选追溯", ["trace"]),
+        ("3", "跟涨经验", ["followthrough"]),
+        ("4", "交易流水", ["trades"]),
+        ("5", "统计与归因", ["stats"]),
+        ("6", "周复盘报告", ["weekly"]),
+        ("7", "周报邮件（周五自动发）", ["weekly-email"]),
     ],
     "配置与维护": [
         ("1", "配置一览", ["config", "list"]),
@@ -534,10 +549,10 @@ SUBMENUS = {
 # 顶层展开视图的分组（子菜单只占一项）。
 MENU_GROUPS = [
     ("道法 · 先看天气", ["1", "2"]),
-    ("计划 · 次日", ["3", "4"]),
-    ("交易 · 买与卖", ["5", "6"]),
-    ("观察 · 盘中与盘后", ["7", "8"]),
-    ("更多功能", ["9", "10"]),
+    ("种子 · 只读与盘面", ["3", "4", "5"]),
+    ("交易 · 买与卖", ["6", "7"]),
+    ("观察 · 盘中与盘后", ["8", "9"]),
+    ("更多功能", ["10", "11"]),
 ]
 
 
@@ -559,20 +574,21 @@ def suggest_keys(tm: Timing, cfg: Optional[Config] = None) -> list:
     再怎么评估也会被门禁挡回来。默认视图只印这几条，其余的按 m 展开。
     """
     if not tm.is_trading_day():
-        keys = ["7", "3", "2", "1"]                   # 观察池 / 种子 / 状态 / 天气
+        keys = ["8", "3", "2", "1"]                   # 观察池 / 种子 / 状态 / 天气
     else:
         keys = []
         if tm.is_buy_window():
-            keys += ["4", "5"]                        # 先看计划▸再准入▸
+            keys += ["5", "6"]                        # 先看计划▸再准入▸
         if tm.is_seed_window():
-            keys += ["3"]                            # 14:30 扫种子、写次日计划
+            keys += ["3"]                            # 14:30 后只读看 SEED（扫描由 launchd 自动）
         if tm.is_plan_recheck_window() or tm.is_overnight_review_window():
-            keys += ["4"]                            # 计划复核在计划▸里
+            keys += ["5"]                            # 计划复核在计划▸里
         if tm.is_after_close():
-            keys += ["7", "3"]                       # 观察池 / 种子
+            keys += ["8", "3"]                       # 观察池 / 种子
         if not keys:
-            keys = ["1", "7"] if tm.in_session() else ["1", "4"]  # 盘中盯观察池，盘前看计划
-        keys += ["6", "2"]                           # 持仓▸与今日状态任何时候都想看
+            # 盘中：天气 + 盘面浏览 + 观察池；盘前：天气 + 计划
+            keys = ["1", "4", "8"] if tm.in_session() else ["1", "5"]
+        keys += ["7", "2"]                           # 持仓▸与今日状态任何时候都想看
 
     # 有历史待回填且处于盘后/隔夜窗 → 优先推全量盘后复核
     try:
@@ -581,10 +597,10 @@ def suggest_keys(tm: Timing, cfg: Optional[Config] = None) -> list:
         pending = 0
     if pending > 0 and (tm.is_after_close() or tm.is_overnight_review_window()
                         or not tm.is_trading_day()):
-        keys.insert(0, "8")
+        keys.insert(0, "9")
 
     if _has_stale_plan(cfg):
-        keys.insert(0, "4")                          # 旧计划 → 计划▸里清除
+        keys.insert(0, "5")                          # 旧计划 → 计划▸里清除
 
     out = []
     for k in keys:
@@ -840,11 +856,16 @@ def build_parser() -> argparse.ArgumentParser:
     e.add_argument("--news", action="store_true", help="有明确消息催化")
     e.set_defaults(func=cmd_eval)
 
-    s = sub.add_parser("seed-plan", help="种子扫描四步流 + 写次日计划")
+    s = sub.add_parser("seed-plan", help="种子扫描四步流 + 写次日计划（仅 launchd / --force）")
     s.add_argument("--no-eve", action="store_true", help="跳过前夕观察扫描")
     s.add_argument("--no-plan", action="store_true", help="只扫描不写计划")
     s.add_argument("--strict-window", action="store_true", help="非 14:30 窗口时提示")
+    s.add_argument("--force", action="store_true", help="漏扫补救：绕过 launchd 守卫")
     s.set_defaults(func=cmd_seed_plan)
+
+    ss = sub.add_parser("seed-show", help="只读查看最新 SEED 报告（不扫描）")
+    ss.add_argument("--all", action="store_true", help="不限当日，取 reports 下最新一份")
+    ss.set_defaults(func=cmd_seed_show)
 
     wr = sub.add_parser("winrate-scan", help="胜率选股（数据型通道，只落盘对比，不写计划）")
     wr.set_defaults(func=cmd_winrate_scan)

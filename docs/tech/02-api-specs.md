@@ -22,8 +22,9 @@
 | 命令 | Runner / 模块锚点 | 副作用 |
 |---|---|---|
 | `weather` | sentiment + timing | 只读 |
-| `seed-plan` | `Screener` 四步流 → `plan` 写次日计划 → `maybe_auto_backfill(seed)` | 写计划 / 观察池 / 种子记录；**后台**轻量回填（不阻塞） |
-| `winrate-scan` | `Screener.winrate_scan`（菜单在复盘工具▸） | **只落盘观察，不写计划** |
+| `seed-plan` | `Screener` 四步流 → `plan` 写次日计划 → `maybe_auto_backfill(seed)` | 写计划 / 观察池 / 种子记录；**仅** `TEA_LAUNCHD=1` 或 `--force`；**后台**轻量回填 |
+| `seed-show` | `seed_report.show_latest` 读 `reports/SEED_*.md` | **只读**；不扫描、不写样本 |
+| `winrate-scan` | `Screener.winrate_scan`（菜单 `4`） | **只落盘 `mode=winrate` 影子样本，不写计划、不入观察池** |
 | `plan-check` | `plan` 复核 | 变动则整单作废 |
 | `run` / `eval` | gates → phases Phase1–4；`eval` 不落仓 | `run` 可登记灰度仓 |
 | `review` | followthrough 回填 + watch 复核 + 缺口/影子看板 | 写 seed_records / 报告 |

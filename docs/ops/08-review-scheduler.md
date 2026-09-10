@@ -57,8 +57,8 @@ tea review --scheduled --force
 
 ## 5. 日志
 
+- `logs/daily/review/YYYY-MM-DD.log`：**复核日录**（当天有实际复核或 `already_done` 记录才生成）
 - `logs/tea.log`：搜 `tea.review`
-- `logs/review-cron.log`：wrapper 输出
 - `logs/launchd-review.{stdout,stderr}.log`：launchd 直出
 
 ## 6. 排障

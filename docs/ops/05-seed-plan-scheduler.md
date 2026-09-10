@@ -30,7 +30,7 @@ chmod +x ops/*.sh
 ```bash
 launchctl list | grep com.tea.seed-plan
 ./ops/seed-plan-cron.sh    # 手动试跑
-tail -30 logs/seed-cron.log
+tail -30 logs/daily/seed/$(date +%Y-%m-%d).log
 ls -lt reports/SEED_*.md | head -3
 ```
 
@@ -55,8 +55,8 @@ ls -lt reports/SEED_*.md | head -3
 
 | 路径 | 内容 |
 |---|---|
-| `logs/tea.log` | **主审计源**：结构化运行日志（`tea.scan` / `tea.data` / `tea.score`） |
-| `logs/seed-cron.log` | 手动 `./ops/seed-plan-cron.sh` 的终端输出；launchd 直调时由程序末尾补一行摘要 |
+| `logs/daily/seed/YYYY-MM-DD.log` | **种子日录**（当天有扫描才生成）：cron 输出 + 控制台 transcript + 扫描摘要 |
+| `logs/tea.log` | 汇总运行日志（`tea.scan` / `tea.data` / `tea.score`，按日轮转） |
 | `logs/launchd-seed.stdout.log` | launchd 标准输出 |
 | `logs/launchd-seed.stderr.log` | launchd 标准错误（权限/路径问题先看这里） |
 | `reports/SEED_*.md` | 种子报告 |
@@ -74,7 +74,7 @@ grep "共振预审" logs/tea.log | tail -30
 grep -E "行情就绪|K线就绪|行情取数失败|K线取数失败" logs/tea.log | tail -30
 ```
 
-晚间 SOP §4 检查：`tea.log` 或 `seed-cron.log` 当日是否有扫描完成记录，并扫一眼 SEED 报告。
+晚间 SOP §4 检查：`logs/daily/seed/` 当日文件是否存在且含 `done seed-plan`，并扫一眼 SEED 报告。
 
 ### 3.2 launchd 报 `Operation not permitted`
 
@@ -94,19 +94,19 @@ grep -E "行情就绪|K线就绪|行情取数失败|K线取数失败" logs/tea.l
 
 | 场景 | 动作 |
 |---|---|
-| 笔记本合盖 / 休眠错过 14:30 | 收盘前手动 `tea seed-plan` 或 `./ops/seed-plan-cron.sh` |
+| 笔记本合盖 / 休眠错过 14:30 | 收盘前 `./ops/seed-plan-cron.sh` 或 `tea seed-plan --force` |
 | 连续 2 个交易日未产出 SEED | 次日 MIT-1 强制种子（见 [`03-operator-daily-sop.md`](03-operator-daily-sop.md) §4） |
 | launchd 未加载 | `launchctl list \| grep com.tea.seed-plan`；无则重装 install 脚本 |
 | 法定假日误触发 | 脚本周末会 skip；假日若触发可忽略（`seed-plan` 仍安全 exit） |
 
-**成功定义不变**：自动扫描只替代「忘记点菜单 3」；`plan-check` 与 `run` 仍须人工。
+**成功定义不变**：自动扫描替代手动种子扫描（菜单 3 已改为只读 SEED）；`plan-check` 与 `run` 仍须人工。
 
 ---
 
 ## 5. 验收清单（Phase 0）
 
 - [ ] `install-launchd-seed-plan.sh` 执行成功，`launchctl list` 可见 `com.tea.seed-plan`
-- [ ] 手动 `./ops/seed-plan-cron.sh` 后 `logs/seed-cron.log` 有 `done seed-plan exit=0`
+- [ ] 手动 `./ops/seed-plan-cron.sh` 后 `logs/daily/seed/$(date +%Y-%m-%d).log` 有 `done seed-plan exit=0`
 - [ ] `reports/SEED_*.md` 正常产出
 - [ ] 晚间 SOP 已把「是否自动跑通」纳入 §4 checklist
 - [ ] 知晓漏扫时手动补跑路径

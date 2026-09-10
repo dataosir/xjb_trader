@@ -13,7 +13,7 @@
 | 风格 | 跟随现有命名与写法，禁止另起一套约定 |
 | KISS | 只做需求内核心逻辑；禁止炫技、超前抽象 |
 | 异常 | 核心路径显式处理；**禁止空 catch**；业务边界不清则停手提问 |
-| 可观测 | 关键流程结构化日志，便于 `logs/` 排查 |
+| 可观测 | 关键流程结构化日志；操作日录见 `logs/daily/{category}/YYYY-MM-DD.log`（当天无操作则无文件） |
 | 文档同步 | Plan 先写清受影响模块；接口/数据结构变更必须更新 `docs/tech/` |
 | 禁静默 | 任务完成必须追加 [`../CHANGELOG.md`](../CHANGELOG.md) |
 
@@ -97,6 +97,21 @@ utils.hl("可买", utils.COLOR_SEED)                    # 种子选中标品红
 | 连板 / 涨停 / 热点数 | 青（信息强调） |
 | 热点名 | 青；涨幅 `sign_color` |
 | 数据缺口 / 备注 | 黄 |
+
+## 操作日录（`logs/daily/`）
+
+按**操作类型**分目录、按**自然日**单文件；**当天无对应操作则不创建文件**（便于 `ls logs/daily/seed/` 一眼看出哪天跑过）。
+
+| 类别 | 路径 | 何时落盘 |
+| --- | --- | --- |
+| `seed` | `logs/daily/seed/YYYY-MM-DD.log` | 种子扫描（cron / `--force` / launchd） |
+| `review` | `logs/daily/review/YYYY-MM-DD.log` | 盘后复核完成或 `already_done` 去重记录 |
+| `watch_alert` | `logs/daily/watch_alert/YYYY-MM-DD.log` | 发信 / 失败 / 扫描到候选（静默 skip 不写） |
+| `weekly_email` | `logs/daily/weekly_email/YYYY-MM-DD.log` | 周报邮件尝试（含 skip / 失败） |
+
+API：`tea/core/logger.py` 的 `daily_log_path` / `append_daily_log` / `write_daily_transcript` / `daily_log_session` / `prune_daily_logs`。`logs/tea.log` 仍作全量汇总（按日轮转），与日录互补。
+
+**保留策略**：操作日录默认保留 **7 天**（`logs.daily_backup_days`，含当天共 7 个自然日）；写入或 cron 启动时自动 `prune_daily_logs` 删除更早文件。汇总 `tea.log` 仍走 `logs.backup_days`（默认 30）。
 
 ## 新增模块放哪里
 

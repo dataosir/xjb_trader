@@ -61,6 +61,7 @@ tea weekly-email
 日志：
 
 ```bash
+tail -20 logs/daily/weekly_email/$(date +%Y-%m-%d).log   # 周五有发信才有
 grep tea.weekly_email logs/tea.log | tail -10
 ```
 

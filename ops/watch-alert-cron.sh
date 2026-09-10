@@ -20,9 +20,8 @@ ROOT="$(cd -- "$SELF_DIR/.." && pwd)"
 export TEA_HOME="${TEA_HOME:-$ROOT}"
 cd -- "$ROOT"
 
-LOG_DIR="$ROOT/logs"
-LOG_FILE="$LOG_DIR/watch-alert-cron.log"
-mkdir -p "$LOG_DIR"
+# shellcheck source=ops/_log-daily.sh
+source "${ROOT}/ops/_log-daily.sh"
 
 ts() { date "+%Y-%m-%d %H:%M:%S %z"; }
 
@@ -33,15 +32,19 @@ if [ -z "$PY" ]; then
     done
 fi
 if [ -z "$PY" ]; then
-    echo "$(ts) error: python not found" >>"$LOG_FILE"
+    echo "$(ts) error: python not found" >&2
     exit 1
 fi
 
-echo "$(ts) start watch-alert (TEA_HOME=$TEA_HOME)" >>"$LOG_FILE"
-if "$PY" -m tea watch-alert >>"$LOG_FILE" 2>&1; then
-    echo "$(ts) done watch-alert exit=0" >>"$LOG_FILE"
-    exit 0
+# 静默 skip 不落盘；有输出（发信/失败/候选）时 Python 写入 logs/daily/watch_alert/日期.log
+OUT="$("$PY" -m tea watch-alert 2>&1)" || rc=$?
+rc=${rc:-0}
+if [ -n "$OUT" ]; then
+    LOG_FILE="$(daily_log_resolve watch_alert)"
+    daily_log_ensure_dir "$LOG_FILE"
+    daily_log_prune watch_alert
+    echo "$(ts) watch-alert" >>"$LOG_FILE"
+    echo "$OUT" >>"$LOG_FILE"
+    echo "$(ts) done watch-alert exit=$rc" >>"$LOG_FILE"
 fi
-rc=$?
-echo "$(ts) done watch-alert exit=$rc" >>"$LOG_FILE"
 exit "$rc"

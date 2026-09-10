@@ -18,18 +18,17 @@ case "${BASH_SOURCE[0]}" in
 esac
 ROOT="$(cd -- "$SELF_DIR/.." && pwd)"
 export TEA_HOME="${TEA_HOME:-$ROOT}"
+export TEA_LAUNCHD=1
 cd -- "$ROOT"
 
-LOG_DIR="$ROOT/logs"
-LOG_FILE="$LOG_DIR/seed-cron.log"
-mkdir -p "$LOG_DIR"
+# shellcheck source=ops/_log-daily.sh
+source "${ROOT}/ops/_log-daily.sh"
 
 ts() { date "+%Y-%m-%d %H:%M:%S %z"; }
 
 # 周末跳过（与 tea.core.utils.is_trading_day 周口径一致；法定假日仍可能误触发，可手动忽略）
 dow="$(date +%u)"
 if [ "$dow" -gt 5 ]; then
-    echo "$(ts) skip: weekend (dow=$dow)" >>"$LOG_FILE"
     exit 0
 fi
 
@@ -40,9 +39,13 @@ if [ -z "$PY" ]; then
     done
 fi
 if [ -z "$PY" ]; then
-    echo "$(ts) error: python not found" >>"$LOG_FILE"
+    echo "$(ts) error: python not found" >&2
     exit 1
 fi
+
+LOG_FILE="$(daily_log_resolve seed)"
+daily_log_ensure_dir "$LOG_FILE"
+daily_log_prune seed
 
 echo "$(ts) start seed-plan (TEA_HOME=$TEA_HOME)" >>"$LOG_FILE"
 if "$PY" -m tea seed-plan >>"$LOG_FILE" 2>&1; then

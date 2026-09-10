@@ -7,7 +7,8 @@ P0 纠偏后：**共振 PASS 不足以可买**，还需硬闸（突破/过热禁
 
 ## 2. 用户故事 / 场景
 
-- 14:30 `seed-plan`：产出少量可买 + 观察池候选 + SEED 报告。  
+- 14:30 launchd `seed-plan`：产出少量可买 + 观察池候选 + SEED 报告（**菜单不提供手动扫描**，避免污染样本锚点）。  
+- 盘中只读：`seed-show` / 菜单 `3` 查看最新 SEED 报告。  
 - 交易者不希望中游板块（rank>5）、「突破」或「过热」阶段票写成可买计划。
 
 ## 3. 功能范围
@@ -57,7 +58,8 @@ P0 纠偏后：**共振 PASS 不足以可买**，还需硬闸（突破/过热禁
 
 - `tea/screening/screener.py` · `Screener` / `_winrate_gate` / `rank_sectors` / `seed_scan`  
 - `tea/runtime/runner.py` · `seed_plan`  
-- CLI：`tea seed-plan [--no-eve] [--no-plan] [--strict-window]`
+- CLI：`tea seed-plan [--no-eve] [--no-plan] [--strict-window] [--force]`（仅 launchd / 漏扫补救）  
+- CLI：`tea seed-show [--all]`（只读 SEED 报告）
 
 ## 7. 验收标准
 

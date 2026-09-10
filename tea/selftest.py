@@ -19,7 +19,7 @@ from .analysis import (expectancy as exp_mod, followthrough as ft_mod,
                        identity as ident_mod, sentiment as sent_mod)
 from .config import config_store, email_setup, notify_setup as notify_setup_mod
 from .config.config_store import Config
-from .core import paths, utils
+from .core import logger as logger_mod, paths, utils
 from .data import Market, MarketError, indicators
 from .data.fetcher import Fetcher
 from .core import notify as notify_mod
@@ -2548,7 +2548,7 @@ def check_menu(t: Suite, cfg: Config) -> None:
 
     keys = [k for k, _, _ in cli.MENU]
     grouped = [k for _, ks in cli.MENU_GROUPS for k in ks]
-    t.eq("顶层约 10 项", len(keys), 10)
+    t.eq("顶层约 11 项", len(keys), 11)
     t.eq("顶层分组总数等于菜单项数", len(grouped), len(keys))
     t.ok("顶层分组无重复", len(set(grouped)) == len(grouped))
     t.ok("顶层分组无遗漏", set(grouped) == set(keys),
@@ -2563,7 +2563,7 @@ def check_menu(t: Suite, cfg: Config) -> None:
     all_argv = [av[0] for _, _, av in cli.MENU if av[0] != "__submenu__"]
     for sub in cli.SUBMENUS.values():
         all_argv += [av[0] for _, _, av in sub]
-    expect = {"weather", "status", "seed-plan", "winrate-scan", "plan-check", "__plan__",
+    expect = {"weather", "status", "seed-show", "winrate-scan", "plan-check", "__plan__",
               "run", "pos", "__close__", "watch", "review", "accum", "trace",
               "followthrough", "trades", "stats", "weekly", "weekly-email",
               "__pos_add__", "__pos_rm__",
@@ -2587,14 +2587,32 @@ def check_menu(t: Suite, cfg: Config) -> None:
         # 非交易日不能推荐新开：门禁必定拦回，推了就是领着人撞墙。
         holiday = _dt.datetime(2026, 8, 2, 16, 30)
         utils.now = lambda when=None, _f=holiday: _f
-        t.ok("非交易日不推荐准入评估", "5" not in cli.suggest_keys(Timing(cfg), cfg))
+        t.ok("非交易日不推荐准入评估", "6" not in cli.suggest_keys(Timing(cfg), cfg))
 
         # 买入窗口必须推荐准入评估：一天就这 45 分钟能新开。
         window = _dt.datetime(2026, 8, 3, 14, 10)
         utils.now = lambda when=None, _f=window: _f
-        t.ok("买入窗口推荐准入评估", "5" in cli.suggest_keys(Timing(cfg), cfg))
+        t.ok("买入窗口推荐准入评估", "6" in cli.suggest_keys(Timing(cfg), cfg))
     finally:
         utils.now = real_now
+
+    labels = {k: label for k, label, _ in cli.MENU}
+    t.ok("菜单 3 为只读 SEED", "只读" in labels.get("3", ""))
+    t.ok("菜单 4 为胜率选股", "胜率选股" in labels.get("4", ""))
+    import os as _os
+    from types import SimpleNamespace
+    args = SimpleNamespace(force=False, no_eve=False, no_plan=False, strict_window=False)
+    old = _os.environ.get("TEA_LAUNCHD")
+    try:
+        _os.environ.pop("TEA_LAUNCHD", None)
+        t.eq("非 launchd 拒绝 seed-plan", cli.cmd_seed_plan(args, cfg), 1)
+        _os.environ["TEA_LAUNCHD"] = "1"
+        # 不真跑扫描，只验证守卫放行（会联网/很慢）；守卫已测，此处恢复环境即可
+    finally:
+        if old is None:
+            _os.environ.pop("TEA_LAUNCHD", None)
+        else:
+            _os.environ["TEA_LAUNCHD"] = old
 
 
 def check_end_to_end(t: Suite, cfg: Config, mk: FakeMarket, sent: dict) -> None:
@@ -3616,6 +3634,44 @@ def check_paths(t: Suite) -> None:
         _restore()
 
 
+def check_daily_logs(t: Suite, cfg: Config) -> None:
+    """操作日录：按类别分目录、按天单文件；无写入则不创建。"""
+    t.head("日志 · 操作日录")
+    day = "2099-01-15"
+    path = logger_mod.daily_log_path("seed", cfg, day=day)
+    t.ok("日录路径含类别与日期", path.endswith(os.path.join("daily", "seed", f"{day}.log")))
+    t.ok("首次写入前文件不存在", not os.path.exists(path))
+    t.ok("append 成功", logger_mod.append_daily_log("seed", "probe", cfg, day=day))
+    t.ok("写入后文件存在", os.path.exists(path))
+    with open(path, "r", encoding="utf-8") as fh:
+        body = fh.read()
+    t.ok("内容含 probe", "probe" in body)
+    t.ok("transcript 写入",
+         logger_mod.write_daily_transcript("seed", ["line1", "line2"], cfg, day=day))
+    with open(path, "r", encoding="utf-8") as fh:
+        body2 = fh.read()
+    t.ok("transcript 区块存在", "--- console ---" in body2 and "line1" in body2)
+    try:
+        logger_mod.daily_log_path("nope", cfg)
+        t.ok("未知类别抛错", False)
+    except ValueError:
+        t.ok("未知类别抛错", True)
+    with logger_mod.daily_log_session("review", cfg) as sess_path:
+        t.ok("session 返回路径", sess_path.endswith(f"{utils.today_str()}.log"))
+        logger_mod.get_logger("review").info("session probe")
+    t.ok("session 后日录存在", os.path.exists(sess_path))
+    today = utils.now().date()
+    prune_day = (today - _dt.timedelta(days=10)).strftime("%Y-%m-%d")
+    prune_keep = (today - _dt.timedelta(days=3)).strftime("%Y-%m-%d")
+    for d in (prune_day, prune_keep):
+        logger_mod.append_daily_log("seed", f"probe-{d}", cfg, day=d, with_ts=False)
+    t.ok("保留期内文件存在", os.path.exists(logger_mod.daily_log_path("seed", cfg, day=prune_keep)))
+    removed = logger_mod.prune_daily_logs("seed", cfg)
+    t.ok("超期日录已清理", removed >= 1)
+    t.ok("保留期内未删", os.path.exists(logger_mod.daily_log_path("seed", cfg, day=prune_keep)))
+    t.ok("超期文件已删", not os.path.exists(logger_mod.daily_log_path("seed", cfg, day=prune_day)))
+
+
 def check_packaging(t: Suite) -> None:
     """打包规格的隐式导入清单必须盖住磁盘上所有模块。
 
@@ -3720,6 +3776,7 @@ def main(verbose: bool = True, cfg: Optional[Config] = None) -> int:
         check_config_migration(t, tmp)
         check_onboarding(t, tmp)
         check_paths(t)
+        check_daily_logs(t, c)
         check_packaging(t)
         check_end_to_end(t, c, mk, sent)
         check_followthrough(t, c)

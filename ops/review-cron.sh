@@ -20,9 +20,8 @@ ROOT="$(cd -- "$SELF_DIR/.." && pwd)"
 export TEA_HOME="${TEA_HOME:-$ROOT}"
 cd -- "$ROOT"
 
-LOG_DIR="$ROOT/logs"
-LOG_FILE="$LOG_DIR/review-cron.log"
-mkdir -p "$LOG_DIR"
+# shellcheck source=ops/_log-daily.sh
+source "${ROOT}/ops/_log-daily.sh"
 
 ts() { date "+%Y-%m-%d %H:%M:%S %z"; }
 
@@ -33,9 +32,13 @@ if [ -z "$PY" ]; then
     done
 fi
 if [ -z "$PY" ]; then
-    echo "$(ts) error: python not found" >>"$LOG_FILE"
+    echo "$(ts) error: python not found" >&2
     exit 1
 fi
+
+LOG_FILE="$(daily_log_resolve review)"
+daily_log_ensure_dir "$LOG_FILE"
+daily_log_prune review
 
 echo "$(ts) start review --scheduled (TEA_HOME=$TEA_HOME)" >>"$LOG_FILE"
 if "$PY" -m tea review --scheduled >>"$LOG_FILE" 2>&1; then

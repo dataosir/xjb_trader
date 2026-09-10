@@ -90,8 +90,8 @@ grep tea.alert logs/tea.log | tail -10
 
 | 路径 | 内容 |
 |---|---|
+| `logs/daily/watch_alert/YYYY-MM-DD.log` | **提醒日录**（仅发信/失败/有候选时生成；静默 skip 不落盘） |
 | `logs/tea.log` | `tea.alert` 扫描摘要（skip / 待发 / 已发 / 失败） |
-| `logs/watch-alert-cron.log` | wrapper 输出（可选） |
 | `logs/launchd-watch-alert.stdout.log` | launchd stdout |
 | `logs/launchd-watch-alert.stderr.log` | launchd stderr |
 | `data/watch_alert_state.json` | 当日已发去重 |

@@ -29,7 +29,7 @@
 
 | 优先级 | 范例 | 对应命令/文档 |
 |---|---|---|
-| MIT-1 | 14:30 前完成 `seed-plan` | 菜单 `3` / `tea seed-plan`；已装 launchd 则查 [`05-seed-plan-scheduler`](05-seed-plan-scheduler.md) 日志 |
+| MIT-1 | 14:30 launchd 自动 `seed-plan` | 查 [`05-seed-plan-scheduler`](05-seed-plan-scheduler.md) 日志；**勿**菜单手动扫 |
 | MIT-2 | 压待 T+3：全量或轻量回填有进展 | `review` / 种子收尾自动回填 |
 | MIT-3 | **零改 config**；调参冲动只写反馈日志 | [`02-user-feedback.md`](02-user-feedback.md) |
 
@@ -59,7 +59,8 @@
 
 ### 2.2 盘中帽子规则
 
-- **交易员帽**：菜单 1–8、准入、持仓；禁止边看盘边改 `screener.py`  
+- **交易员帽**：菜单 1–9、准入、持仓；禁止边看盘边改 `screener.py`  
+- **上午盘面浏览**：可用菜单 `4` 胜率选股或 `6▸2` 只算不买；**勿**手动 `seed-plan`（污染主样本锚点）  
 - **策略研发帽**：盘中默认**关闭**；仅 CI 红/生产 bug 可例外，且须 MIT 写明  
 
 ### 2.3 冲动拦截
@@ -91,7 +92,7 @@
 ### Checklist
 
 - [ ] **MIT 对照**：完成 / 卡住（原因）/ 砍掉（原因）  
-- [ ] 今日是否跑通 `seed-plan`？（自动：`logs/seed-cron.log`；手动：菜单 `3`）回填摘要是否看过？  
+- [ ] 今日是否跑通 `seed-plan`？（自动：`logs/daily/seed/YYYY-MM-DD.log`；只读报告：菜单 `3`）回填摘要是否看过？  
 - [ ] 本周是否已 ≥1 次全量 `review`？（周五前必须 yes）  
 - [ ] 今日是否改 config / 合并策略 PR？若是 → 是否违反「样本门槛」或缺少 CHANGELOG？  
 - [ ] **心流审计**（一句话）：今天是在攒证据，还是在用研发逃避复盘？  

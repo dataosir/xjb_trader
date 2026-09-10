@@ -738,6 +738,8 @@ DEFAULTS: Dict[str, Any] = {
     "logs": {
         # 历史日志保留天数（TimedRotatingFileHandler 的 backupCount）
         "backup_days": 30,
+        # 操作日录 logs/daily/{category}/ 单文件保留天数（含当天共 N 天）
+        "daily_backup_days": 7,
         # 日志级别：DEBUG / INFO / WARNING / ERROR
         "level": "INFO",
     },

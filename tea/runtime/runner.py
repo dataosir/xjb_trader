@@ -160,146 +160,132 @@ def seed_plan(cfg: Optional[Config] = None, market: Optional[Market] = None,
         io.say(f"  ! 当前不在种子扫描窗口（{cfg.get('timing.seed_scan')} 前后），结果仅供参考")
     io.say("  ⏳ 开始种子扫描（网络取数较多，预计 1~2 分钟）...")
 
-    logger_mod.get_logger("scan").info(
-        "种子扫描开始 phase=%s seed_window=%s require_window=%s",
-        tm.phase(), cfg.get("timing.seed_scan"), require_window)
+    with logger_mod.daily_log_session("seed", cfg):
+        logger_mod.get_logger("scan").info(
+            "种子扫描开始 phase=%s seed_window=%s require_window=%s",
+            tm.phase(), cfg.get("timing.seed_scan"), require_window)
 
-    sent = sent if sent is not None else weather(cfg, mk, io=io)
-    io.say(format_weather(sent))
+        sent = sent if sent is not None else weather(cfg, mk, io=io)
+        io.say(format_weather(sent))
 
-    result = sc.seed_scan(sent=sent, include_eve=include_eve, io=io)
-    # 运行日志留痕：每次扫描的漏斗结果，供日后按日志复盘「为什么没票」。
-    logger_mod.get_logger("scan").info(
-        "扫描完成 %s | 裁决 %s | 档位 %s | 初筛 %s | VETO过 %s | 可买 %d | 观察 %d | 近失 %d",
-        result.get("scan_id"), result.get("verdict"), result.get("tier"),
-        result.get("candidates_n"), result.get("veto_passed_n"),
-        len(result.get("buyable") or []), len(result.get("watch") or []),
-        len(result.get("near_miss") or []))
-    # 网络摘要只是一行装饰，不能因为注入的是个简易 fetcher 就把扫描结果带死。
-    # 优先报源命中（东财 45｜腾讯 18）：降级链有没接上比累计耗时更值得看。
-    net = mk.stats_line() if hasattr(mk, "stats_line") else (
-        mk.f.stats_line() if hasattr(getattr(mk, "f", None), "stats_line") else "")
-    io.say(f"  ✓ 种子扫描完成 ({time.time() - t_start:.1f}s)" + (f"，{net}" if net else ""))
-    # 数据缺口/网络异常醒目标记：指数超时、主源抖动这类事不该藏在天气屏里一闪过，
-    # 要打进扫描结果和 SEED 报告，复盘时一眼看出「今天选票基于不完整数据」。
-    gap_banner = format_data_gap_banner(sent, net)
-    if gap_banner:
-        io.say(gap_banner)
-        result.setdefault("notes", []).append(
-            "数据缺口/网络异常：" + "；".join(data_gap_summary(sent, net)))
-    io.say(seed_report.format_result(result, cfg))
-
-    # ---------------------------------------------------------- 写计划
-    plan = None
-    buyable = result.get("buyable") or []
-    if buyable and write_plan:
-        codes = [ev.get("code") for ev in buyable if ev.get("code")]
-        execute_date = utils.today_str(utils.next_trading_day())
-        cur = plan_mod.load_plan(cfg)
-        if codes and plan_mod.active_codes_equal(cur, codes, execute_date=execute_date):
-            # 同日多次扫描产出同一批 code：不重写、不重记 plan.write，幂等跳过。
-            # 否则 accumulator 里同一计划刷三遍，事后按 code 维度复盘会被重复计数。
-            plan = cur
-            io.say("")
-            io.say("  计划与现有未执行计划一致（按 code 幂等），跳过重写")
-            io.say(plan_mod.format_plan(plan))
-        else:
-            notes = [f"种子扫描 {result.get('scan_id')}　档位 {result.get('tier')}",
-                     f"天气：{sent.get('cycle')} / {sent.get('stance')} "
-                     f"情绪 {sent.get('score')} 乘数 ×{utils.num(sent.get('base_pos_mult'), 2)}"]
-            notes += list(result.get("notes") or [])[:3]
-            plan = plan_mod.write_plan(buyable, cfg, execute_date=execute_date, notes=notes)
-            accumulator.record_plan("write", plan, f"种子扫描产出 {len(buyable)} 只", cfg)
-            io.say("")
-            io.say(plan_mod.format_plan(plan))
-            io.say("  → 次日 09:35 先跑 plan-check，复核无变动才可在 14:00-14:45 执行")
-    elif buyable:
-        io.say("  （write_plan=False，本次不落计划）")
-    else:
-        io.say("  宁缺毋滥：今日无可买标的，不写计划")
-        cur = plan_mod.load_plan(cfg)
-        if plan_mod.active_items(cur):
-            io.say(f"  ! 注意：仍存在未执行的旧计划（{'、'.join(plan_mod.planned_labels(cur))}），"
-                   f"如已过期请执行 plan-clear")
-
-    # ---------------------------------------------------------- 观察池闭环
-    added: List[str] = []
-    for ev in (result.get("watch") or []):
-        track = ev.get("track") or watch_pool.TRACK_WATCH
-        watch_pool.add(ev, track=track, source=f"seed:{result.get('scan_id')}",
-                       triggers=ev.get("triggers"), cfg=cfg)
-        added.append(f"{ev.get('code')}→{track}")
-    for ev in (result.get("eve") or []):
-        watch_pool.add(ev, track=watch_pool.TRACK_EVE, source=f"seed:{result.get('scan_id')}",
-                       triggers=ev.get("triggers"), cfg=cfg)
-        added.append(f"{ev.get('code')}→{watch_pool.TRACK_EVE}")
-    if added:
-        io.say(f"  观察池新增/续期 {len(added)} 项：" + "、".join(added))
-
-    # ---------------------------------------------------------- 跟涨样本 + 报告
-    entries = _ft_entries(result)
-    ft_res = ft_mod.record_seed(entries, cfg) if entries else {"added": 0, "skipped": 0, "updated": 0}
-    logger_mod.get_logger("scan").info("跟涨样本落盘 %s | 新增 %d | 升级 %d | 去重跳过 %d",
-                                       result.get("scan_id"),
-                                       ft_res.get("added"), ft_res.get("updated"),
-                                       ft_res.get("skipped"))
-    if ft_res.get("added") or ft_res.get("updated"):
-        parts = []
-        if ft_res.get("added"):
-            parts.append(f"已落 {ft_res['added']} 条")
-        if ft_res.get("updated"):
-            parts.append(f"升级 {ft_res['updated']} 条")
-        io.say(f"  跟涨样本 {'、'.join(parts)}"
-               f"（去重跳过 {ft_res.get('skipped', 0)} 条）")
-    elif ft_res.get("skipped"):
-        io.say(f"  跟涨样本全部与历史重复（{ft_res['skipped']} 条），未新增落盘")
-
-    # 自动轻量回填历史 pending（今日新样本本身回填不了）；控制台只留一行数量摘要
-    auto_upd = None
-    try:
-        auto_upd = maybe_auto_backfill(cfg=cfg, market=mk, io=io, trigger="seed")
-    except Exception as exc:
-        io.say(f"  ! 自动回填失败（不阻断种子）：{exc}")
-        logger_mod.get_logger("scan").warning("自动回填失败: %s", exc)
-    result["auto_backfill"] = auto_upd
-
-    # 归档提醒进 SEED 报告：控制台消息转瞬即逝，写进 notes 才能随 MD 存档复盘。
-    if not buyable:
-        result.setdefault("notes", []).append("宁缺毋滥：今日无可买标的，不写计划")
-    if auto_upd and not cfg.get("followthrough.auto_backfill_full_review", False):
-        if auto_upd.get("async"):
+        result = sc.seed_scan(sent=sent, include_eve=include_eve, io=io)
+        # 运行日志留痕：每次扫描的漏斗结果，供日后按日志复盘「为什么没票」。
+        logger_mod.get_logger("scan").info(
+            "扫描完成 %s | 裁决 %s | 档位 %s | 初筛 %s | VETO过 %s | 可买 %d | 观察 %d | 近失 %d",
+            result.get("scan_id"), result.get("verdict"), result.get("tier"),
+            result.get("candidates_n"), result.get("veto_passed_n"),
+            len(result.get("buyable") or []), len(result.get("watch") or []),
+            len(result.get("near_miss") or []))
+        net = mk.stats_line() if hasattr(mk, "stats_line") else (
+            mk.f.stats_line() if hasattr(getattr(mk, "f", None), "stats_line") else "")
+        io.say(f"  ✓ 种子扫描完成 ({time.time() - t_start:.1f}s)" + (f"，{net}" if net else ""))
+        gap_banner = format_data_gap_banner(sent, net)
+        if gap_banner:
+            io.say(gap_banner)
             result.setdefault("notes", []).append(
-                f"待回填 {auto_upd.get('pending', 0)} 条（后台处理中）")
+                "数据缺口/网络异常：" + "；".join(data_gap_summary(sent, net)))
+        io.say(seed_report.format_result(result, cfg))
+
+        plan = None
+        buyable = result.get("buyable") or []
+        if buyable and write_plan:
+            codes = [ev.get("code") for ev in buyable if ev.get("code")]
+            execute_date = utils.today_str(utils.next_trading_day())
+            cur = plan_mod.load_plan(cfg)
+            if codes and plan_mod.active_codes_equal(cur, codes, execute_date=execute_date):
+                plan = cur
+                io.say("")
+                io.say("  计划与现有未执行计划一致（按 code 幂等），跳过重写")
+                io.say(plan_mod.format_plan(plan))
+            else:
+                notes = [f"种子扫描 {result.get('scan_id')}　档位 {result.get('tier')}",
+                         f"天气：{sent.get('cycle')} / {sent.get('stance')} "
+                         f"情绪 {sent.get('score')} 乘数 ×{utils.num(sent.get('base_pos_mult'), 2)}"]
+                notes += list(result.get("notes") or [])[:3]
+                plan = plan_mod.write_plan(buyable, cfg, execute_date=execute_date, notes=notes)
+                accumulator.record_plan("write", plan, f"种子扫描产出 {len(buyable)} 只", cfg)
+                io.say("")
+                io.say(plan_mod.format_plan(plan))
+                io.say("  → 次日 09:35 先跑 plan-check，复核无变动才可在 14:00-14:45 执行")
+        elif buyable:
+            io.say("  （write_plan=False，本次不落计划）")
         else:
-            result.setdefault("notes", []).append(
-                f"回填 {auto_upd.get('updated', 0)} 条，仍待 {auto_upd.get('pending', 0)} 条")
+            io.say("  宁缺毋滥：今日无可买标的，不写计划")
+            cur = plan_mod.load_plan(cfg)
+            if plan_mod.active_items(cur):
+                io.say(f"  ! 注意：仍存在未执行的旧计划（{'、'.join(plan_mod.planned_labels(cur))}），"
+                       f"如已过期请执行 plan-clear")
 
-    # ---------------------------------------------------------- 每日价格跟踪
-    codes = [e.get("code") for e in entries if e.get("code")]
-    names = {e.get("code"): e.get("name") for e in entries if e.get("code")}
-    added_track = pricetrack.ensure_tracked(codes, names, cfg)
-    pr_res = pricetrack.record_daily(mk, cfg)
-    if added_track or pr_res.get("recorded"):
-        io.say(f"  价格跟踪：新纳入 {added_track} 只，记当日价 {pr_res['recorded']} 只"
-               f"（跟踪中 {pr_res['tracking']} 只）")
+        added: List[str] = []
+        for ev in (result.get("watch") or []):
+            track = ev.get("track") or watch_pool.TRACK_WATCH
+            watch_pool.add(ev, track=track, source=f"seed:{result.get('scan_id')}",
+                           triggers=ev.get("triggers"), cfg=cfg)
+            added.append(f"{ev.get('code')}→{track}")
+        for ev in (result.get("eve") or []):
+            watch_pool.add(ev, track=watch_pool.TRACK_EVE, source=f"seed:{result.get('scan_id')}",
+                           triggers=ev.get("triggers"), cfg=cfg)
+            added.append(f"{ev.get('code')}→{watch_pool.TRACK_EVE}")
+        if added:
+            io.say(f"  观察池新增/续期 {len(added)} 项：" + "、".join(added))
 
-    path = seed_report.write_report(result, cfg)
-    result["report_path"] = path
-    # launchd 直调 python 时无 wrapper 写 seed-cron.log，在此补一行摘要便于 SOP 核对。
-    try:
-        cron_log = os.path.join(cfg.logs_dir(), "seed-cron.log")
-        with open(cron_log, "a", encoding="utf-8") as fh:
-            fh.write(
-                f"{utils.now().strftime('%Y-%m-%d %H:%M:%S %z')} "
-                f"done seed-plan scan_id={result.get('scan_id')} "
-                f"verdict={result.get('verdict')} exit={0 if buyable else 1}\n")
-    except OSError:
-        pass
-    if path:
-        io.say(f"  报告已存档：{path}")
-    accumulator.record_seed(seed_report.summarize(result), cfg)
-    result["plan"] = plan
-    return result
+        entries = _ft_entries(result)
+        ft_res = ft_mod.record_seed(entries, cfg) if entries else {"added": 0, "skipped": 0, "updated": 0}
+        logger_mod.get_logger("scan").info("跟涨样本落盘 %s | 新增 %d | 升级 %d | 去重跳过 %d",
+                                           result.get("scan_id"),
+                                           ft_res.get("added"), ft_res.get("updated"),
+                                           ft_res.get("skipped"))
+        if ft_res.get("added") or ft_res.get("updated"):
+            parts = []
+            if ft_res.get("added"):
+                parts.append(f"已落 {ft_res['added']} 条")
+            if ft_res.get("updated"):
+                parts.append(f"升级 {ft_res['updated']} 条")
+            io.say(f"  跟涨样本 {'、'.join(parts)}"
+                   f"（去重跳过 {ft_res.get('skipped', 0)} 条）")
+        elif ft_res.get("skipped"):
+            io.say(f"  跟涨样本全部与历史重复（{ft_res['skipped']} 条），未新增落盘")
+
+        auto_upd = None
+        try:
+            auto_upd = maybe_auto_backfill(cfg=cfg, market=mk, io=io, trigger="seed")
+        except Exception as exc:
+            io.say(f"  ! 自动回填失败（不阻断种子）：{exc}")
+            logger_mod.get_logger("scan").warning("自动回填失败: %s", exc)
+        result["auto_backfill"] = auto_upd
+
+        if not buyable:
+            result.setdefault("notes", []).append("宁缺毋滥：今日无可买标的，不写计划")
+        if auto_upd and not cfg.get("followthrough.auto_backfill_full_review", False):
+            if auto_upd.get("async"):
+                result.setdefault("notes", []).append(
+                    f"待回填 {auto_upd.get('pending', 0)} 条（后台处理中）")
+            else:
+                result.setdefault("notes", []).append(
+                    f"回填 {auto_upd.get('updated', 0)} 条，仍待 {auto_upd.get('pending', 0)} 条")
+
+        codes = [e.get("code") for e in entries if e.get("code")]
+        names = {e.get("code"): e.get("name") for e in entries if e.get("code")}
+        added_track = pricetrack.ensure_tracked(codes, names, cfg)
+        pr_res = pricetrack.record_daily(mk, cfg)
+        if added_track or pr_res.get("recorded"):
+            io.say(f"  价格跟踪：新纳入 {added_track} 只，记当日价 {pr_res['recorded']} 只"
+                   f"（跟踪中 {pr_res['tracking']} 只）")
+
+        path = seed_report.write_report(result, cfg)
+        result["report_path"] = path
+        if path:
+            io.say(f"  报告已存档：{path}")
+        accumulator.record_seed(seed_report.summarize(result), cfg)
+        result["plan"] = plan
+
+        logger_mod.append_daily_log(
+            "seed",
+            f"done seed-plan scan_id={result.get('scan_id')} "
+            f"verdict={result.get('verdict')} exit={0 if buyable else 1}",
+            cfg)
+        logger_mod.write_daily_transcript("seed", io.transcript, cfg)
+        return result
 
 
 def winrate_plan(cfg: Optional[Config] = None, market: Optional[Market] = None,
@@ -686,36 +672,44 @@ def scheduled_review(cfg: Optional[Config] = None, market: Optional[Market] = No
     today = utils.today_str()
     out: Dict[str, Any] = {"date": today}
 
-    if not force and not cfg.get("review.scheduled_enabled", True):
-        log.info("tea.review skip: scheduled_disabled")
-        out["skip"] = "scheduled_disabled"
-        return out
+    with logger_mod.daily_log_session("review", cfg):
+        if not force and not cfg.get("review.scheduled_enabled", True):
+            log.info("tea.review skip: scheduled_disabled")
+            out["skip"] = "scheduled_disabled"
+            logger_mod.append_daily_log("review", "skip scheduled_disabled", cfg)
+            return out
 
-    if not force and not utils.is_trading_day(utils.now().date()):
-        log.info("tea.review skip: not_trading_day")
-        out["skip"] = "not_trading_day"
-        return out
+        if not force and not utils.is_trading_day(utils.now().date()):
+            log.info("tea.review skip: not_trading_day")
+            out["skip"] = "not_trading_day"
+            return out
 
-    tm = Timing(cfg)
-    if not force and not tm.is_after_close():
-        log.info("tea.review skip: before_close phase=%s", tm.phase())
-        out["skip"] = "before_close"
-        return out
+        tm = Timing(cfg)
+        if not force and not tm.is_after_close():
+            log.info("tea.review skip: before_close phase=%s", tm.phase())
+            out["skip"] = "before_close"
+            return out
 
-    state = _load_review_state(cfg)
-    if not force and state.get("last_date") == today:
-        log.info("tea.review skip: already_done")
-        out["skip"] = "already_done"
-        return out
+        state = _load_review_state(cfg)
+        if not force and state.get("last_date") == today:
+            log.info("tea.review skip: already_done")
+            out["skip"] = "already_done"
+            logger_mod.append_daily_log("review", "skip already_done", cfg)
+            return out
 
-    log.info("tea.review scheduled start date=%s force=%s", today, force)
-    result = close_review(cfg=cfg, market=market, io=io)
-    out.update(result)
-    _save_review_state(cfg, {"last_date": today, "last_run": utils.now().isoformat(timespec="seconds")})
-    ft = result.get("followthrough") or {}
-    log.info("tea.review scheduled done updated=%s pending=%s",
-             ft.get("updated"), ft.get("pending"))
-    return out
+        log.info("tea.review scheduled start date=%s force=%s", today, force)
+        result = close_review(cfg=cfg, market=market, io=io)
+        out.update(result)
+        _save_review_state(cfg, {"last_date": today, "last_run": utils.now().isoformat(timespec="seconds")})
+        ft = result.get("followthrough") or {}
+        log.info("tea.review scheduled done updated=%s pending=%s",
+                 ft.get("updated"), ft.get("pending"))
+        logger_mod.append_daily_log(
+            "review",
+            f"done review updated={ft.get('updated')} pending={ft.get('pending')}",
+            cfg)
+        logger_mod.write_daily_transcript("review", io.transcript, cfg)
+        return out
 
 
 def watch_alert(cfg: Optional[Config] = None, market: Optional[Market] = None,
@@ -791,6 +785,15 @@ def watch_alert(cfg: Optional[Config] = None, market: Optional[Market] = None,
     log.info("tea.alert done %s", summary)
     if out["sent"] or out["failed"]:
         io.say(f"观察池提醒：{summary}")
+    if out.get("sent") or out.get("failed") or (scan.get("candidates") or []):
+        with logger_mod.daily_log_session("watch_alert", cfg):
+            logger_mod.append_daily_log("watch_alert", summary, cfg)
+            if out.get("sent"):
+                logger_mod.append_daily_log(
+                    "watch_alert", f"sent {','.join(out['sent'])}", cfg, with_ts=False)
+            for fail in out.get("failed") or []:
+                logger_mod.append_daily_log(
+                    "watch_alert", f"failed {fail.get('code')}: {fail.get('error')}", cfg)
     return out
 
 
@@ -852,28 +855,36 @@ def weekly_email(days: int = 7, cfg: Optional[Config] = None,
     log = logger_mod.get_logger("weekly_email")
     days = int(days or cfg.get("weekly_email.days") or 7)
 
-    if cfg.get("weekly_email.run_review_before", True):
-        rev = scheduled_review(cfg=cfg, io=IO(interactive=False, quiet=True), force=True)
-        log.info("tea.weekly_email pre_review skip=%s updated=%s",
-                 rev.get("skip"), (rev.get("followthrough") or {}).get("updated"))
+    with logger_mod.daily_log_session("weekly_email", cfg):
+        if cfg.get("weekly_email.run_review_before", True):
+            rev = scheduled_review(cfg=cfg, io=IO(interactive=False, quiet=True), force=True)
+            log.info("tea.weekly_email pre_review skip=%s updated=%s",
+                     rev.get("skip"), (rev.get("followthrough") or {}).get("updated"))
 
-    res = weekly.send_email_report(days=days, cfg=cfg, force=force)
-    if res.get("skip"):
-        log.info("tea.weekly_email skip: %s", res.get("skip"))
-        return res
+        res = weekly.send_email_report(days=days, cfg=cfg, force=force)
+        if res.get("skip"):
+            log.info("tea.weekly_email skip: %s", res.get("skip"))
+            logger_mod.append_daily_log("weekly_email", f"skip {res.get('skip')}", cfg)
+            return res
 
-    if not res.get("ok"):
-        log.error("tea.weekly_email send failed: %s", res.get("error"))
+        if not res.get("ok"):
+            log.error("tea.weekly_email send failed: %s", res.get("error"))
+            logger_mod.append_daily_log("weekly_email", f"failed {res.get('error')}", cfg)
+            if io:
+                io.say(f"  ✗ 周报邮件发送失败：{res.get('error')}")
+            return res
+
+        log.info("tea.weekly_email sent week=%s path=%s", res.get("week_key"),
+                 res.get("report_path"))
+        logger_mod.append_daily_log(
+            "weekly_email",
+            f"sent week={res.get('week_key')} path={res.get('report_path')}",
+            cfg)
+        logger_mod.write_daily_transcript("weekly_email", io.transcript, cfg)
         if io:
-            io.say(f"  ✗ 周报邮件发送失败：{res.get('error')}")
+            io.say(f"  ✓ 周报邮件已发送（{res.get('week_key')}）")
+            io.say(f"  报告已存档：{res.get('report_path')}")
         return res
-
-    log.info("tea.weekly_email sent week=%s path=%s", res.get("week_key"),
-             res.get("report_path"))
-    if io:
-        io.say(f"  ✓ 周报邮件已发送（{res.get('week_key')}）")
-        io.say(f"  报告已存档：{res.get('report_path')}")
-    return res
 
 
 # ==================================================================== 持仓动作

@@ -383,6 +383,61 @@ def write_report(result: dict, cfg: Optional[Config] = None) -> Optional[str]:
     return out
 
 
+def latest_report_path(cfg: Optional[Config] = None,
+                       prefer_today: bool = True) -> Optional[str]:
+    """返回最新 SEED 报告路径；prefer_today 时优先当日最新一份。"""
+    cfg = cfg or load_config()
+    prefix = str(cfg.get("report.seed_prefix", "SEED"))
+    d = cfg.reports_dir()
+    try:
+        names = os.listdir(d)
+    except OSError:
+        return None
+    today_tag = utils.now().strftime("%Y%m%d")
+    candidates: List[tuple] = []
+    for name in names:
+        if not name.startswith(f"{prefix}_") or not name.lower().endswith(".md"):
+            continue
+        path = os.path.join(d, name)
+        if not os.path.isfile(path):
+            continue
+        try:
+            mtime = os.path.getmtime(path)
+        except OSError:
+            continue
+        candidates.append((mtime, path, name))
+    if not candidates:
+        return None
+    if prefer_today:
+        today_hits = [c for c in candidates if today_tag in c[2]]
+        if today_hits:
+            return max(today_hits, key=lambda x: x[0])[1]
+    return max(candidates, key=lambda x: x[0])[1]
+
+
+def show_latest(cfg: Optional[Config] = None, io: Any = None,
+                prefer_today: bool = True) -> int:
+    """只读展示最新 SEED 报告（不触发扫描、不写样本）。"""
+    cfg = cfg or load_config()
+    if io is None:
+        io = type("IO", (), {"say": lambda self, msg: print(msg, file=sys.stdout)})()
+    path = latest_report_path(cfg, prefer_today=prefer_today)
+    if not path:
+        io.say("  暂无 SEED 报告")
+        io.say("  种子扫描由 launchd 工作日 14:30 自动执行；漏扫见 ops/05-seed-plan-scheduler.md")
+        return 1
+    io.say(f"  只读 · {path}")
+    io.say("  提示：菜单不提供手动种子扫描，避免污染 seed_records 样本锚点（14:30）")
+    io.say("")
+    try:
+        with open(path, encoding="utf-8") as f:
+            io.say(f.read().rstrip())
+    except OSError as exc:
+        io.say(f"  ! 读取失败：{exc}")
+        return 1
+    return 0
+
+
 # ------------------------------------------------------------------ 控制台
 
 def format_result(result: dict, cfg: Optional[Config] = None) -> str:

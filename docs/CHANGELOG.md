@@ -4,6 +4,21 @@
 
 ## [Unreleased]
 
+### 可观测（2026-09-10：操作日录分文件 + 7 天保留）
+
+- **日录日志**：`logs/daily/{seed|review|watch_alert|weekly_email}/YYYY-MM-DD.log`；当天无操作则不创建文件。  
+- **保留**：`logs.daily_backup_days` 默认 **7**；`prune_daily_logs` 在写入 / `daily_log_session` / cron `daily_log_prune` 时自动清理超期文件。  
+- **接入点**：`seed_plan` / `scheduled_review` / `watch_alert` / `weekly_email` + `ops/*-cron.sh`（`ops/_log-daily.sh` 公共路径解析）。  
+- **观察池提醒**：仅发信/失败/有候选时落盘，避免每分钟空跑刷日志。  
+- **文档**：`ops/03`–`08`、`tech/00` 日志路径同步；自测 `check_daily_logs`。
+
+### 运营（2026-09-10：菜单去掉手动种子扫描）
+
+- **菜单 3**：由「种子扫描 + 写计划」改为「最新 SEED 报告（只读）」；`tea seed-show` 读 `reports/SEED_*.md`，不写 `seed_records` / 计划。  
+- **CLI 守卫**：`tea seed-plan` 仅 `TEA_LAUNCHD=1`（launchd / `ops/seed-plan-cron.sh`）或 `--force`（漏扫补救）可执行；避免早盘手动扫污染 14:30 样本锚点。  
+- **菜单 4**：「胜率选股（盘面浏览，不写计划）」从复盘工具▸迁至顶层；盘中 `suggest_keys` 默认推荐；执行前提示只落 `mode=winrate` 影子样本。  
+- **文档**：`02-daily-workflow`、`F03`、`F05`、`ops/03` 同步菜单语义与编号。
+
 ### 体验（2026-09-10：市场天气语义色高亮）
 
 - **道 · 市场天气**：控制台 `format_weather` 对情绪分/周期/姿态/新开、上证涨跌、涨跌比、连板涨停、热点板块与前5均涨、半仓乘数、数据缺口等走统一语义色 ANSI；热点行板块名（青）+ 涨幅（sign_color）分色高亮。  
