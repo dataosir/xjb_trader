@@ -1630,6 +1630,124 @@ def check_veto(t: Suite, cfg: Config, mk: FakeMarket, idn: dict) -> None:
     t.eq("科创板涨停幅度 20%", utils.limit_up_pct("688001", "科创测试"), 20.0)
     t.eq("主板涨停幅度 10%", utils.limit_up_pct("600123", "主板测试"), 10.0)
     t.eq("ST 涨停幅度 5%", utils.limit_up_pct("600123", "ST测试"), 5.0)
+    t.eq("挂单价向下取整 10~20 元档", utils.round_price_down(11.37), 11.30)
+    t.eq("挂单价向下取整 5~10 元档", utils.round_price_down(7.86), 7.85)
+    ev_watch = {
+        "code": "605006",
+        "name": "山东玻纤",
+        "quote": {"price": 16.98, "chg_pct": 3.92, "code": "605006"},
+        "ind": {"ma20": 14.98},
+        "levels": {"stop": 15.90, "target": 19.50, "sl_pct": 6.0, "tp_pct": 15.0, "odds": 2.08},
+        "total_score": 6,
+        "pass_threshold": 7,
+    }
+    cand_row = screener_mod.candidate_row(
+        {"code": "605006", "name": "山东玻纤", "chg": 3.92},
+        ev_watch, screener_mod.CAND_WATCH, "共振 6/7 差 1 分 → 待启动")
+    t.eq("观察轨候选挂单价按纪律回踩", cand_row.get("order_price"), 16.1)
+    t.eq("观察轨止损按挂单价重算", cand_row.get("stop"), 15.1)
+    t.ok("挂单价与止损分离（非贴止损）",
+         cand_row.get("order_price") is not None and cand_row.get("stop") is not None
+         and cand_row["order_price"] > cand_row["stop"])
+    t.ok("高乖离标注 MA20 仅参考",
+         "MA20≈14.98 仅参考" in (cand_row.get("order_basis") or ""))
+    hint_line = seed_report.format_order_hint(cand_row)
+    t.ok("候选挂单价文案含止损止盈",
+         hint_line and "建议挂单价：16.10" in hint_line and "止损" in hint_line,
+         hint_line or "")
+    wp_mod.attach_output_order_hints({"watch": [ev_watch]})
+    watch_fmt = seed_report.format_result({
+        "at": "2026-09-10 10:00", "verdict": screener_mod.VERDICT_PENDING,
+        "sentiment": None, "tier": "严格", "candidates_n": 1,
+        "veto_passed_n": 1, "buyable": [], "watch": [ev_watch],
+        "near_miss": [], "eve": [], "candidates": [], "sectors": [],
+    })
+    t.ok("待启动观察主列表展示挂单价",
+         "建议挂单价：" in watch_fmt and "16.10" in watch_fmt and "止损" in watch_fmt,
+         watch_fmt[-500:])
+    t.ok("控制台核心数据 ANSI 高亮",
+         "\033[" in watch_fmt and "16.98" in watch_fmt and "3.92%" in watch_fmt,
+         watch_fmt[-500:])
+    watch_md = seed_report.render_md({
+        "at": "2026-09-10 10:00", "verdict": screener_mod.VERDICT_PENDING,
+        "sentiment": None, "tier": "严格", "candidates_n": 1,
+        "veto_passed_n": 1, "buyable": [], "watch": [ev_watch],
+        "near_miss": [], "eve": [], "candidates": [], "sectors": [],
+    })
+    t.ok("SEED 报告待启动观察区展示挂单价",
+         "建议挂单价：**16.10**" in watch_md, watch_md[-500:])
+    t.ok("SEED 报告核心数据 Markdown 加粗",
+         "**16.98**" in watch_md and "**16.10**" in watch_md, watch_md[-500:])
+    t3_line = seed_report.format_t3_expect_hint(cand_row)
+    t.ok("候选计划止盈路径文案",
+         t3_line and "计划止盈路径" in t3_line and "T+1" in t3_line
+         and "T+2" in t3_line and "T+3" in t3_line and "18.60" in t3_line,
+         t3_line or "")
+    ev_eve = {
+        "code": "600979",
+        "name": "广安爱众",
+        "quote": {"price": 4.09, "chg_pct": 1.24, "code": "600979"},
+        "ind": {"ma20": 3.95},
+        "levels": {"stop": 3.97, "target": 4.43, "sl_pct": 2.93, "tp_pct": 8.34, "odds": 2.0},
+        "total_score": 5,
+        "pass_threshold": 7,
+        "triggers": ["涨入严格窗 3.0~5.5%", "分时回落至 ≤75% 后再预审"],
+    }
+    wp_mod.attach_output_order_hints({"eve": [ev_eve]})
+    eve_fmt = seed_report.format_result({
+        "at": "2026-09-10 14:30", "verdict": screener_mod.VERDICT_PENDING,
+        "sentiment": None, "tier": "严格", "candidates_n": 0,
+        "veto_passed_n": 0, "buyable": [], "watch": [],
+        "near_miss": [], "eve": [ev_eve], "candidates": [], "sectors": [],
+    })
+    t.ok("低吸观察主列表展示挂单价",
+         "建议挂单价：" in eve_fmt and "4.00" in eve_fmt, eve_fmt[-600:])
+    t.ok("低吸观察主列表展示计划止盈路径",
+         "计划止盈路径" in eve_fmt and "T+1" in eve_fmt and "T+3" in eve_fmt and "4.34" in eve_fmt,
+         eve_fmt[-600:])
+    eve_md = seed_report.render_md({
+        "at": "2026-09-10 14:30", "verdict": screener_mod.VERDICT_PENDING,
+        "sentiment": None, "tier": "严格", "candidates_n": 1,
+        "veto_passed_n": 0, "buyable": [], "watch": [],
+        "near_miss": [], "eve": [ev_eve],
+        "candidates": [cand_row], "sectors": [],
+    })
+    t.ok("SEED 低吸区展示挂单价与计划止盈路径",
+         "建议挂单价：**4.00**" in eve_md and "计划止盈路径" in eve_md and "**4.34**" in eve_md,
+         eve_md[-800:])
+    ev_buyable = {
+        "code": "600123",
+        "name": "主板测试",
+        "quote": {"price": 12.00, "chg_pct": 5.5, "code": "600123"},
+        "ind": {"ma20": 11.20},
+        "levels": {"stop": 11.50, "target": 14.00, "sl_pct": 4.0, "tp_pct": 16.67, "odds": 3.5},
+        "total_score": 7,
+        "pass_threshold": 6,
+        "identity": {"tier": "龙头", "score": 90},
+        "stage": {"stage": "主升"},
+    }
+    wp_mod.attach_output_order_hints({"buyable": [ev_buyable]})
+    buy_fmt = seed_report.format_result({
+        "at": "2026-09-10 14:30", "verdict": screener_mod.VERDICT_TRADEABLE,
+        "sentiment": None, "tier": "严格", "candidates_n": 1,
+        "veto_passed_n": 1, "buyable": [ev_buyable],
+        "watch": [], "near_miss": [], "eve": [], "candidates": [], "sectors": [],
+    })
+    t.ok("可买主列表展示挂单价",
+         "建议挂单价：" in buy_fmt and "12.00" in buy_fmt and "止损" in buy_fmt,
+         buy_fmt[-600:])
+    t.ok("可买主列表单独展示计划止盈路径",
+         "计划止盈路径" in buy_fmt and "T+1" in buy_fmt and "T+3" in buy_fmt and "14.00" in buy_fmt,
+         buy_fmt[-600:])
+    buy_md = seed_report.render_md({
+        "at": "2026-09-10 14:30", "verdict": screener_mod.VERDICT_TRADEABLE,
+        "sentiment": None, "tier": "严格", "candidates_n": 1,
+        "veto_passed_n": 1, "buyable": [ev_buyable],
+        "watch": [], "near_miss": [], "eve": [], "candidates": [], "sectors": [],
+    })
+    t.ok("SEED 可买区展示挂单价与计划止盈路径",
+         "建议挂单价：**12.00**" in buy_md and "计划止盈路径" in buy_md and "**14.00**" in buy_md,
+         buy_md[-800:])
 
     cfg.set("permissions.gem", False)
     r = veto_mod.check(gem, ind, idn, 0.60, cfg)
@@ -2068,6 +2186,10 @@ def check_seed(t: Suite, cfg: Config, mk: FakeMarket, sent: dict) -> dict:
     t.ok("控制台候选明细每条都带原因行",
          all(f"        原因：{seed_report.cand_display_reason(d)}" in fmt_det for d in det),
          fmt_det[-20:] if len(fmt_det) > 20 else fmt_det)
+    with_order = [d for d in det if d.get("order_price") is not None]
+    t.ok("预审完成的候选明细含建议挂单价", len(with_order) >= 1,
+         "；".join(f"{d['code']}:{d.get('order_price')}" for d in det))
+    t.ok("控制台候选明细展示挂单价", "建议挂单价：" in fmt_det, fmt_det[-400:])
     soft_stub = {"code": "002141", "name": "贤丰控股", "verdict": screener_mod.CAND_SOFT,
                  "veto_labels": ["MA20 乖离过热"], "reason": ""}
     screener_mod._finalize_cand_reason(soft_stub)
@@ -2078,6 +2200,9 @@ def check_seed(t: Suite, cfg: Config, mk: FakeMarket, sent: dict) -> dict:
     t.ok("SEED 报告含候选明细表且覆盖全部候选",
          "候选明细" in md and all(d["code"] in md for d in det),
          f"codes={[d['code'] for d in det]}")
+    t.ok("SEED 报告候选明细含建议挂单价",
+         "建议挂单价：" in md and any(d.get("order_price") is not None for d in det),
+         md[-400:])
     t.ok("SEED 报告含共振六维逐项展开", "共振六维" in md, "")
     t.ok("共振六维含市值具体值", "市值 120.0亿" in md, "")
     t.ok("共振六维含量价结构条件与结果",
@@ -3036,7 +3161,9 @@ def check_watch_alert(t: Suite, c: Config) -> None:
     ev_ready = {
         "code": TARGET, "name": TARGET_NAME, "verdict": preflight.VERDICT_PASS,
         "total_score": 7, "pass_threshold": 6, "intraday": 0.55,
-        "quote": {"price": 11.0, "high": 12.0},
+        "quote": {"price": 11.37, "high": 12.0},
+        "ind": {"ma20": 11.05},
+        "levels": {"entry": 11.37, "stop": 10.80, "target": 12.50, "tp_pct": 10.0},
         "identity": {"tier": ident_mod.TIER_FOLLOW},
         "veto": {"rejected": False, "hard": []},
     }
@@ -3071,7 +3198,16 @@ def check_watch_alert(t: Suite, c: Config) -> None:
     try:
         scan = wp_mod.scan_alerts(market=None, cfg=c)
         t.eq("pullback_ready 扫描出 1 只", len(scan.get("candidates") or []), 1)
-        t.ok("邮件正文含不自动下单", "不自动下单" in (scan["candidates"][0].get("body") or ""))
+        cand0 = scan["candidates"][0]
+        t.eq("建议挂单价按纪律回踩", cand0.get("order_price"), 11.1)
+        t.ok("邮件正文含建议挂单价", "建议挂单价：【11.10】" in (cand0.get("body") or ""))
+        t.ok("邮件正文含止损止盈", "止损：【10.50】" in (cand0.get("body") or "")
+             and "止盈：【12.30】" in (cand0.get("body") or ""))
+        t.ok("邮件正文含计划止盈路径",
+             "计划止盈路径（复盘对照，非概率）：" in (cand0.get("body") or "")
+             and "T+1：【+3.60%】 → 【11.50】" in (cand0.get("body") or "")
+             and "T+3：【+10.81%】 → 【12.30】" in (cand0.get("body") or ""))
+        t.ok("邮件正文含不自动下单", "不自动下单" in (cand0.get("body") or ""))
 
         res = runner_mod.watch_alert(cfg=c, market=None, io=None, force=True)
         t.eq("首次发信成功", len(res.get("sent") or []), 1)

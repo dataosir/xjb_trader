@@ -241,11 +241,145 @@ def _passes_alert_filters(item: dict, ev: dict, condition: str,
     return True, {"pullback": pb, "condition": CONDITION_PULLBACK}
 
 
+def _discipline_pullback_pct(ev: dict, cfg: Optional[Config] = None) -> float:
+    """乖离自适应纪律回踩幅度（%）：高乖离等更深回踩，不用 MA20 作挂单价锚。"""
+    cfg = cfg or load_config()
+    ind = ev.get("ind") or {}
+    bias = ind.get("bias_ma20")
+    if bias is None and ind.get("ma20"):
+        ma20 = float(ind["ma20"])
+        price = float((ev.get("quote") or {}).get("price") or 0)
+        if ma20 > 0 and price > 0:
+            bias = (price / ma20 - 1.0) * 100.0
+    if bias is None:
+        return float(cfg.get("order.default_pullback_pct", 3.0))
+    bias = float(bias)
+    if bias > 10.0:
+        return float(cfg.get("order.high_bias_pullback_pct", 5.0))
+    if bias > 5.0:
+        return float(cfg.get("order.mid_bias_pullback_pct", 3.0))
+    return float(cfg.get("order.low_bias_pullback_pct", 2.0))
+
+
+def _levels_sl_tp_pct(levels: dict, price: float) -> tuple:
+    """从预审 levels 取 sl/tp 百分比；缺失时由 entry/stop 反推。"""
+    sl_pct = levels.get("sl_pct")
+    tp_pct = levels.get("tp_pct")
+    entry = levels.get("entry") or price
+    stop = levels.get("stop")
+    if sl_pct is None and stop is not None and entry:
+        sl_pct = (float(entry) - float(stop)) / float(entry) * 100.0
+    return sl_pct, tp_pct
+
+
+def _levels_from_order(order: float, code: str, levels: dict,
+                       price: float) -> tuple:
+    """以挂单价为入场重算止损/止盈（与扫描价解耦，避免挂单价=扫描止损）。"""
+    sl_pct, tp_pct = _levels_sl_tp_pct(levels, price)
+    stop = target = None
+    if sl_pct is not None:
+        stop = utils.round_price_down(order * (1.0 - float(sl_pct) / 100.0), code)
+    elif levels.get("stop") is not None:
+        stop = float(levels["stop"])
+    if tp_pct is not None:
+        target = utils.round_price_up(order * (1.0 + float(tp_pct) / 100.0), code)
+    elif levels.get("target") is not None:
+        target = float(levels["target"])
+    return stop, target, sl_pct, tp_pct
+
+
+def suggest_limit_price(ev: dict, condition: str = "",
+                        cfg: Optional[Config] = None) -> dict:
+    """建议限价挂单价：回踩用乖离自适应纪律回踩；止损/止盈按挂单价重算。"""
+    quote = ev.get("quote") or {}
+    price = quote.get("price")
+    if price is None or float(price) <= 0:
+        return {"order_price": None, "stop": None, "target": None, "basis": "无现价"}
+
+    price = float(price)
+    code = ev.get("code") or quote.get("code") or ""
+    ind = ev.get("ind") or {}
+    ma20 = ind.get("ma20")
+    levels = ev.get("levels") or {}
+
+    if condition == CONDITION_PREFLIGHT:
+        order = utils.round_price_down(price, code)
+        basis = "现价"
+        stop = levels.get("stop")
+        target = levels.get("target")
+        sl_pct, tp_pct = _levels_sl_tp_pct(levels, price)
+    else:
+        pull = _discipline_pullback_pct(ev, cfg)
+        order = utils.round_price_down(price * (1.0 - pull / 100.0), code)
+        cap = utils.round_price_down(price, code)
+        if order > cap:
+            order = cap
+            basis = "现价（不追高）"
+        else:
+            basis = f"纪律回踩 {pull:.0f}%"
+            if ma20 and float(ma20) < price:
+                bias = ind.get("bias_ma20")
+                if bias is None:
+                    bias = (price / float(ma20) - 1.0) * 100.0
+                if float(bias) > 8.0:
+                    basis += f"（MA20≈{utils.num(ma20)} 仅参考）"
+        stop, target, sl_pct, tp_pct = _levels_from_order(order, code, levels, price)
+    return {
+        "order_price": order,
+        "stop": stop,
+        "target": target,
+        "sl_pct": sl_pct,
+        "tp_pct": tp_pct,
+        "ma20_ref": float(ma20) if ma20 else None,
+        "basis": basis,
+    }
+
+
+def order_condition_for_verdict(verdict: str) -> str:
+    """种子候选挂单价锚点：可买追高锚现价，其余用乖离自适应纪律回踩。"""
+    if verdict == "可买（追高）":
+        return CONDITION_PREFLIGHT
+    return CONDITION_PULLBACK
+
+
+def attach_order_hint(row: dict, ev: dict, condition: str = "",
+                      cfg: Optional[Config] = None) -> None:
+    """把 suggest_limit_price 写入候选/报告行（原地更新）。"""
+    hint = suggest_limit_price(ev, condition, cfg)
+    q = ev.get("quote") or {}
+    levels = ev.get("levels") or {}
+    if q.get("price") is not None:
+        row["price"] = q.get("price")
+    row["order_price"] = hint.get("order_price")
+    row["order_basis"] = hint.get("basis")
+    row["stop"] = hint.get("stop")
+    row["target"] = hint.get("target")
+    if hint.get("sl_pct") is not None:
+        row["sl_pct"] = hint.get("sl_pct")
+    if hint.get("tp_pct") is not None:
+        row["tp_pct"] = hint.get("tp_pct")
+    elif levels.get("tp_pct") is not None:
+        row["tp_pct"] = levels.get("tp_pct")
+    if hint.get("ma20_ref") is not None:
+        row["ma20_ref"] = hint.get("ma20_ref")
+
+
+def attach_output_order_hints(result: dict, cfg: Optional[Config] = None) -> None:
+    """种子三档输出 evaluation 写入挂单价（可买锚现价，观察/前夕用纪律回踩）。"""
+    for ev in result.get("buyable") or []:
+        attach_order_hint(ev, ev, CONDITION_PREFLIGHT, cfg)
+    for ev in result.get("watch") or []:
+        attach_order_hint(ev, ev, CONDITION_PULLBACK, cfg)
+    for ev in result.get("eve") or []:
+        attach_order_hint(ev, ev, CONDITION_PULLBACK, cfg)
+
+
 def format_alert_body(candidate: dict, condition: str) -> str:
     """邮件正文（含纪律提示）。"""
     pb = candidate.get("pullback") or {}
     price = candidate.get("price")
     intr = candidate.get("intraday")
+    order_price = candidate.get("order_price")
     lines = [
         f"标的：{candidate.get('code')} {candidate.get('name')}",
         f"轨道：{candidate.get('track')}",
@@ -253,6 +387,14 @@ def format_alert_body(candidate: dict, condition: str) -> str:
         f"现价：{utils.num(price)}",
         f"分时位置：{('%.0f%%' % (intr * 100)) if intr is not None else '—'}",
     ]
+    if order_price is not None:
+        basis = candidate.get("order_basis") or ""
+        lines.append(f"建议挂单价：【{utils.num(order_price)}】"
+                     + (f"（{basis}）" if basis else ""))
+        if candidate.get("stop") is not None or candidate.get("target") is not None:
+            lines.append(f"止损：【{utils.num(candidate.get('stop'))}】　"
+                         f"止盈：【{utils.num(candidate.get('target'))}】")
+    lines.extend(preflight.format_tn_plan_email_lines(candidate))
     if pb.get("drop") is not None:
         lines.append(f"回撤：{utils.pct(pb.get('drop'))}（入池 {pb.get('days')} 天）")
     if candidate.get("verdict"):
@@ -303,6 +445,8 @@ def scan_alerts(market: Optional[Market] = None, cfg: Optional[Config] = None,
             continue
 
         quote = ev.get("quote") or {}
+        order_hint = suggest_limit_price(ev, condition, cfg)
+        levels = ev.get("levels") or {}
         rec.update({
             "price": quote.get("price"),
             "intraday": ev.get("intraday"),
@@ -310,12 +454,24 @@ def scan_alerts(market: Optional[Market] = None, cfg: Optional[Config] = None,
             "pass_threshold": ev.get("pass_threshold"),
             "verdict": ev.get("verdict"),
             "pullback": detail.get("pullback"),
+            "order_price": order_hint.get("order_price"),
+            "order_basis": order_hint.get("basis"),
+            "stop": order_hint.get("stop"),
+            "target": order_hint.get("target"),
+            "tp_pct": levels.get("tp_pct"),
+            "levels": levels,
             "body": format_alert_body({
                 **rec,
                 "pullback": detail.get("pullback"),
                 "verdict": ev.get("verdict"),
                 "total_score": ev.get("total_score"),
                 "pass_threshold": ev.get("pass_threshold"),
+                "order_price": order_hint.get("order_price"),
+                "order_basis": order_hint.get("basis"),
+                "stop": order_hint.get("stop"),
+                "target": order_hint.get("target"),
+                "tp_pct": levels.get("tp_pct"),
+                "levels": levels,
             }, condition),
         })
         out["candidates"].append(rec)

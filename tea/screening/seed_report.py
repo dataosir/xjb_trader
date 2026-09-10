@@ -21,6 +21,46 @@ def _hl(text: str, color: str = "") -> str:
     """ANSI 高亮（复用 utils.hl，默认警告黄）。"""
     return utils.hl(text, color or utils.COLOR_WARN)
 
+
+def _md_em(text: str) -> str:
+    """Markdown 加粗（核心数值）；占位符不包。"""
+    if not text or text == "—":
+        return text or "—"
+    return f"**{text}**"
+
+
+def _hl_price(v: Optional[float], nd: int = 2, width: int = 0) -> str:
+    text = utils.num(v, nd)
+    if width:
+        text = f"{text:>{width}}"
+    return _hl(text, utils.COLOR_NEUTRAL)
+
+
+def _hl_chg(v: Optional[float], width: int = 0) -> str:
+    text = utils.pct(v)
+    if width:
+        text = f"{text:>{width}}"
+    return _hl(text, utils.sign_color(v))
+
+
+def _hl_reso(score: Optional[int], threshold: Optional[int]) -> str:
+    if score is None or threshold is None:
+        return "—"
+    color = utils.COLOR_PROFIT if score >= threshold else utils.COLOR_WARN
+    return _hl(f"{score}/{threshold}", color)
+
+
+def _hl_sl_pct(v: Optional[float]) -> str:
+    return _hl(utils.pct(v), utils.COLOR_LOSS)
+
+
+def _hl_tp_pct(v: Optional[float]) -> str:
+    return _hl(utils.pct(v), utils.COLOR_PROFIT)
+
+
+def _hl_odds(v: Optional[float]) -> str:
+    return _hl(utils.num(v), utils.COLOR_INFO)
+
 VERDICT_LABEL = {
     VERDICT_TRADEABLE: "HAS_TRADEABLE（有可买标的，已写次日计划）",
     VERDICT_PENDING: "PENDING（无可买，仅观察轨跟踪）",
@@ -68,13 +108,16 @@ def _ev_row(ev: dict) -> str:
     idn = ev.get("identity") or {}
     lv = ev.get("levels") or {}
     ft = ev.get("followthrough") or {}
+    score = ev.get("total_score")
+    threshold = ev.get("pass_threshold")
+    reso = "—" if score is None or threshold is None else _md_em(f"{score}/{threshold}")
     return (f"| {ev.get('code')} | {ev.get('name')} | {ev.get('sector_name') or (ev.get('sector') or {}).get('name') or '—'} "
-            f"| {utils.num(q.get('price'))} | {utils.pct(q.get('chg_pct'))} "
-            f"| {ev.get('total_score')}/{ev.get('pass_threshold')} "
+            f"| {_md_em(utils.num(q.get('price')))} | {_md_em(utils.pct(q.get('chg_pct')))} "
+            f"| {reso} "
             f"| {idn.get('tier')} {utils.num(idn.get('score'), 1)} "
             f"| {(ev.get('stage') or {}).get('stage') or '—'} "
-            f"| {utils.pct(lv.get('sl_pct'))} / {utils.pct(lv.get('tp_pct'))} "
-            f"| {utils.num(lv.get('odds'))} "
+            f"| {_md_em(utils.pct(lv.get('sl_pct')))} / {_md_em(utils.pct(lv.get('tp_pct')))} "
+            f"| {_md_em(utils.num(lv.get('odds')))} "
             f"| {utils.num(ft.get('score'), 1) if ft.get('score') is not None else '—'} |")
 
 
@@ -103,6 +146,40 @@ def _ident(c: dict, nd: int = 1) -> str:
     return f"{c.get('identity_tier') or '—'} {utils.num(c.get('identity_score'), nd)}"
 
 
+def format_t3_expect_hint(c: dict, style: str = "plain") -> Optional[str]:
+    """计划止盈路径 T+1/T+2/T+3（兼容旧名，见 preflight.format_tn_plan_hint）。"""
+    return preflight.format_tn_plan_hint(c, style=style)
+
+
+def format_order_hint(c: dict, style: str = "plain") -> Optional[str]:
+    """建议挂单价一行（候选明细 / 报告复用）。
+
+    style: plain（纯文本）| console（ANSI）| md（Markdown 加粗）
+    """
+    op = c.get("order_price")
+    if op is None:
+        return None
+    basis = c.get("order_basis") or ""
+    stop = c.get("stop")
+    target = c.get("target")
+    if style == "console":
+        op_s = _hl(utils.num(op), utils.COLOR_WARN)
+        stop_s = _hl(utils.num(stop), utils.COLOR_LOSS) if stop is not None else "—"
+        target_s = _hl(utils.num(target), utils.COLOR_PROFIT) if target is not None else "—"
+    elif style == "md":
+        op_s = _md_em(utils.num(op))
+        stop_s = _md_em(utils.num(stop)) if stop is not None else "—"
+        target_s = _md_em(utils.num(target)) if target is not None else "—"
+    else:
+        op_s = utils.num(op)
+        stop_s = utils.num(stop)
+        target_s = utils.num(target)
+    line = f"建议挂单价：{op_s}" + (f"（{basis}）" if basis else "")
+    if stop is not None or target is not None:
+        line += f"  止损：{stop_s}　止盈：{target_s}"
+    return line
+
+
 def cand_display_reason(c: dict) -> str:
     """候选明细展示用原因：优先 reason，否决类用 veto_labels / veto_reason 兜底。"""
     reason = (c.get("reason") or "").strip()
@@ -119,8 +196,12 @@ def cand_display_reason(c: dict) -> str:
 
 
 def _cand_row(c: dict) -> str:
+    reso = _reso(c)
+    score, threshold = c.get("score"), c.get("threshold")
+    if score is not None and threshold is not None:
+        reso = _md_em(reso)
     return (f"| {c.get('code')} | {c.get('name')} | {c.get('sector_name') or '—'} "
-            f"| {utils.pct(c.get('chg'))} | {_intr(c.get('intraday'))} | {_reso(c)} "
+            f"| {_md_em(utils.pct(c.get('chg')))} | {_md_em(_intr(c.get('intraday')))} | {reso} "
             f"| {_ident(c)} "
             f"| **{c.get('verdict') or '—'}** | {cand_display_reason(c)} |")
 
@@ -180,7 +261,7 @@ def render_md(result: dict, cfg: Optional[Config] = None) -> str:
         lines += ["| 排名 | 板块 | 涨幅 | 涨停 | 温和票 | 热度分 | 结构分 | 影子 | 综合分 | 门槛 |",
                   "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |"]
         for s in sectors:
-            lines.append(f"| {s.get('rank')} | {s.get('name')} | {utils.pct(s.get('chg'))} "
+            lines.append(f"| {s.get('rank')} | {s.get('name')} | {_md_em(utils.pct(s.get('chg')))} "
                          f"| {s.get('limit_up_count')} | {s.get('mild_n')} "
                          f"| {utils.num(s.get('heat_score'), 1)} | {utils.num(s.get('mild_score'), 1)} "
                          f"| {'+%.0f' % s['shadow_bonus'] if s.get('shadow_bonus') else '—'} "
@@ -214,6 +295,13 @@ def render_md(result: dict, cfg: Optional[Config] = None) -> str:
                 detail.append("软否决：" + "；".join(i["label"] for i in vt["soft"]))
             if detail:
                 lines.append(f"- **{e.get('code')} {e.get('name')}** — " + " ｜ ".join(detail))
+            if key in ("buyable", "watch", "eve"):
+                order_line = format_order_hint(e, style="md")
+                if order_line:
+                    lines.append(f"  - {order_line}")
+                t3_line = format_t3_expect_hint(e, style="md")
+                if t3_line:
+                    lines.append(f"  - {t3_line}")
             tech = _tech_indicators_line(e)
             if tech:
                 lines.append(f"  - 技术观测：{tech}")
@@ -230,6 +318,12 @@ def render_md(result: dict, cfg: Optional[Config] = None) -> str:
             if e.get("triggers"):
                 lines.append(f"- {e.get('code')} {e.get('name')} — 触发条件："
                              + "；".join(e["triggers"]))
+            order_line = format_order_hint(e, style="md")
+            if order_line:
+                lines.append(f"  - {order_line}")
+            t3_line = format_t3_expect_hint(e, style="md")
+            if t3_line:
+                lines.append(f"  - {t3_line}")
             tech = _tech_indicators_line(e)
             if tech:
                 lines.append(f"  - 技术观测：{tech}")
@@ -245,9 +339,18 @@ def render_md(result: dict, cfg: Optional[Config] = None) -> str:
     if cands:
         lines += _CAND_HEADER + [_cand_row(c) for c in cands] + [""]
         for c in cands:
+            extras: List[str] = []
+            order_line = format_order_hint(c, style="md")
+            if order_line:
+                extras.append(order_line)
+            t3_line = format_t3_expect_hint(c, style="md")
+            if t3_line:
+                extras.append(t3_line)
             tech = _tech_indicators_line_cand(c)
             if tech:
-                lines.append(f"- **{c.get('code')} {c.get('name')}** — 技术观测：{tech}")
+                extras.append(f"技术观测：{tech}")
+            if extras:
+                lines.append(f"- **{c.get('code')} {c.get('name')}** — " + " ｜ ".join(extras))
         lines.append("")
     else:
         lines += ["无候选（初筛未通过任何标的）。", ""]
@@ -307,9 +410,9 @@ def format_result(result: dict, cfg: Optional[Config] = None) -> str:
     lines.append(f"  ---- 第1步 板块 TOP{len(sectors)} ----")
     if sectors:
         for s in sectors:
-            lines.append(f"    #{s.get('rank'):<3} {s.get('name'):<10} {utils.pct(s.get('chg')):>8}"
+            lines.append(f"    #{s.get('rank'):<3} {s.get('name'):<10} {_hl_chg(s.get('chg'), 8)}"
                          f"  涨停 {s.get('limit_up_count')} 家  温和票 {s.get('mild_n')} 只"
-                         f"  综合 {utils.num(s.get('total_score'), 1)}  [{s.get('gate') or '—'}]")
+                         f"  综合 {_hl(utils.num(s.get('total_score'), 1), utils.COLOR_INFO)}  [{s.get('gate') or '—'}]")
     else:
         lines.append("    无板块达标")
 
@@ -332,17 +435,24 @@ def format_result(result: dict, cfg: Optional[Config] = None) -> str:
             idn = e.get("identity") or {}
             lv = e.get("levels") or {}
             lines.append(f"    [{_hl(op_label, color)}] {_hl(e.get('code'), color)} {_hl(e.get('name'), color)} "
-                         f"{utils.num(q.get('price')):>8} {utils.pct(q.get('chg_pct')):>8}"
-                         f"  共振 {e.get('total_score')}/{e.get('pass_threshold')}"
+                         f"{_hl_price(q.get('price'), width=8)} {_hl_chg(q.get('chg_pct'), width=8)}"
+                         f"  共振 {_hl_reso(e.get('total_score'), e.get('pass_threshold'))}"
                          f"  {idn.get('tier')}{utils.num(idn.get('score'), 0)}"
                          f"  {(e.get('stage') or {}).get('stage') or '—'}"
-                         f"  止损 {utils.pct(lv.get('sl_pct'))} 止盈 {utils.pct(lv.get('tp_pct'))}"
-                         f"  R:R {utils.num(lv.get('odds'))}")
+                         f"  止损 {_hl_sl_pct(lv.get('sl_pct'))} 止盈 {_hl_tp_pct(lv.get('tp_pct'))}"
+                         f"  R:R {_hl_odds(lv.get('odds'))}")
             shortfall = preflight.format_resonance_shortfall(e)
             if shortfall and key != "near_miss":
                 lines.append(f"        {shortfall}")
             if e.get("triggers"):
                 lines.append("        触发：" + "；".join(e["triggers"]))
+            if key in ("buyable", "watch", "eve"):
+                order_line = format_order_hint(e, style="console")
+                if order_line:
+                    lines.append(f"        {order_line}")
+                t3_line = format_t3_expect_hint(e, style="console")
+                if t3_line:
+                    lines.append(f"        {t3_line}")
             if key == "near_miss" and e.get("reasons"):
                 lines.append("        原因：" + "；".join(e["reasons"][:4]))
             tech = _tech_indicators_line(e)
@@ -356,11 +466,18 @@ def format_result(result: dict, cfg: Optional[Config] = None) -> str:
     if not cands:
         lines.append("    —")
     for c in cands:
+        intr_s = _hl(f"{_intr(c.get('intraday')):>4}", utils.COLOR_INFO)
         lines.append(f"    [{_hl('候选', utils.COLOR_INFO)}] {_hl(c.get('code'), utils.COLOR_INFO)} {_hl(c.get('name') or '', utils.COLOR_INFO)} "
-                     f"{utils.pct(c.get('chg')):>8}  分时 {_intr(c.get('intraday')):>4}"
-                     f"  共振 {_reso(c):<5}  {_ident(c, 0):<8}"
+                     f"{_hl_chg(c.get('chg'), width=8)}  分时 {intr_s}"
+                     f"  共振 {_hl_reso(c.get('score'), c.get('threshold'))}  {_ident(c, 0):<8}"
                      f"  [{c.get('verdict') or '—'}]")
         lines.append(f"        原因：{cand_display_reason(c)}")
+        order_line = format_order_hint(c, style="console")
+        if order_line:
+            lines.append(f"        {order_line}")
+        t3_line = format_t3_expect_hint(c, style="console")
+        if t3_line:
+            lines.append(f"        {t3_line}")
         tech = _tech_indicators_line_cand(c)
         if tech:
             lines.append(f"        {tech}")

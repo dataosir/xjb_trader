@@ -370,6 +370,48 @@ def normalize_digits(raw: str) -> str:
     return ''.join(_FULLWIDTH.get(c, c) for c in (raw or ""))
 
 
+def price_tick(price: float) -> float:
+    """A 股限价申报最小变动单位（元）。"""
+    p = float(price)
+    if p < 1:
+        return 0.001
+    if p < 5:
+        return 0.01
+    if p < 10:
+        return 0.05
+    if p < 20:
+        return 0.10
+    if p < 50:
+        return 0.20
+    if p < 100:
+        return 0.50
+    return 1.00
+
+
+def round_price_down(price: float, code: str = "") -> float:
+    """按 A 股最小价位向下取整（挂买单不追高）。"""
+    import math
+
+    p = float(price)
+    if p <= 0:
+        return p
+    tick = price_tick(p)
+    places = 3 if tick < 0.01 else (2 if tick < 1 else (1 if tick < 10 else 0))
+    return round(math.floor(p / tick) * tick, places)
+
+
+def round_price_up(price: float, code: str = "") -> float:
+    """按 A 股最小价位向上取整。"""
+    import math
+
+    p = float(price)
+    if p <= 0:
+        return p
+    tick = price_tick(p)
+    places = 3 if tick < 0.01 else (2 if tick < 1 else (1 if tick < 10 else 0))
+    return round(math.ceil(p / tick) * tick, places)
+
+
 def norm_code(raw: str) -> str:
     """规范化股票代码：去前缀 sh/sz、补零到 6 位。"""
     c = (raw or "").strip().upper()

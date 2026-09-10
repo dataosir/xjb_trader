@@ -305,6 +305,9 @@ def candidate_row(cand: dict, ev: Optional[dict] = None,
         "veto_reason": vt.get("reason") or None,
         "verdict": verdict, "reason": reason,
     }
+    if ev:
+        watch_pool.attach_order_hint(
+            row, ev, watch_pool.order_condition_for_verdict(verdict))
     _finalize_cand_reason(row, ev)
     return row
 
@@ -332,6 +335,8 @@ def finalize_candidates(details: List[dict], evaluations: List[dict],
             d["verdict"] = CAND_NEAR
             d["reason"] = "；".join(ev.get("reasons") or []) or "共振分不足"
         _finalize_cand_reason(d, ev)
+        watch_pool.attach_order_hint(
+            d, ev, watch_pool.order_condition_for_verdict(d.get("verdict") or ""))
     for d in details:
         if not d.get("verdict"):
             d["verdict"] = CAND_NEAR
@@ -1064,6 +1069,8 @@ class Screener:
         if write_trace:
             result["trace"] = tracer.flush()
 
+        watch_pool.attach_output_order_hints(result, cfg)
+
         # 将本次详细扫描日志写入 data/ 目录，供周末复盘
         self._write_scan_log(result)
 
@@ -1131,4 +1138,5 @@ class Screener:
         elif watch:
             result["verdict"] = VERDICT_PENDING
         result["notes"].append(f"胜率评分门槛 {threshold} 分（数据启发，见 docs/archive/WINRATE_ROADMAP）")
+        watch_pool.attach_output_order_hints(result, cfg)
         return result

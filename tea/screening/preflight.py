@@ -54,6 +54,108 @@ def odds_calc(price: float, sl_pct: float, tp_pct: float, cfg: Optional[Config] 
     }
 
 
+def row_plan_entry(row: dict) -> Optional[float]:
+    """计划止盈锚点价：优先挂单价，其次现价/预审 entry。"""
+    for k in ("order_price", "price"):
+        v = row.get(k)
+        if v is not None:
+            return float(v)
+    lv = row.get("levels") or {}
+    if lv.get("entry") is not None:
+        return float(lv["entry"])
+    q = row.get("quote") or {}
+    if q.get("price") is not None:
+        return float(q["price"])
+    return None
+
+
+def row_tp_target(row: dict) -> tuple:
+    """从候选/evaluation 取止盈% / 目标价。"""
+    tp_pct = row.get("tp_pct")
+    target = row.get("target")
+    if tp_pct is None or target is None:
+        lv = row.get("levels") or {}
+        if tp_pct is None:
+            tp_pct = lv.get("tp_pct")
+        if target is None:
+            target = lv.get("target")
+    return tp_pct, target
+
+
+def plan_targets_by_day(entry: Optional[float], target: Optional[float],
+                        tp_pct: Optional[float] = None) -> Optional[dict]:
+    """T+1/T+2/T+3 计划止盈路径（挂单价→止盈价线性拆分，复盘对照用）。"""
+    if entry is None:
+        return None
+    entry = float(entry)
+    if target is None:
+        if tp_pct is None:
+            return None
+        target = entry * (1 + float(tp_pct) / 100.0)
+    else:
+        target = float(target)
+    if target <= entry:
+        return None
+
+    def _seg(frac: float) -> dict:
+        price = round(entry + (target - entry) * frac, 4)
+        pct = round((price / entry - 1.0) * 100.0, 2)
+        return {"pct": pct, "price": price}
+
+    return {
+        "entry": round(entry, 4),
+        "target": round(target, 4),
+        "t1": _seg(1 / 3),
+        "t2": _seg(2 / 3),
+        "t3": _seg(1.0),
+    }
+
+
+def plan_targets_from_row(row: dict) -> Optional[dict]:
+    tp_pct, target = row_tp_target(row)
+    entry = row_plan_entry(row)
+    return plan_targets_by_day(entry, target, tp_pct)
+
+
+def _fmt_plan_pct(pct: float) -> str:
+    return f"+{pct:.2f}%"
+
+
+def format_tn_plan_hint(row: dict, style: str = "plain") -> Optional[str]:
+    """计划止盈路径 T+1/T+2/T+3（复盘对照，非概率/非收益承诺）。"""
+    plan = plan_targets_from_row(row)
+    if not plan:
+        return None
+
+    prefix = "计划止盈路径（复盘对照，非概率）："
+
+    def _seg(label: str, seg: dict) -> str:
+        pct_s = _fmt_plan_pct(seg["pct"])
+        price_s = utils.num(seg["price"])
+        if style == "console":
+            pct_s = utils.hl(pct_s, utils.COLOR_PROFIT)
+            price_s = utils.hl(price_s, utils.COLOR_PROFIT)
+        elif style == "md":
+            pct_s = f"**{pct_s}**"
+            price_s = f"**{price_s}**"
+        return f"{label} {pct_s}→{price_s}"
+
+    parts = [_seg("T+1", plan["t1"]), _seg("T+2", plan["t2"]), _seg("T+3", plan["t3"])]
+    return prefix + "　".join(parts)
+
+
+def format_tn_plan_email_lines(row: dict) -> List[str]:
+    """邮件正文用多行计划止盈（【】强调核心数字）。"""
+    plan = plan_targets_from_row(row)
+    if not plan:
+        return []
+    lines = ["计划止盈路径（复盘对照，非概率）："]
+    for label, key in (("T+1", "t1"), ("T+2", "t2"), ("T+3", "t3")):
+        seg = plan[key]
+        lines.append(f"  {label}：【{_fmt_plan_pct(seg['pct'])}】 → 【{utils.num(seg['price'])}】")
+    return lines
+
+
 def min_tp_for_odds(price: float, sl_pct: float, min_odds: float,
                     cfg: Optional[Config] = None) -> float:
     """反推满足含滑点 R:R ≥ min_odds 的最低止盈百分比。"""

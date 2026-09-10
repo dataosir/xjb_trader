@@ -80,7 +80,17 @@
 
 ### 3.6 观察提醒（F16 + F18）
 
-- `watch_pool.scan_alerts(cfg, market)` → `[{code, name, track, condition, detail, ev}]`  
+- `watch_pool.scan_alerts(cfg, market)` → `[{code, name, track, order_price, stop, target, tp_pct, body, ...}]`  
+- `watch_pool.format_alert_body(candidate, condition)` — 邮件正文（挂单价/止损/止盈/计划止盈 T+1~T+3；核心数字【】强调）  
+- `watch_pool.suggest_limit_price(ev, condition)` → `{order_price, stop, target, basis, sl_pct, tp_pct, ma20_ref}`  
+  - **可买（追高）**：挂单价=现价；止损/止盈沿用预审 ATR 结构（扫描价口径）  
+  - **观察/前夕/回踩**：乖离自适应纪律回踩（≤5%→2%、5–10%→3%、>10%→5%）；**止损/止盈按挂单价重算**；高乖离 MA20 仅参考标注  
+- `watch_pool.attach_order_hint(row, ev, condition)` — 种子 `candidate_row` / `finalize_candidates` 写入挂单价字段  
+- `watch_pool.attach_output_order_hints(result)` — 种子三档输出（可买/观察/前夕）写入挂单价  
+- `seed_report.format_order_hint(cand, style)` — 挂单价展示行；`style=console|md` 时核心数值高亮  
+- `preflight.plan_targets_by_day(entry, target, tp_pct)` — T+1/T+2/T+3 计划止盈路径（线性拆分）  
+- `preflight.format_tn_plan_hint(row, style)` / `format_tn_plan_email_lines(row)` — 控制台/SEED/邮件展示  
+- `seed_report.format_t3_expect_hint(cand, style)` — 兼容别名，等同 `format_tn_plan_hint`  
 - `notify.send_alert(cfg, subject, body)` → `{ok, channels}`；密码/Key 不进日志  
 - `runner.watch_alert()`：Timing 守卫 → scan → dedupe(`watch_alert_state.json`) → send_alert  
 - CLI：`tea watch-alert`；`tea setup-email`（SMTP）；`tea setup-notify`（macOS/Bark）；各 `--test`  
