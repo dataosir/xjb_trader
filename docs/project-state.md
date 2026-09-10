@@ -37,7 +37,7 @@
 
 **以攒证据为主**：缺口看板盯 T+1/T+3；影子桶（萌芽∪前三非突破）对照 **T+3>0≥60%**（验收门槛，非收益承诺）；巩固可买硬闸；低吸空池只观察。
 
-已落地（代码）：…**`tea launchd doctor` + `ops/install-launchd-all.sh`（仓库迁移自检）**、…**review launchd 直调 python（修复 Downloads 下 bash Operation not permitted）**、…**scan_anchor 主样本幂等**（primary/manual/winrate；`seed_records`/`scan_details`/accumulator 防早盘重复扫污染）、…**F16 观察池盘中邮件提醒**（…**邮件含建议挂单价/止损/止盈/计划止盈 T+1~T+3**；**种子可买/观察/前夕主列表 + 候选明细同步展示挂单价/计划止盈路径**；**挂单价改乖离自适应纪律回踩（非 MA20 锚定），回踩轨止损/止盈按挂单价重算**；**控制台/SEED 核心数据高亮**；**F01 市场天气屏语义色高亮（热点/情绪/涨跌比/连板涨停等）**）、**操作日录**（`logs/daily/{seed|review|watch_alert|weekly_email}/` 按天单文件，无操作无文件，**默认保留 7 天**）、**集中错误日志**（`logs/error.log`：Python ERROR + cron 失败 + 未捕获异常）、**F17 每周选股周报邮件**…
+已落地（代码）：…**`tea launchd doctor` + `ops/install-launchd-all.sh`（仓库迁移自检）**、…**review launchd 直调 python（修复 Downloads 下 bash Operation not permitted）**、…**scan_anchor 主样本幂等**（primary/manual/winrate；`seed_records`/`scan_details`/accumulator 防早盘重复扫污染）、…**F16 观察池盘中邮件提醒**（…**邮件含建议挂单价/止损/止盈/计划止盈 T+1~T+3**；**种子可买/观察/前夕主列表 + 候选明细同步展示挂单价/计划止盈路径**；**挂单价改乖离自适应纪律回踩（非 MA20 锚定），回踩轨止损/止盈按挂单价重算**；**控制台/SEED 核心数据高亮**；**F01 市场天气屏语义色高亮（热点/情绪/涨跌比/连板涨停等）**）、**操作日录**（`logs/daily/{seed|review|watch_alert|weekly_email|ops_summary}/` 按天单文件，无操作无文件，**默认保留 7 天**）、**集中错误日志**（`logs/error.log`：Python ERROR + cron 失败 + **launchd stderr 增量同步** + 未捕获异常）、**日终运维摘要邮件**（`ops_summary`：`scheduled_review` 后自动发）、**F17 每周选股周报邮件**…
 
 ## 进行中
 

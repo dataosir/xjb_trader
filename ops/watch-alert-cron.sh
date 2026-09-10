@@ -39,6 +39,7 @@ fi
 _on_fail() {
     local rc="$1"
     error_log_append "watch-alert-cron" "watch-alert failed exit=$rc"
+    stderr_sync || true
 }
 
 # 静默 skip 不落盘；有输出（发信/失败/候选）时 Python 写入 logs/daily/watch_alert/日期.log

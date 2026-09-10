@@ -36,3 +36,12 @@ error_log_append() {
     fi
     "$PY" -c "import sys; from tea.core.logger import append_error_log; append_error_log(sys.argv[2], source=sys.argv[1])" _ "$source" "$*"
 }
+
+# launchd stderr 增量同步到 logs/error.log（cron 失败时可顺带扫 stderr）
+stderr_sync() {
+    if [ -z "${PY:-}" ]; then
+        echo "stderr_sync: PY not set" >&2
+        return 1
+    fi
+    "$PY" -c "from tea.reporting.ops_summary import sync_launchd_stderr; from tea.config.config_store import load_config; sync_launchd_stderr(load_config())"
+}

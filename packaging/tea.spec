@@ -114,6 +114,7 @@ HIDDEN = [
     "tea.reporting.retrospective",
     "tea.reporting.seed_trace",
     "tea.reporting.weekly",
+    "tea.reporting.ops_summary",
     # 运行时入口
     "tea.runtime",
     "tea.runtime.cli",

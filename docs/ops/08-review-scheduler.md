@@ -59,7 +59,9 @@ tea review --scheduled --force
 
 - `logs/daily/review/YYYY-MM-DD.log`：**复核日录**（当天有实际复核或 `already_done` 记录才生成）
 - `logs/tea.log`：搜 `tea.review`
-- `logs/launchd-review.{stdout,stderr}.log`：launchd 直出
+- `logs/launchd-review.{stdout,stderr}.log`：launchd 直出（stderr 增量同步到 `logs/error.log`）
+- **`[TEA运维]` 日终摘要邮件**：复核成功后自动发（`ops_summary.send_after_review`）；含 seed/review/watch-alert 心跳与今日 error 摘要
+- 手动预览：`tea ops-summary --dry-run`
 
 ## 6. 排障
 

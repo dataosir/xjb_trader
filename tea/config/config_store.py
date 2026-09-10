@@ -67,6 +67,8 @@ DEFAULTS: Dict[str, Any] = {
         "watch_alert_state_file": "watch_alert_state.json",
         "weekly_email_state_file": "weekly_email_state.json",
         "review_scheduled_state_file": "review_scheduled_state.json",
+        "launchd_stderr_state_file": "launchd_stderr_state.json",
+        "ops_summary_state_file": "ops_summary_state.json",
     },
     # ---------------------------------------------------------- 行情/防封
     "market": {
@@ -711,6 +713,15 @@ DEFAULTS: Dict[str, Any] = {
         "require_friday": True,
         "subject_prefix": "[TEA周报]",
         "run_review_before": True,           # 发周报前先跑 close_review，确保 T+3 最新
+    },
+    # ---------------------------------------------------------- 日终运维摘要邮件（stderr→error.log + 任务心跳）
+    "ops_summary": {
+        "enabled": True,
+        "send_after_review": True,             # scheduled_review 成功后自动发
+        "dedupe_per_day": True,
+        "only_on_issues": False,               # False=交易日每天都发（含全绿摘要）
+        "subject_prefix": "[TEA运维]",
+        "alert_heartbeat_min": 30,             # 交易日盘中最少 tea.alert 条数
     },
     # ---------------------------------------------------------- 观察池
     "watch": {

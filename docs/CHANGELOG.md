@@ -4,6 +4,14 @@
 
 ## [Unreleased]
 
+### 可观测（2026-09-10：stderr→error.log + 日终运维摘要邮件）
+
+- **stderr 同步**：`sync_launchd_stderr` 增量读取 `logs/launchd-*.stderr.log`，去重折叠后写入 `logs/error.log`（状态 `data/launchd_stderr_state.json`）。  
+- **触发点**：`watch-alert` 每分钟、`scheduled_review` 收尾、`tea launchd doctor`、cron 失败时 `stderr_sync`。  
+- **日终运维邮件**：`ops_summary` 配置；`scheduled_review` 成功后自动发 `[TEA运维]` 摘要（seed/review/watch-alert 心跳 + 今日 error.log）。  
+- **CLI**：`tea ops-summary`（`--dry-run` / `--sync-only` / `--force`）。  
+- **文档**：`ops/03`、`ops/08`、`tech/00`/`02` 同步；自测 `check_ops_summary`。
+
 ### 运维（2026-09-10：launchd doctor + 一键重装）
 
 - **`tea launchd doctor`**：对比已安装 plist 的 `TEA_HOME` / `WorkingDirectory` / Python 与当前环境；检测未加载、shell 脚本触发、Downloads 路径警告、`timing.seed_scan` 漂移。  

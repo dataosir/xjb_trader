@@ -92,6 +92,7 @@
 ### Checklist
 
 - [ ] **MIT 对照**：完成 / 卡住（原因）/ 砍掉（原因）  
+- [ ] 查 **`[TEA运维]` 日终摘要邮件** 或 `grep "$(date +%Y-%m-%d)" logs/error.log`（launchd stderr 已自动汇入）  
 - [ ] 今日是否跑通 `seed-plan`？（自动：`logs/daily/seed/YYYY-MM-DD.log`；只读报告：菜单 `3`）回填摘要是否看过？  
 - [ ] 本周是否已 ≥1 次全量 `review`？（周五前必须 yes）  
 - [ ] 今日是否改 config / 合并策略 PR？若是 → 是否违反「样本门槛」或缺少 CHANGELOG？  

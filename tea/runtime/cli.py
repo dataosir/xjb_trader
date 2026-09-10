@@ -95,7 +95,7 @@ def cmd_seed_plan(args, cfg: Config) -> int:
     if not getattr(args, "force", False) and os.environ.get("TEA_LAUNCHD") != "1":
         io.say("  种子扫描仅由 launchd 工作日 14:30 自动执行（避免早盘手动扫污染样本）")
         io.say("  查看报告：菜单 3 或 tea seed-show")
-        io.say("  漏扫补救：./ops/seed-plan-cron.sh  或  tea seed-plan --force")
+        io.say("  漏扫补救：tea seed-plan --force")
         return 1
     res = runner.seed_plan(cfg=cfg, io=io, include_eve=not args.no_eve,
                            write_plan=not args.no_plan, require_window=args.strict_window)
@@ -340,6 +340,26 @@ def cmd_weekly_email(args, cfg: Config) -> int:
     return 0 if res.get("ok") else 1
 
 
+def cmd_ops_summary(args, cfg: Config) -> int:
+    from tea.reporting import ops_summary as ops_mod
+
+    io = _io()
+    stderr_res = ops_mod.sync_launchd_stderr(cfg)
+    if stderr_res.get("errors"):
+        io.say(f"  stderr 同步：{stderr_res.get('errors')} 条 → error.log")
+    status = ops_mod.collect_daily_status(cfg=cfg, stderr_res=stderr_res)
+    io.say(ops_mod.format_summary_text(status, cfg))
+    if args.dry_run:
+        return 0
+    if args.sync_only:
+        return 0
+    res = ops_mod.send_daily_summary(cfg, force=args.force, stderr_res=stderr_res)
+    if res.get("skip"):
+        io.say(f"  邮件跳过：{res.get('skip')}")
+        return 0
+    return 0 if res.get("ok") else 1
+
+
 def cmd_accum(args, cfg: Config) -> int:
     io = _io()
     if args.days and args.days > 1:
@@ -455,7 +475,11 @@ def cmd_launchd(args, cfg: Config) -> int:
             io.say(f"  配置：{job.config_prefix}.*")
         return 0
     if args.action == "doctor":
-        res = diagnose(cfg, tea_home=getattr(args, "tea_home", None))
+        res = diagnose(
+            cfg,
+            tea_home=getattr(args, "tea_home", None),
+            fix=getattr(args, "fix", False),
+        )
         io.say(format_report(res))
         return 0 if res.get("ok") else 1
     if args.action == "render-plist":
@@ -970,6 +994,12 @@ def build_parser() -> argparse.ArgumentParser:
     we.add_argument("--force", action="store_true", help="忽略周五/去重守卫（演练）")
     we.set_defaults(func=cmd_weekly_email)
 
+    osm = sub.add_parser("ops-summary", help="运维摘要：stderr→error.log + 日终邮件")
+    osm.add_argument("--force", action="store_true", help="忽略去重/非交易日守卫")
+    osm.add_argument("--dry-run", action="store_true", help="只打印摘要，不发邮件")
+    osm.add_argument("--sync-only", action="store_true", help="仅同步 launchd stderr")
+    osm.set_defaults(func=cmd_ops_summary)
+
     au = sub.add_parser("accum", help="当日/区间累积（为什么今天没交易）")
     au.add_argument("--date", help="YYYY-MM-DD，默认今天")
     au.add_argument("--days", type=int, help="改看最近 N 天汇总")
@@ -1023,6 +1053,8 @@ def build_parser() -> argparse.ArgumentParser:
     ld_render.set_defaults(func=cmd_launchd)
     ld_doc = ld_sub.add_parser("doctor", help="检查已安装 plist 与当前 TEA_HOME/Python 是否一致")
     ld_doc.add_argument("--tea-home", help="期望 TEA_HOME（默认当前配置目录）")
+    ld_doc.add_argument("--fix", action="store_true",
+                        help="清空旧版 launchd stderr 误报（重装 plist 后执行一次）")
     ld_doc.set_defaults(func=cmd_launchd)
 
     mn = sub.add_parser("menu", help="进入数字菜单")

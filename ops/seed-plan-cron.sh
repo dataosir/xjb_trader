@@ -47,6 +47,7 @@ _on_fail() {
     local rc="$1"
     if [ "$rc" -ne 0 ]; then
         error_log_append "seed-plan-cron" "seed-plan failed exit=$rc (see logs/daily/seed/$(date +%Y-%m-%d).log)"
+        stderr_sync || true
     fi
 }
 

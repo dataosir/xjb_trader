@@ -78,15 +78,21 @@ grep -E "行情就绪|K线就绪|行情取数失败|K线取数失败" logs/tea.l
 
 ### 3.2 launchd 报 `Operation not permitted`
 
-旧版 plist 通过 `/bin/bash ops/seed-plan-cron.sh` 触发时，若仓库在 **Downloads** 目录，macOS 可能拦截脚本执行（`launchd-seed.stderr.log` 可见）。
+**原因**：macOS **无法**给 `ops/` 目录做「一劳永逸放行」；旧版 plist 经 `/bin/bash ops/*.sh` 触发时，仓库在 **Downloads** 下会被 TCC 拦截。
 
-**已修复**：新版 plist 直接 `python3 -m tea seed-plan`，需重装：
+**永久方案**（已落地）：
+
+1. plist **直调** `python3 -m tea <命令>`，**不经过** `ops/*-cron.sh`
+2. 重装后清空旧 stderr 误报：
 
 ```bash
-./ops/install-launchd-seed-plan.sh
+./ops/install-launchd-all.sh
+tea launchd doctor --fix
 ```
 
-若仍失败：将仓库移出 Downloads，或给 Terminal / `python3` 开「完全磁盘访问权限」。
+3. 漏扫补救用 **`tea seed-plan --force`**（勿依赖 `ops/seed-plan-cron.sh`）
+
+若仍失败：将仓库移出 Downloads，或 `TEA_HOME=~/my_trade` 固定数据目录后重装 launchd。
 
 ### 3.3 仓库迁移 / Python 升级
 

@@ -3724,6 +3724,68 @@ def check_error_log(t: Suite, cfg: Config) -> None:
     t.ok("logging.ERROR 同步落盘", "handler-probe" in body2)
 
 
+def check_ops_summary(t: Suite, cfg: Config) -> None:
+    """launchd stderr→error.log + 日终运维摘要邮件。"""
+    from tea.reporting import ops_summary as ops_mod
+
+    t.head("运维 · stderr 同步 + 日终摘要")
+
+    log_dir = cfg.logs_dir()
+    os.makedirs(log_dir, exist_ok=True)
+    stderr_path = os.path.join(log_dir, "launchd-watch-alert.stderr.log")
+    with open(stderr_path, "w", encoding="utf-8") as fh:
+        fh.write("ModuleNotFoundError: No module named 'tea'\n")
+        fh.write("ModuleNotFoundError: No module named 'tea'\n")
+
+    res = ops_mod.sync_launchd_stderr(cfg, jobs=("watch_alert",))
+    t.ok("stderr 同步有新增", int(res.get("errors") or 0) >= 1)
+    err_path = logger_mod.error_log_path(cfg)
+    with open(err_path, "r", encoding="utf-8") as fh:
+        err_body = fh.read()
+    t.ok("error.log 含 launchd 来源", "launchd:launchd-watch-alert" in err_body)
+    t.ok("重复行已折叠", "(×2)" in err_body)
+
+    res2 = ops_mod.sync_launchd_stderr(cfg, jobs=("watch_alert",))
+    t.eq("二次同步无新增", int(res2.get("errors") or 0), 0)
+
+    day = utils.today_str()
+    logger_mod.append_daily_log("seed", "probe seed", cfg, day=day, with_ts=False)
+    logger_mod.append_daily_log("review", "done review", cfg, day=day, with_ts=False)
+    tea_log = os.path.join(log_dir, "tea.log")
+    with open(tea_log, "a", encoding="utf-8") as fh:
+        fh.write(f"{day} 10:00:00 +0800 INFO [tea.alert] tea.alert scan start n=1\n")
+
+    status = ops_mod.collect_daily_status(day, cfg, stderr_res=res)
+    t.ok("seed 状态正常", any(x.get("name") == "seed-plan" and x.get("ok") for x in status["tasks"]))
+    t.ok("watch-alert 有心跳", status.get("alert_count", 0) >= 1)
+    body = ops_mod.format_summary_text(status, cfg)
+    t.ok("摘要含定时任务", "seed-plan" in body and "watch-alert" in body)
+
+    sent_box: List[dict] = []
+
+    def _fake_sender(**kw) -> None:
+        sent_box.append(kw)
+
+    cfg.set("ops_summary.enabled", True)
+    cfg.set("notify.email.enabled", True)
+    cfg.set("notify.email.smtp_host", "smtp.163.com")
+    cfg.set("notify.email.smtp_user", "test@163.com")
+    cfg.set("notify.email.smtp_password", "secret")
+    cfg.set("notify.email.from_addr", "test@163.com")
+    cfg.set("notify.email.to_addrs", ["recv@163.com"])
+    cfg.save()
+
+    mail = ops_mod.send_daily_summary(cfg, force=True, stderr_res=res2, sender=_fake_sender)
+    t.ok("force 发运维摘要", mail.get("ok") is True)
+    t.ok("邮件已 mock", len(sent_box) == 1)
+    t.ok("主题含日终摘要", "日终摘要" in (sent_box[0].get("subject") or ""))
+
+    sent_box.clear()
+    dup = ops_mod.send_daily_summary(cfg, force=False, stderr_res=res2, sender=_fake_sender)
+    t.eq("同日去重", dup.get("skip"), "already_sent")
+    t.ok("去重后无新邮件", not sent_box)
+
+
 def check_packaging(t: Suite) -> None:
     """打包规格的隐式导入清单必须盖住磁盘上所有模块。
 
@@ -3822,6 +3884,32 @@ def check_launchd_doctor(t: Suite, c: Config) -> None:
     t.ok("doctor 含不一致提示",
          any("不一致" in i.get("message", "") for i in bad_res.get("issues") or []))
 
+    stale_agent = tempfile.mkdtemp(prefix="tea_launchd_stale_")
+    stale_job = get_job("seed_plan")
+    stale_plist = os.path.join(stale_agent, f"{stale_job.label}.plist")
+    with open(stale_plist, "wb") as fh:
+        plistlib.dump({
+            "Label": stale_job.label,
+            "WorkingDirectory": home,
+            "EnvironmentVariables": {"TEA_HOME": home},
+            "ProgramArguments": [py, "-m", "tea", "seed-plan"],
+        }, fh)
+    stale_log = os.path.join(c.logs_dir(), stale_job.stderr_log)
+    os.makedirs(os.path.dirname(stale_log), exist_ok=True)
+    with open(stale_log, "w", encoding="utf-8") as fh:
+        fh.write("/bin/bash: ops/seed-plan-cron.sh: Operation not permitted\n")
+    stale_res = doc_mod.diagnose(c, tea_home=home, agent_dir=stale_agent,
+                                 loaded_labels={stale_job.label})
+    t.ok("doctor 识别旧 stderr 误报",
+         any("stderr 含旧版误报" in i.get("message", "") for i in stale_res.get("issues") or []))
+    t.ok("_stderr_looks_stale", doc_mod._stderr_looks_stale(
+        {"ProgramArguments": [py, "-m", "tea", "seed-plan"]},
+        "Operation not permitted seed-plan-cron.sh"))
+    fix_res = doc_mod.diagnose(c, tea_home=home, agent_dir=stale_agent,
+                               loaded_labels={stale_job.label}, fix=True)
+    t.ok("doctor --fix 清空 stderr", (fix_res.get("cleared_stderr") or {}).get("count", 0) >= 1)
+    t.ok("fix 后 stderr 为空", not os.path.getsize(stale_log))
+
 
 # ==================================================================== 入口
 
@@ -3882,6 +3970,7 @@ def main(verbose: bool = True, cfg: Optional[Config] = None) -> int:
         check_daily_logs(t, c)
         check_launchd_doctor(t, c)
         check_error_log(t, c)
+        check_ops_summary(t, c)
         check_packaging(t)
         check_end_to_end(t, c, mk, sent)
         check_followthrough(t, c)

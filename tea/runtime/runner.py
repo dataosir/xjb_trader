@@ -667,6 +667,25 @@ def _save_review_state(cfg: Config, state: dict) -> None:
     utils.write_json(_review_state_path(cfg), state)
 
 
+def _finish_scheduled_ops(cfg: Config, review_out: dict) -> None:
+    """scheduled_review 收尾：stderr→error.log + 日终运维摘要邮件。"""
+    log = logger_mod.get_logger("review")
+    try:
+        from tea.reporting import ops_summary
+        stderr_res = ops_summary.sync_launchd_stderr(cfg)
+        if stderr_res.get("errors"):
+            log.warning("launchd stderr synced errors=%s", stderr_res.get("errors"))
+        mail = ops_summary.maybe_send_after_review(cfg, review_out, stderr_res=stderr_res)
+        if mail.get("ok"):
+            log.info("tea.ops_summary sent date=%s", mail.get("date"))
+        elif mail.get("skip"):
+            log.info("tea.ops_summary skip: %s", mail.get("skip"))
+        elif mail.get("error"):
+            log.error("tea.ops_summary send failed: %s", mail.get("error"))
+    except Exception as ex:
+        log.error("tea.ops_summary failed: %s", ex, exc_info=True)
+
+
 def scheduled_review(cfg: Optional[Config] = None, market: Optional[Market] = None,
                      io: Optional[IO] = None, force: bool = False) -> dict:
     """launchd 盘后自动全量复核：交易日 + 收盘后 + 每日去重一次。
@@ -702,6 +721,7 @@ def scheduled_review(cfg: Optional[Config] = None, market: Optional[Market] = No
             log.info("tea.review skip: already_done")
             out["skip"] = "already_done"
             logger_mod.append_daily_log("review", "skip already_done", cfg)
+            _finish_scheduled_ops(cfg, out)
             return out
 
         log.info("tea.review scheduled start date=%s force=%s", today, force)
@@ -716,6 +736,7 @@ def scheduled_review(cfg: Optional[Config] = None, market: Optional[Market] = No
             f"done review updated={ft.get('updated')} pending={ft.get('pending')}",
             cfg)
         logger_mod.write_daily_transcript("review", io.transcript, cfg)
+        _finish_scheduled_ops(cfg, out)
         return out
 
 
@@ -733,6 +754,12 @@ def watch_alert(cfg: Optional[Config] = None, market: Optional[Market] = None,
     tm = Timing(cfg)
     today = utils.today_str()
     out: Dict[str, Any] = {"date": today, "sent": [], "skipped": [], "failed": []}
+
+    try:
+        from tea.reporting.ops_summary import sync_launchd_stderr
+        sync_launchd_stderr(cfg, jobs=("watch_alert",))
+    except Exception:
+        pass
 
     if not force and not cfg.get("alert.enabled", False):
         log.info("tea.alert skip: alert.enabled=false")

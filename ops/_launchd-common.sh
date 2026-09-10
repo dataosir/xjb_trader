@@ -52,3 +52,14 @@ launchd_bootstrap() {
     launchctl bootstrap "gui/$(id -u)" "$plist_dst" 2>/dev/null \
         || launchctl load "$plist_dst"
 }
+
+# 重装后清空旧版 bash/错误 Python 遗留的 stderr，避免 sync 进 error.log 误报
+launchd_clear_stderr() {
+    "$PY" -c "
+from tea.config.config_store import load_config
+from tea.config.launchd_doctor import clear_launchd_stderr_logs
+n = clear_launchd_stderr_logs(load_config()).get('count', 0)
+if n:
+    print(f'已清空 {n} 个 launchd stderr 日志（旧误报）')
+" 2>/dev/null || true
+}

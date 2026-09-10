@@ -37,6 +37,7 @@ DAILY_CATEGORIES: Dict[str, Tuple[str, ...]] = {
     "review": ("review", "ft"),
     "watch_alert": ("alert",),
     "weekly_email": ("weekly_email", "review"),
+    "ops_summary": ("ops_summary",),
 }
 
 _LOG_FMT = "%(asctime)s %(levelname)s [%(name)s] %(message)s"

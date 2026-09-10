@@ -40,6 +40,7 @@ _on_fail() {
     local rc="$1"
     if [ "$rc" -ne 0 ]; then
         error_log_append "weekly-email-cron" "weekly-email failed exit=$rc (see logs/daily/weekly_email/$(date +%Y-%m-%d).log)"
+        stderr_sync || true
     fi
 }
 

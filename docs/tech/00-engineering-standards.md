@@ -108,6 +108,7 @@ utils.hl("可买", utils.COLOR_SEED)                    # 种子选中标品红
 | `review` | `logs/daily/review/YYYY-MM-DD.log` | 盘后复核完成或 `already_done` 去重记录 |
 | `watch_alert` | `logs/daily/watch_alert/YYYY-MM-DD.log` | 发信 / 失败 / 扫描到候选（静默 skip 不写） |
 | `weekly_email` | `logs/daily/weekly_email/YYYY-MM-DD.log` | 周报邮件尝试（含 skip / 失败） |
+| `ops_summary` | `logs/daily/ops_summary/YYYY-MM-DD.log` | 日终运维摘要邮件（发信/失败） |
 
 API：`tea/core/logger.py` 的 `daily_log_path` / `append_daily_log` / `write_daily_transcript` / `daily_log_session` / `prune_daily_logs`。`logs/tea.log` 仍作全量汇总（按日轮转），与日录互补。
 
@@ -119,9 +120,14 @@ API：`tea/core/logger.py` 的 `daily_log_path` / `append_daily_log` / `write_da
 | --- | --- |
 | Python `logger.error` / 未捕获异常 | 邮件发送失败、CLI 崩溃 |
 | cron `error_log_append` | `review-cron` exit≠0、launchd 调度后进程异常退出 |
+| `sync_launchd_stderr` | `No module named tea`（launchd stderr 增量同步，重复行折叠为 `×N`） |
 | `append_error_log` | shell 显式落盘 |
 
-**每日排查**：`tail -20 logs/error.log` 或 `grep "$(date +%Y-%m-%d)" logs/error.log`。
+**每日排查**：`tail -20 logs/error.log` 或 `grep "$(date +%Y-%m-%d)" logs/error.log`；或等 **`[TEA运维]` 日终摘要邮件**（`scheduled_review` 后自动发）。
+
+### 日终运维摘要（`ops_summary`）
+
+`tea/reporting/ops_summary.py`：`scheduled_review` 成功后汇总 seed / review / watch-alert 心跳与 `error.log`，SMTP 发 `[TEA运维]` 邮件。手动：`tea ops-summary`（`--dry-run` 只看摘要）。
 
 **保留策略**：操作日录默认保留 **7 天**（`logs.daily_backup_days`，含当天共 7 个自然日）；写入或 cron 启动时自动 `prune_daily_logs` 删除更早文件。汇总 `tea.log` / `error.log` 仍走 `logs.backup_days`（默认 30）。
 
