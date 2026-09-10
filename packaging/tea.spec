@@ -123,6 +123,7 @@ HIDDEN = [
     "tea.screening.gates",
     "tea.screening.preflight",
     "tea.screening.screener",
+    "tea.config.launchd_doctor",
     "tea.screening.scan_anchor",
     "tea.screening.seed_report",
     "tea.screening.veto",

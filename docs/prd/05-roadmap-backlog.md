@@ -35,7 +35,9 @@
 | B-P1-05 | 将归因结论反馈为闸门微调（非拍脑袋） | F03 | **方案 0 执行中** | 用户确认维持 2 周；~09-18 复盘后再议方案 A；须 param_change |
 | B-P1-06 | `shadow_tag`（萌芽∪前三非突破）T+3>0 对照 | F11 | **对照达标 + 方案 0 已确认** | T+3 69%；维持现状攒样本至 ~09-18 |
 | B-P1-07 | 样本缺口看板（待 T+1/T+3、低吸、新闸门可买） | F11 | **已落地** | `format_sample_gap`；运营日看 |
-| B-P1-08 | 观察池盘中邮件提醒（launchd 每分钟） | F16/F10 | **Plan 已写，待实现** | [`F16-watch-alert-notify`](03-features/F16-watch-alert-notify.md) |
+| B-P1-08 | 观察池盘中邮件提醒（launchd 每分钟） | F16/F10 | **已落地** | [`F16-watch-alert-notify`](03-features/F16-watch-alert-notify.md)；含 F18 macOS/Bark |
+| B-P1-09 | `scan_anchor` 主样本幂等（primary/manual/winrate） | F03/F11 | **已落地** | `seed_records`/`scan_details`/accumulator 防重复扫污染 |
+| B-P1-10 | `tea launchd doctor` + 一键重装 | ops | **已落地** | `ops/install-launchd-all.sh`；仓库迁移后自检 |
 
 ## P2 · 样本门槛未达 · HOLD
 

@@ -4,6 +4,13 @@
 
 ## [Unreleased]
 
+### 运维（2026-09-10：launchd doctor + 一键重装）
+
+- **`tea launchd doctor`**：对比已安装 plist 的 `TEA_HOME` / `WorkingDirectory` / Python 与当前环境；检测未加载、shell 脚本触发、Downloads 路径警告、`timing.seed_scan` 漂移。  
+- **`ops/install-launchd-all.sh`**：一键重装 seed-plan / review / watch-alert / weekly-email 四个任务。  
+- **菜单 11▸6**：配置与维护新增 launchd 健康检查入口。  
+- **backlog**：B-P1-08（F16）标为已落地；新增 B-P1-09（scan_anchor）、B-P1-10（launchd doctor）。
+
 ### 修复（2026-09-10：review launchd Downloads 权限）
 
 - **review plist**：改直调 `python3 -m tea review --scheduled`（绕过 Downloads 下 bash 脚本 `Operation not permitted`）；与 seed-plan 修复一致。  

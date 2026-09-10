@@ -2568,8 +2568,8 @@ def check_menu(t: Suite, cfg: Config) -> None:
               "followthrough", "trades", "stats", "weekly", "weekly-email",
               "__pos_add__", "__pos_rm__",
               "__confirm__", "__eval__", "config", "setup", "setup-email", "setup-notify",
-              "selftest", "plan-clear"}
-    t.eq("28 项功能一个不少", sorted(set(all_argv)), sorted(expect))
+              "selftest", "launchd", "plan-clear"}
+    t.eq("29 项功能一个不少", sorted(set(all_argv)), sorted(expect))
 
     # 时段→建议：每个时段都得有东西可做，且不超过四条（否则就又回到平铺）。
     real_now = utils.now
@@ -3772,6 +3772,57 @@ def check_packaging(t: Suite) -> None:
          all(f'"{x}"' in spec for x in ("pytest", "ruff", "numpy")))
 
 
+# ==================================================================== launchd doctor
+
+def check_launchd_doctor(t: Suite, c: Config) -> None:
+    """launchd 健康检查：对比 plist TEA_HOME/Python 与当前环境。"""
+    import plistlib
+    from tea.config import launchd_doctor as doc_mod
+    from tea.config.schedules import JOBS, get_job
+
+    t.head("launchd · doctor")
+
+    agent = tempfile.mkdtemp(prefix="tea_launchd_agent_")
+    home = str(c.data_dir())
+    py = sys.executable
+    all_labels = set()
+    for jid in JOBS:
+        job = get_job(jid)
+        all_labels.add(job.label)
+        argv = [py, "-m", "tea"]
+        if job.tea_argv:
+            argv.extend(job.tea_argv)
+        elif job.tea_command:
+            argv.append(job.tea_command)
+        plist_path = os.path.join(agent, f"{job.label}.plist")
+        with open(plist_path, "wb") as fh:
+            plistlib.dump({
+                "Label": job.label,
+                "WorkingDirectory": home,
+                "EnvironmentVariables": {"TEA_HOME": home},
+                "ProgramArguments": argv,
+            }, fh)
+
+    ok_res = doc_mod.diagnose(c, tea_home=home, agent_dir=agent, loaded_labels=all_labels)
+    t.ok("doctor 匹配环境通过", ok_res.get("ok"))
+    txt = doc_mod.format_report(ok_res)
+    t.ok("doctor 报告含 TEA_HOME", home in txt)
+
+    bad_agent = tempfile.mkdtemp(prefix="tea_launchd_bad_")
+    bad_path = os.path.join(bad_agent, "com.tea.review.plist")
+    with open(bad_path, "wb") as fh:
+        plistlib.dump({
+            "Label": "com.tea.review",
+            "WorkingDirectory": "/tmp/old-tea",
+            "EnvironmentVariables": {"TEA_HOME": "/tmp/old-tea"},
+            "ProgramArguments": [py, "-m", "tea", "review", "--scheduled"],
+        }, fh)
+    bad_res = doc_mod.diagnose(c, tea_home=home, agent_dir=bad_agent)
+    t.ok("doctor 路径漂移报错", not bad_res.get("ok"))
+    t.ok("doctor 含不一致提示",
+         any("不一致" in i.get("message", "") for i in bad_res.get("issues") or []))
+
+
 # ==================================================================== 入口
 
 def main(verbose: bool = True, cfg: Optional[Config] = None) -> int:
@@ -3829,6 +3880,7 @@ def main(verbose: bool = True, cfg: Optional[Config] = None) -> int:
         check_onboarding(t, tmp)
         check_paths(t)
         check_daily_logs(t, c)
+        check_launchd_doctor(t, c)
         check_error_log(t, c)
         check_packaging(t)
         check_end_to_end(t, c, mk, sent)

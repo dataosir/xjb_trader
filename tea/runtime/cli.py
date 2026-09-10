@@ -444,6 +444,8 @@ def cmd_setup_notify(args, cfg: Config) -> int:
 
 def cmd_launchd(args, cfg: Config) -> int:
     """launchd plist 生成与调度一览（时刻见 scheduler.* 配置）。"""
+    from tea.config.launchd_doctor import diagnose, format_report
+
     io = _io()
     if args.action == "list":
         for jid in sorted(schedules.JOBS):
@@ -452,6 +454,10 @@ def cmd_launchd(args, cfg: Config) -> int:
             io.say(f"  触发：{schedules.trigger_summary(cfg, jid)}")
             io.say(f"  配置：{job.config_prefix}.*")
         return 0
+    if args.action == "doctor":
+        res = diagnose(cfg, tea_home=getattr(args, "tea_home", None))
+        io.say(format_report(res))
+        return 0 if res.get("ok") else 1
     if args.action == "render-plist":
         if not args.job:
             io.err("请指定任务名，例如：tea launchd render-plist review")
@@ -543,6 +549,7 @@ SUBMENUS = {
         ("3", "邮件提醒邮箱配置", ["setup-email"]),
         ("4", "即时提醒通道（macOS / Bark）", ["setup-notify"]),
         ("5", "离线自测", ["selftest"]),
+        ("6", "launchd 健康检查", ["launchd", "doctor"]),
     ],
 }
 
@@ -1014,6 +1021,9 @@ def build_parser() -> argparse.ArgumentParser:
     ld_render.add_argument("--python", help="Python 解释器路径（默认 python3）")
     ld_render.add_argument("-o", "--output", help="写入文件（默认 stdout）")
     ld_render.set_defaults(func=cmd_launchd)
+    ld_doc = ld_sub.add_parser("doctor", help="检查已安装 plist 与当前 TEA_HOME/Python 是否一致")
+    ld_doc.add_argument("--tea-home", help="期望 TEA_HOME（默认当前配置目录）")
+    ld_doc.set_defaults(func=cmd_launchd)
 
     mn = sub.add_parser("menu", help="进入数字菜单")
     mn.set_defaults(func=None)

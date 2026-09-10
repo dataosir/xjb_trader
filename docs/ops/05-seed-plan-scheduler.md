@@ -88,6 +88,18 @@ grep -E "行情就绪|K线就绪|行情取数失败|K线取数失败" logs/tea.l
 
 若仍失败：将仓库移出 Downloads，或给 Terminal / `python3` 开「完全磁盘访问权限」。
 
+### 3.3 仓库迁移 / Python 升级
+
+launchd plist 里的 `TEA_HOME` / `WorkingDirectory` / Python 路径在**安装时写死**，移动文件夹后不会自动更新。
+
+```bash
+cd /new/path/to/tea
+./ops/install-launchd-all.sh    # 一键重装四个任务
+tea launchd doctor              # 验证路径一致
+```
+
+数据与代码分离时：`TEA_HOME=~/my_trade ./ops/install-launchd-all.sh`。
+
 ---
 
 ## 4. 漏扫补救

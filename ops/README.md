@@ -18,7 +18,14 @@
 ```bash
 cd /path/to/tea
 chmod +x ops/*.sh
-./ops/install-launchd-seed-plan.sh
+./ops/install-launchd-all.sh          # 一键安装四个任务
+# 或单独：./ops/install-launchd-seed-plan.sh
+```
+
+仓库迁移 / Python 升级后自检：
+
+```bash
+tea launchd doctor
 ```
 
 ### 手动试跑
