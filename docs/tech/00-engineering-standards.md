@@ -23,9 +23,30 @@
 
 先说最重要的一条。
 
+## 模块化与文件体量（高内聚、低耦合）
+
+参考 Java 包/类职责：**一个模块一件事，模块间窄接口协作**。细则亦见 `.cursor/rules/modular-cohesion.mdc`。
+
+| 约束 | 要求 |
+| --- | --- |
+| 新 `.py` 文件 | 软上限 **500 行**，硬上限 **800 行**；超限必须拆文件 |
+| 单函数 | 建议 ≤ **80 行**；过长则抽子函数或下沉 |
+| 依赖 | 分层单向、无循环 import；跨子包经 `__init__.py` 契约 |
+| CLI | 无交易/筛选逻辑，只做参数与展示 |
+
+### selftest 目录约定（新增用例强制）
+
+`tea/selftest.py`（约 4000 行）为**历史单体**，专项拆分前**不整体重构**，但**禁止继续在其中大块追加新用例**：
+
+1. 新 `check_*` → `tea/tests/checks/<域>.py`（域名对齐 `tea/` 子包，如 `screening`、`portfolio`）。
+2. `selftest.py` 保留沙箱、`Suite` 编排与 `main()` 入口，从 `checks/` import 并注册。
+3. 修改已有公式/阈值：优先改对应 `checks/` 文件；仅在遗留块内小改可暂留 `selftest.py`。
+
+未来拆分目标：`selftest.py` 瘦身为入口，`tea/tests/suite.py` 承载 `Suite` 框架。Cursor 规则与本文同步维护。
+
 ## 一条硬规矩：公式与断言同步
 
-`tea/selftest.py` 里的每一条断言，都是**按规格文档独立重算一遍**再和引擎输出比对的。这是本项目唯一的正确性防线。
+`tea/selftest.py`（及 `tea/tests/checks/` 下各模块）里的每一条断言，都是**按规格文档独立重算一遍**再和引擎输出比对的。这是本项目唯一的正确性防线。
 
 所以：
 
@@ -165,7 +186,7 @@ runtime → phases → reporting / screening / portfolio → analysis → data �
 
 1. 在 `config_store.py` 的 `DEFAULTS` 里加默认值（带注释说明含义与取值范围）。
 2. 在用到的模块里通过 `cfg.get("段.键", 默认)` 或 `cfg.s("键", 默认)` 读取。
-3. 在 `selftest.py` 里补一条断言，覆盖它生效与不生效两种情况。
+3. 在 `tea/tests/checks/` 对应域文件（或遗留 `selftest.py` 小块）补断言，覆盖生效与不生效两种情况。
 4. 如果它影响决策，在 README 对应小节补一句说明。
 
 ## 提 Issue

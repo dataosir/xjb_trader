@@ -38,9 +38,10 @@
 
 ## 6. 代码锚点
 
-- `tea/selftest.py`  
+- `tea/selftest.py`（编排入口；历史用例单体，专项拆分前不整体重构）  
+- `tea/tests/checks/`（**新增**断言落点，按子包域拆分）  
 - `.github/workflows/ci.yml`  
-- `docs/tech/00-engineering-standards.md`  
+- `docs/tech/00-engineering-standards.md`、`.cursor/rules/modular-cohesion.mdc`  
 - CLI：`tea selftest [--quiet]`
 
 ## 7. 验收标准
@@ -52,5 +53,6 @@
 
 ## 8. 已知缺口 / 待迭代
 
+- **`selftest.py` 单体过大**（~4000 行）：已立规——新用例进 `tea/tests/checks/`，入口保留在 `selftest.py`；全量拆分为独立 backlog，不在证据观察期做大重构  
 - README 自测计数可能滞后于真实用例数，以命令输出为准  
 - 打包（PyInstaller）属分发路径，需在目标 OS 本地构建  

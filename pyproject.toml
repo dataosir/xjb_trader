@@ -59,6 +59,8 @@ packages = [
     "tea.reporting",
     "tea.runtime",
     "tea.screening",
+    "tea.tests",
+    "tea.tests.checks",
 ]
 
 [tool.ruff]

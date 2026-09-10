@@ -4,6 +4,11 @@
 
 ## [Unreleased]
 
+### 工程（2026-09-10：模块化规约 — 高内聚低耦合）
+
+- **规则** 新增 `.cursor/rules/modular-cohesion.mdc`：单文件体量上限（500/800 行）、selftest 新用例落 `tea/tests/checks/`、禁止继续膨胀 `selftest.py` 单体。  
+- **文档** `RULES.md`、`tech/00-engineering-standards.md`、`prd/F15` 同步目录约定与拆分 backlog。
+
 ### 质量（2026-09-10：selftest 日志沙箱 + ruff 全绿）
 
 - **修复** `tea selftest` 经 CLI 启动时 `logging.ERROR` 未写入沙箱 `error.log`：`logger.reset_logging()` + 沙箱内重绑 `init_logging`。  
