@@ -4,6 +4,18 @@
 
 ## [Unreleased]
 
+### 质量（2026-09-10：selftest 日志沙箱 + ruff 全绿）
+
+- **修复** `tea selftest` 经 CLI 启动时 `logging.ERROR` 未写入沙箱 `error.log`：`logger.reset_logging()` + 沙箱内重绑 `init_logging`。  
+- **修复** ruff 17 处告警（F541 无占位 f-string、F401 未用 import、F821 缺 `load_config`/`Any`）。  
+- **同步** README badge 与 CI 注释：自测 **799/799**。
+
+### 运营（2026-09-10：Ops-2 证据周 scorecard）
+
+- **新增** [`ops/04-evidence-scorecard.md`](ops/04-evidence-scorecard.md)：周表模板、里程碑 / Kill 表、方案 A 每周必看项。  
+- **重编号** `ops/04-promotion-one-pager.md` → [`ops/09-promotion-one-pager.md`](ops/09-promotion-one-pager.md)（释放 `04` 给 Ops-2）。  
+- **文档**：`ops/README`、`INDEX`、`project-state` 同步；`01-growth-channels` 链到新编号。
+
 ### 可观测（2026-09-10：stderr→error.log + 日终运维摘要邮件）
 
 - **stderr 同步**：`sync_launchd_stderr` 增量读取 `logs/launchd-*.stderr.log`，去重折叠后写入 `logs/error.log`（状态 `data/launchd_stderr_state.json`）。  

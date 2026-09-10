@@ -66,7 +66,7 @@
 1. 日循环：`seed-plan`（14:30）+ **自动 review**（15:01 launchd）+ 菜单 `8` 可随时补跑；周五 `weekly-email` 发信前再 force review。  
 2. **方案 A 已启动**（rank 5→3）：攒 post-change 样本；盯 rank≤3 T+3、新闸后可买 n≥10；~09-18 复盘对照。归因见 `archive/FACTOR_ATTRIB_2026-09-04.md`。  
 3. 低吸：空池只读 diag；`lowbuy` 回填 ≥30 前不上买入。  
-4. **Ops-2（待做）**：证据周 scorecard + 里程碑/Kill 表（`ops/04`–`05`）。
+4. **Ops-2（已建）**：每周日填 [`ops/04-evidence-scorecard.md`](ops/04-evidence-scorecard.md)；~09-18 方案 A 复盘对照。
 
 ---
 
@@ -78,6 +78,6 @@
 | `docs/README.md` | 入口 + 4 步闭环（明细见 INDEX） |
 | `docs/prd/` | 完整（F01–F18） |
 | `docs/tech/` | 框架已建（00–03） |
-| `docs/ops/` | 框架已建（00–03；Ops-1 日 SOP + 两帽） |
+| `docs/ops/` | 框架已建（00–04、05–09；Ops-1 日 SOP + Ops-2 证据周表） |
 | `docs/archive/` | 历史策略/评审已迁入 |
 | 根 `RULES.md` | **已存在**（技术迭代铁律权威源；`tech/00` 摘要引用；`.cursorrules` 已挂钩） |

@@ -8,7 +8,9 @@
 | [`01-growth-channels.md`](01-growth-channels.md) | 受众与推广渠道假设 |
 | [`02-user-feedback.md`](02-user-feedback.md) | 反馈 / Bug 收集与进迭代规则 |
 | [`03-operator-daily-sop.md`](03-operator-daily-sop.md) | 日 MIT + 晨晚间 checklist（命令时间线见 `prd/02-daily-workflow`） |
+| [`04-evidence-scorecard.md`](04-evidence-scorecard.md) | 证据周 scorecard + 里程碑 / Kill 表（Ops-2） |
 | [`05-seed-plan-scheduler.md`](05-seed-plan-scheduler.md) | 14:30 种子扫描 launchd 安装与漏扫 SOP（脚本在仓库 `ops/`） |
+| [`09-promotion-one-pager.md`](09-promotion-one-pager.md) | 对外推广 one-pager 快捷引用 |
 | [`06-watch-alert-scheduler.md`](06-watch-alert-scheduler.md) | 观察池盘中提醒 launchd（每分钟 + SMTP 配置） |
 | [`07-weekly-email-scheduler.md`](07-weekly-email-scheduler.md) | 每周五选股周报邮件 launchd（17:00 + SMTP） |
 

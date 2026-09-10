@@ -24,7 +24,7 @@ indie-build-log 用 CEO/CMO/CTO/COO 四帽管商业化漏斗；TEA 在**攒证�
 
 | 帽子 | 建议占比 | 说明 |
 |---|---|---|
-| **交易员** | **≥70%** | 含盘中执行、盘后复核、周 scorecard 填写（Ops-2 待建） |
+| **交易员** | **≥70%** | 含盘中执行、盘后复核、周 scorecard 填写（[`04-evidence-scorecard.md`](04-evidence-scorecard.md)） |
 | **策略研发** | **≤30%** | 仅限 selftest 修复、体验文案、文档；**禁止**无样本改 `pass_threshold` / 放宽低吸 |
 
 **升权条件**（满足其一才可把策略研发提到 ~50%）：

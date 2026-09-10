@@ -5,7 +5,7 @@
 from __future__ import annotations
 
 import platform
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Dict, Optional
 
 from tea.config.config_store import Config, load_config
 from tea.core import notify
@@ -45,7 +45,7 @@ def format_status(cfg: Config) -> str:
         f"  Bark Push：{'开' if bc.get('enabled') else '关'}  key={_mask_key(bc.get('key') or '')}",
         f"  邮件 SMTP：{'开' if ec.get('enabled') else '关'}"
         f"（完整度：{'是' if notify.smtp_ready(cfg) else '否'}）",
-        f"  邮件配置：运行 tea setup-email",
+        "  邮件配置：运行 tea setup-email",
     ]
     return "\n".join(lines)
 

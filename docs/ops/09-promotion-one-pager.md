@@ -1,4 +1,4 @@
-# 04 · 对外推广 One-Pager
+# 09 · 对外推广 One-Pager
 
 > 完整版（含 indie-build-log 交叉链接）见：  
 > [`indie-build-log/docs/03-growth-and-automation/tea-promotion-one-pager.md`](https://github.com/dataosir/indie-build-log/blob/main/docs/03-growth-and-automation/tea-promotion-one-pager.md)  

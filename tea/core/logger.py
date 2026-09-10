@@ -66,6 +66,16 @@ def append_error_log(message: str, source: str = "", cfg: Optional[Config] = Non
         return False
 
 
+def reset_logging() -> None:
+    """清除 handler 并重置初始化标记（仅自测/测试用；生产进程勿调用）。"""
+    global _initialized
+    logger = logging.getLogger(_LOGGER_NAME)
+    for handler in list(logger.handlers):
+        logger.removeHandler(handler)
+        handler.close()
+    _initialized = False
+
+
 def init_logging(cfg: Optional[Config] = None, level: int = logging.INFO) -> logging.Logger:
     """初始化运行日志（幂等），返回 root logger。
 

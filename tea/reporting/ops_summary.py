@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import os
 from collections import Counter
-from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
+from typing import Any, Callable, Dict, List, Optional, Sequence
 
 from tea.config.config_store import Config, load_config
 from tea.config.schedules import JOBS, get_job

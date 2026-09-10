@@ -13,7 +13,7 @@ import datetime
 import os
 import sys
 from collections import defaultdict
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 
 from tea.config.config_store import Config, load_config
 from tea.core import utils

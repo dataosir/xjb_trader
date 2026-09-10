@@ -71,7 +71,9 @@
 | [`ops/01-growth-channels.md`](ops/01-growth-channels.md) | 受众与推广渠道假设 |
 | [`ops/02-user-feedback.md`](ops/02-user-feedback.md) | 反馈 / Bug 收集规则 |
 | [`ops/03-operator-daily-sop.md`](ops/03-operator-daily-sop.md) | 交易运营日 SOP（MIT / 晨晚间 checklist；命令见 prd/02） |
+| [`ops/04-evidence-scorecard.md`](ops/04-evidence-scorecard.md) | 证据周 scorecard + 里程碑 / Kill 表（Ops-2） |
 | [`ops/05-seed-plan-scheduler.md`](ops/05-seed-plan-scheduler.md) | 种子扫描外部调度（launchd 方案 A：安装 / 日志 / 漏扫补救） |
+| [`ops/09-promotion-one-pager.md`](ops/09-promotion-one-pager.md) | 对外推广 one-pager 快捷引用 |
 | [`ops/06-watch-alert-scheduler.md`](ops/06-watch-alert-scheduler.md) | 观察池盘中提醒 launchd（每分钟 `watch-alert` + SMTP） |
 | [`ops/07-weekly-email-scheduler.md`](ops/07-weekly-email-scheduler.md) | 每周五选股周报邮件 launchd（`weekly-email` + SMTP） |
 | [`ops/08-review-scheduler.md`](ops/08-review-scheduler.md) | 盘后复核自动调度（工作日 15:01 `review --scheduled` + T+3 回填；`scheduler.*` 统一配置） |

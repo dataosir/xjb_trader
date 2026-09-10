@@ -4,7 +4,6 @@
 """
 from __future__ import annotations
 
-import os
 import plistlib
 import subprocess
 import sys
@@ -12,6 +11,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from tea.config import config_store
+from tea.config.config_store import load_config
 from tea.config.schedules import JOBS, get_job, seed_scan_should_match
 
 

@@ -438,7 +438,7 @@ def format_weekly(wk: Optional[dict] = None, cfg: Optional[Config] = None) -> st
     t3 = wk.get("t3_attribution") or {}
     if t3.get("total_n"):
         tr = t3.get("total_rate") or 0.0
-        lines.append(f"  ---- T+3 三日持有（方案 E）----")
+        lines.append("  ---- T+3 三日持有（方案 E）----")
         lines.append(f"    全样本 T+3>0 {tr:.0%}（{t3.get('total_up', 0)}/{t3['total_n']}）")
         if t3.get("mengya_n"):
             mr = t3.get("mengya_rate") or 0.0

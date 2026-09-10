@@ -3926,6 +3926,9 @@ def main(verbose: bool = True, cfg: Optional[Config] = None) -> int:
         c.set("strategy.require_standard_window_for_buy", False)
         c.set("report.write_seed_trace", True)
         c.save()
+        # cli.main 可能已对真实 cfg 初始化过 logging；沙箱内须重绑 handler。
+        logger_mod.reset_logging()
+        logger_mod.init_logging(c)
 
         t = Suite(verbose)
         if verbose:

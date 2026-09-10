@@ -3,7 +3,7 @@
 [![CI](https://github.com/dataosir/xjb_trader/actions/workflows/ci.yml/badge.svg)](https://github.com/dataosir/xjb_trader/actions/workflows/ci.yml)
 [![Python](https://img.shields.io/badge/python-3.8%2B-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![自测](https://img.shields.io/badge/selftest-352%2F352-brightgreen.svg)](#离线自测)
+[![自测](https://img.shields.io/badge/selftest-799%2F799-brightgreen.svg)](#离线自测)
 
 > 计划你的交易，交易你的计划。宁可空仓，不强行凑票。
 
@@ -260,7 +260,7 @@ python3 -m tea config set market.data_sources '["eastmoney","tencent","sina"]'
 python3 -m tea selftest
 ```
 
-自测**不联网**，用构造行情跑全链路。每一项断言都在测试内**按规格独立重算一遍**再和引擎比对，能抓住"实现和规格分叉"。当前：**352/352 通过**。自测在临时 `TEA_HOME` 沙箱中运行，不会碰真实数据与报告。
+自测**不联网**，用构造行情跑全链路。每一项断言都在测试内**按规格独立重算一遍**再和引擎比对，能抓住"实现和规格分叉"。当前：**799/799 通过**。自测在临时 `TEA_HOME` 沙箱中运行，不会碰真实数据与报告。
 
 ---
 
