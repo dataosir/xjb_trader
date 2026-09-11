@@ -367,10 +367,10 @@ def check_clist_paging(t: Suite, cfg: Config) -> None:
 
 
 def check_disk_fallback(t: Suite, cfg: Config) -> None:
-    """无备源接口（涨跌家数/涨停池）的磁盘兜底：实时取数失败回退最近成功值。
+    """无备源/慢源接口的磁盘兜底：实时取数失败回退最近成功值。
 
-    东财 clist/ztpool 间歇性 RemoteDisconnected，且无备源。实时失败时回退磁盘
-    缓存并标注 stale，避免天气里出现「涨跌比 — / 涨停 —」。
+    东财 clist/ztpool 间歇性 RemoteDisconnected，且无备源。大盘指数降级链在网抖时
+    可能超过天气单路超时；实时失败时回退磁盘缓存并标注 stale，避免「上证 —」。
     """
     t.head("数据层 · 涨跌家数/涨停池磁盘兜底")
 
@@ -393,6 +393,8 @@ def check_disk_fallback(t: Suite, cfg: Config) -> None:
                                   "exact": True})
     mk0._kv_disk_save("ztpool", {"limit_up_count": 55, "max_boards": 5,
                                  "date": "20260818", "ok": True})
+    mk0._kv_disk_save("index", {"point": 3200.0, "chg_pct": 0.5, "ma20": 3150.0,
+                                "ma20_above": True})
 
     # 实时取数全失败 → 回退兜底缓存并标注 stale
     mk = Market(cfg, fetcher=_FailFetcher())
@@ -406,6 +408,12 @@ def check_disk_fallback(t: Suite, cfg: Config) -> None:
          f"stale={zt.get('stale')} count={zt.get('limit_up_count')}")
     t.ok("兜底不含 error（避免被误报为数据缺口）", zt.get("error") is None,
          f"error={zt.get('error')}")
+    idx = mk.get_index()
+    t.ok("大盘指数回退缓存且标注 stale",
+         idx.get("stale") is True and idx.get("point") == 3200.0,
+         f"stale={idx.get('stale')} point={idx.get('point')}")
+    t.ok("指数磁盘兜底保留 MA20", idx.get("ma20") == 3150.0,
+         f"ma20={idx.get('ma20')}")
 
     # 板块排名兜底：实时失败回退磁盘缓存，且标注 sector_stale（选股据此告警）
     mk0._sector_disk_save([{"bk": "BK1", "name": "农业", "chg": 8.0, "rank": 1}])
@@ -1254,7 +1262,7 @@ def check_providers(t: Suite, cfg: Config) -> None:
 
 def check_sentiment(t: Suite, cfg: Config, mk: FakeMarket) -> dict:
     t.head("道 · 情绪评分（§4.2 表逐项复算）")
-    t.eq("天气采集单路超时默认30s", float(cfg.get("sentiment.fetch_timeout_sec", 30)), 30.0)
+    t.eq("天气采集单路超时默认45s", float(cfg.get("sentiment.fetch_timeout_sec", 45)), 45.0)
     raw = {"index": mk.get_index(), "sectors": mk.get_sector_ranking(),
            "breadth": mk.get_breadth(), "limit_up": mk.get_limit_up_stats()}
     scored = sent_mod.compute_score(raw, cfg)
@@ -1333,7 +1341,7 @@ def check_sentiment(t: Suite, cfg: Config, mk: FakeMarket) -> dict:
          f"stance={below['stance']} notes={below.get('notes')}")
 
     # 数据缺口横幅：指数超时 + 网络失败 → 醒目汇总；无缺口 → 空串
-    fetch_to = int(cfg.get("sentiment.fetch_timeout_sec", 30))
+    fetch_to = int(cfg.get("sentiment.fetch_timeout_sec", 45))
     s_gap = {"errors": [f"index: 超时 {fetch_to}s", "hard: 请求失败"], "limit_up_error": None}
     gaps = sent_mod.data_gap_summary(s_gap, "网络请求 27 次｜东财 1｜失败 9")
     t.ok("指数缺口映射为大盘指数", any(g.startswith("大盘指数: 超时") for g in gaps), str(gaps))
@@ -3547,15 +3555,18 @@ def check_weekly_email(t: Suite, c: Config) -> None:
     c.set("notify.email.to_addrs", ["recv@163.com"])
     c.save()
 
-    skip = weekly_mod.send_email_report(cfg=c, force=False)
-    t.ok("非周五跳过", skip.get("skip") in ("not_friday", "not_trading_day"))
+    from unittest import mock
+    thu_noon = _dt.datetime(2026, 9, 10, 12, 0, 0)  # 周四，固定测 require_friday 守卫
+    with mock.patch.object(weekly_mod.utils, "now", return_value=thu_noon):
+        skip = weekly_mod.send_email_report(cfg=c, force=False)
+    t.eq("非周五跳过", skip.get("skip"), "not_friday")
 
     res = weekly_mod.send_email_report(cfg=c, force=True, sender=_fake_sender)
     t.ok("force 发信成功", res.get("ok") is True)
     t.ok("邮件已 mock", len(sent_box) == 1)
     t.ok("主题含选股周报", "选股周报" in (sent_box[0].get("subject") or ""))
-    t.ok("正文含纪律自查", "纪律自查" in (sent_box[0].get("body") or ""))
-    t.ok("正文含 T+3 段", "三日持有 T+3>0" in (sent_box[0].get("body") or ""))
+    t.ok("正文含核心一览", "核心一览" in (sent_box[0].get("body") or ""))
+    t.ok("正文不含完整周报", "======== 完整周报 ========" not in (sent_box[0].get("body") or ""))
     t.ok("state 已记录", weekly_mod.is_sent_this_week(c))
 
     c.set("weekly_email.require_friday", False)
@@ -3977,6 +3988,14 @@ def main(verbose: bool = True, cfg: Optional[Config] = None) -> int:
         check_packaging(t)
         check_end_to_end(t, c, mk, sent)
         check_followthrough(t, c)
+        from tea.tests.checks.followthrough import (
+            check_mode_channel_stats,
+            check_winrate_seed_fields,
+            check_winrate_watch_full_persist,
+        )
+        check_winrate_seed_fields(t, c)
+        check_mode_channel_stats(t, c)
+        check_winrate_watch_full_persist(t, c, mk)
         check_pricetrack(t, c, mk)
         check_watch_alert(t, c)
         check_email_setup(t, tmp)
@@ -3984,6 +4003,8 @@ def main(verbose: bool = True, cfg: Optional[Config] = None) -> int:
         check_notify_setup(t, tmp)
         check_t3_attribution_and_scheduled_review(t, c)
         check_weekly_email(t, c)
+        from tea.tests.checks.reporting import check_email_digest
+        check_email_digest(t, c)
         return t.report()
     finally:
         sent_mod.clear_cache()

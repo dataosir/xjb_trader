@@ -315,6 +315,14 @@ class Market:
         return self.cache.put(key, out)
 
     # -------------------------------------------------- 3.5 大盘指数
+    def index_disk_fallback(self) -> Optional[dict]:
+        """实时取数失败/超时时回退最近成功的指数快照（含 MA20 若当时有）。"""
+        disk = self._kv_disk_load("index",
+                                  float(self.cfg.get("market.index_disk_cache_hours", 6.0)))
+        if disk is None:
+            return None
+        return {**disk, "stale": True}
+
     def _fill_index_ma20(self, snap: dict, secid: str) -> dict:
         """东财报价通、K 线挂时快照 ma20 为空，但降级链因 point>0 不会整包问备源。
 
@@ -327,7 +335,8 @@ class Market:
         log = logger_mod.get_logger("data")
         t0 = time.time()
         try:
-            rows = self.get_klines("", limit=lmt, secid=secid)
+            with self._retry_scope("index_ma20_retries", 1):
+                rows = self.get_klines("", limit=lmt, secid=secid)
         except MarketError as exc:
             log.warning(
                 "大盘指数 MA20 跨源补全失败 secid=%s point=%s elapsed=%.2fs: %s",
@@ -369,6 +378,12 @@ class Market:
         try:
             snap = self.provider.fetch_index_snapshot(secid)
         except MarketError as exc:
+            fb = self.index_disk_fallback()
+            if fb is not None:
+                logger_mod.get_logger("data").warning(
+                    "大盘指数实时取数失败，回退磁盘缓存 secid=%s elapsed=%.2fs: %s",
+                    secid, time.time() - t0, exc)
+                return self.cache.put(key, fb)
             src = (getattr(self.provider, "last_source", None) or {}).get("index_snapshot")
             logger_mod.get_logger("data").warning(
                 "大盘指数取数失败 secid=%s source=%s elapsed=%.2fs: %s",
@@ -380,6 +395,8 @@ class Market:
             "大盘指数就绪 secid=%s point=%s chg=%s%% ma20=%s source=%s elapsed=%.2fs",
             secid, snap.get("point"), snap.get("chg_pct"), snap.get("ma20"),
             src or "-", time.time() - t0)
+        clean = {k: v for k, v in snap.items() if k != "stale"}
+        self._kv_disk_save("index", clean)
         return self.cache.put(key, snap)
 
     # -------------------------------------------------- 3.6 涨跌家数

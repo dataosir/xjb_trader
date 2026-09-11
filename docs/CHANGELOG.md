@@ -4,6 +4,32 @@
 
 ## [Unreleased]
 
+### 报告（2026-09-11：周报邮件精简摘要）
+
+> 关联：F17；手机邮件只看核心，完整 Markdown 落盘 `reports/WEEKLY_*.md`。
+
+- **邮件**：`format_email_digest` 替代「摘要 + 完整周报」双份正文；含空仓对比、本周主线、选股名单、样本积累。  
+- **配置**：`weekly_email.include_full_report`（默认 `false`，可恢复附完整 Markdown）。  
+- **自测**：`tea/tests/checks/reporting.py`。
+
+### 数据（2026-09-11：胜率影子样本增强 + 分轨周报）
+
+> 关联：F05 / F11 / B-P1-01；605006 类「高分被过热闸挡」反事实归因。
+
+- **落盘**：`record_seed` 新增 `winrate_gate` / `winrate_detail` / `winrate_would_buy`（分数够但被硬闸挡可统计）。  
+- **观察轨**：`winrate_scan` 落盘全量 `watch`，控制台仍按 `seed.max_watch_output` 截断展示。  
+- **周报**：`mode_channel_stats` + 周报「rule vs winrate 通道对照」段（T+1 / T+3 / 硬闸 TOP）。  
+- **自测**：`tea/tests/checks/followthrough.py` 三则断言。
+
+### 数据（2026-09-11：大盘指数磁盘兜底 + 天气超时预算）
+
+> 关联：F01 市场天气；胜率选股/seed 扫描中「index: 超时 30s → 上证 —」。
+
+- **根因**：指数降级链 + MA20 跨源补全在网抖时易超过 `fetch_raw` 单路 30s；超时后线程被掐断、无回退 → 姿态误报「上证位置未知」。  
+- **修复**：`Market.get_index` 成功时落盘 `index_cache_file`；实时失败或 `fetch_raw` 指数超时 → 回退 6h 内磁盘快照（保留 MA20 若当时有）。  
+- **优化**：`index_ma20_retries` 默认 1（MA20 补全不再死磕整条链）；`sentiment.fetch_timeout_sec` 默认 **45s**。  
+- **自测**：`check_disk_fallback` 增补指数兜底断言。
+
 ### 工程（2026-09-10：模块化规约 — 高内聚低耦合）
 
 - **规则** 新增 `.cursor/rules/modular-cohesion.mdc`：单文件体量上限（500/800 行）、selftest 新用例落 `tea/tests/checks/`、禁止继续膨胀 `selftest.py` 单体。  

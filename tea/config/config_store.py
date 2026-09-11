@@ -63,6 +63,7 @@ DEFAULTS: Dict[str, Any] = {
         # 无备源的东财接口（涨跌家数/涨停池）磁盘兜底缓存：实时取数失败时回退最近值。
         "breadth_cache_file": ".tea_breadth_cache.json",
         "ztpool_cache_file": ".tea_ztpool_cache.json",
+        "index_cache_file": ".tea_index_cache.json",
         "shadow_pool_file": "shadow_pool.json",
         "watch_alert_state_file": "watch_alert_state.json",
         "weekly_email_state_file": "weekly_email_state.json",
@@ -196,7 +197,11 @@ DEFAULTS: Dict[str, Any] = {
         # 实时取数间歇性 RemoteDisconnected 时回退到最近一次成功值，避免天气里出现「—」。
         "breadth_disk_cache_hours": 6.0,
         "ztpool_disk_cache_hours": 6.0,
+        # 大盘指数磁盘兜底：实时降级链超时/全挂时回退最近成功快照（含 MA20 若当时有）。
+        "index_disk_cache_hours": 6.0,
         "index_cache_sec": 120,
+        # MA20 跨源补全已在 index_double_route 内试过 K 线，此处再跑整条链时压低重试。
+        "index_ma20_retries": 1,
         "offline": False,
     },
     # ---------------------------------------------------------- 交易时间轴
@@ -259,9 +264,9 @@ DEFAULTS: Dict[str, Any] = {
         "ice_cut_advance": 0.35,
         "ice_cut_mult": 0.25,
         "cache_sec": 120,
-        # 市场天气三路并行采集的单路最长等待（秒）。指数走降级链（东财→腾讯→新浪），
-        # 15s 容易在链未跑完时被线程池掐断 → 大盘趋势维归零；默认 30s 给备源接手留余量。
-        "fetch_timeout_sec": 30.0,
+        # 市场天气三路并行采集的单路最长等待（秒）。指数走降级链（东财→腾讯→新浪）
+        # + 可能的 MA20 跨源补全；30s 在网抖时仍易掐断，默认 45s。
+        "fetch_timeout_sec": 45.0,
     },
     # ---------------------------------------------------------- 术：9 分共振
     "scoring": {
@@ -712,6 +717,7 @@ DEFAULTS: Dict[str, Any] = {
         "dedupe_per_week": True,
         "require_friday": True,
         "subject_prefix": "[TEA周报]",
+        "include_full_report": False,        # True=邮件末尾附完整 Markdown（默认仅精简摘要）
         "run_review_before": True,           # 发周报前先跑 close_review，确保 T+3 最新
     },
     # ---------------------------------------------------------- 日终运维摘要邮件（stderr→error.log + 任务心跳）

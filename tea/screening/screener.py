@@ -1154,7 +1154,8 @@ class Screener:
         buyable.sort(key=lambda e: -e.get("winrate_score", -99))
 
         result["buyable"] = buyable
-        result["watch"] = watch[:int(cfg.get("seed.max_watch_output", 3))]
+        result["watch"] = watch
+        result["watch_display_limit"] = int(cfg.get("seed.max_watch_output", 3))
         result["candidates"] = vf["candidates"]
         result["candidates_n"] = len(cands)
         result["veto_passed_n"] = len(vf["passed"])

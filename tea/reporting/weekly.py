@@ -41,6 +41,7 @@ def collect(days: int = 7, cfg: Optional[Config] = None) -> Dict[str, Any]:
         "decisions": decisions,
         "forced_n": len(forced),
         "followthrough": followthrough.aggregate(cfg),
+        "mode_channels": followthrough.mode_channel_stats(cfg),
         "t3_attribution": followthrough.t3_attribution(cfg),
         "watch_items": watch_pool.items(cfg),
         "empty_days": (rd.get("verdicts") or {}).get("EMPTY", 0)
@@ -249,6 +250,34 @@ def render_md(wk: Optional[dict] = None, cfg: Optional[Config] = None) -> str:
                       f"（门槛 ≥{shadow.get('target', 0.6):.0%}，n≥{shadow.get('min_samples', 15)}）"]
     lines.append("")
 
+    # ---- rule vs winrate 通道对照（B-P1-01）
+    mc = wk.get("mode_channels") or {}
+    lines += ["## rule vs winrate 通道对照（B-P1-01）", ""]
+    if not any((mc.get(m) or {}).get("n") for m in ("rule", "winrate")):
+        lines.append("尚无分轨样本（需 seed-plan + winrate-scan 落盘并 review 回填）。")
+    else:
+        lines += ["| 通道 | 样本 | 可买 | 观察 | T+1 胜率 | T+3>0 | 高分被闸挡 |",
+                  "| --- | --- | --- | --- | --- | --- | --- |"]
+        for mode, label in (("rule", "规则(9分)"), ("winrate", "胜率影子")):
+            slot = mc.get(mode) or {}
+            n = slot.get("n") or 0
+            if not n:
+                lines.append(f"| {label} | 0 | — | — | — | — | — |")
+                continue
+            lines.append(
+                f"| {label} | {n} | {slot.get('buyable_n', 0)} | {slot.get('watch_n', 0)} "
+                f"| {stats.fmt_wr(slot.get('t1_rate'))} "
+                f"| {stats.fmt_wr(slot.get('t3_up_rate'))} "
+                f"| {slot.get('gate_blocked_n', 0)} |")
+        wr_slot = mc.get("winrate") or {}
+        reasons = wr_slot.get("gate_reasons") or {}
+        if reasons:
+            lines += ["", "**胜率通道硬闸 TOP**", "",
+                      "| 原因 | 次数 |", "| --- | --- |"]
+            for k, v in sorted(reasons.items(), key=lambda x: -x[1])[:8]:
+                lines.append(f"| {k} | {v} |")
+    lines.append("")
+
     # ---- 跟涨经验
     agg = wk.get("followthrough") or {}
     lines += ["## 跟涨经验（阶段×档位×轨道 T+1 胜率）", ""]
@@ -293,6 +322,203 @@ def write_report(days: int = 7, cfg: Optional[Config] = None) -> str:
     out = utils.atomic_write(path, render_md(wk, cfg))
     utils.cleanup_reports(cfg)
     return out
+
+
+# ------------------------------------------------------------------ 邮件精简摘要（F17）
+
+def _week_hot_sectors(rd: dict, top_n: int = 6) -> List[dict]:
+    """汇总周内热点板块出现频次（来自每日 seed 扫描 sectors 快照）。"""
+    slots: Dict[str, dict] = {}
+    for d in rd.get("digests") or []:
+        for s in d.get("sectors") or []:
+            name = s.get("name")
+            if not name:
+                continue
+            slot = slots.setdefault(name, {"name": name, "days": 0, "chg_sum": 0.0, "limit_up": 0})
+            slot["days"] += 1
+            slot["chg_sum"] += float(s.get("chg") or 0)
+            slot["limit_up"] += int(s.get("limit_up_count") or 0)
+    ranked = sorted(slots.values(), key=lambda x: (-x["days"], -x["chg_sum"]))
+    for s in ranked:
+        s["avg_chg"] = s["chg_sum"] / s["days"] if s["days"] else 0.0
+    return ranked[:top_n]
+
+
+def _week_seed_picks(since: str, until: str, cfg: Config) -> Dict[str, List[dict]]:
+    """周内落盘种子，按 rule / winrate 分轨。"""
+    out: Dict[str, List[dict]] = {"rule": [], "winrate": []}
+    for r in followthrough.load_records(cfg):
+        d = r.get("date") or ""
+        if not (since <= d <= until):
+            continue
+        mode = r.get("mode") or "rule"
+        key = "winrate" if mode == "winrate" else "rule"
+        out[key].append(r)
+    for key in out:
+        out[key].sort(key=lambda x: (x.get("date") or "", x.get("code") or ""))
+    return out
+
+
+def _week_sample_delta(since: str, until: str, cfg: Config) -> int:
+    return sum(1 for r in followthrough.load_records(cfg)
+               if since <= (r.get("date") or "") <= until)
+
+
+def _fmt_pick_score(rec: dict) -> str:
+    if rec.get("mode") == "winrate":
+        return f"胜率{rec.get('winrate_score', '—')}"
+    return f"共振{rec.get('total_score', '—')}/{rec.get('pass_threshold', '—')}"
+
+
+def _fmt_pick_follow(rec: dict) -> str:
+    parts: List[str] = []
+    if rec.get("result") in ("win", "loss"):
+        tag = "胜" if rec["result"] == "win" else "负"
+        parts.append(f"T+1{tag}{utils.num(rec.get('next_chg'))}%")
+    elif rec.get("next_chg") is not None:
+        parts.append(f"T+1 {utils.num(rec.get('next_chg'))}%")
+    else:
+        parts.append("T+1待填")
+    if rec.get("chg_t3") is not None:
+        parts.append(f"T+3 {utils.num(rec.get('chg_t3'))}%")
+    return " ".join(parts)
+
+
+def _fmt_pick_line(rec: dict) -> str:
+    sector = rec.get("pick_sector_name") or rec.get("sector_name") or "—"
+    rank = rec.get("pick_sector_rank") or rec.get("sector_rank")
+    rank_txt = f"#{rank}" if rank is not None else ""
+    stage = rec.get("stage") or "—"
+    gate = f" 闸:{rec['winrate_gate']}" if rec.get("winrate_gate") else ""
+    return (f"  {rec.get('date')}  {rec.get('track') or '—'}  "
+            f"{rec.get('code')} {rec.get('name')}  {_fmt_pick_score(rec)}  "
+            f"{sector}{rank_txt}  {stage}  {_fmt_pick_follow(rec)}{gate}")
+
+
+def format_email_digest(wk: dict, cfg: Optional[Config] = None,
+                        report_path: Optional[str] = None) -> str:
+    """手机邮件用精简摘要：选股名单 / 空仓对比 / 主线 / 样本积累。"""
+    cfg = cfg or load_config()
+    rd = wk.get("range") or {}
+    since = wk.get("since") or ""
+    until = wk.get("until") or ""
+    n_days = len(wk.get("days") or [])
+    wp = wk.get("week_perf") or {}
+    empty = wk.get("empty_days", 0)
+    verdicts = rd.get("verdicts") or {}
+    verdict_txt = "  ".join(f"{k} {v}天" for k, v in verdicts.items()) or "—"
+
+    lines: List[str] = [
+        f"TEA 选股周报 {since} ~ {until}（{n_days} 个交易日）",
+        "引擎不自动下单，请结合盘面人工决策。",
+        "",
+        "━━ 核心一览 ━━",
+        (f"空仓 {empty}/{n_days} 天  |  本周可买 {rd.get('total_buyable') or 0} 只"
+         f"  评估 {rd.get('total_evaluations') or 0} 次  |  成交 {wp.get('n', 0)} 笔"),
+        (f"周均情绪 {utils.num(rd.get('avg_sentiment'), 1)}  |  FORCE {wk.get('forced_n', 0)} 次"),
+        f"裁决：{verdict_txt}",
+        "",
+        "━━ 空仓日对比 ━━",
+        "日期        情绪  姿态  裁决          可买 观察  主因",
+    ]
+    for d in rd.get("digests") or []:
+        reasons = d.get("top_reasons") or {}
+        top1 = next(iter(reasons), "—") if reasons else "—"
+        lines.append(
+            f"{d.get('date')}  {utils.num(d.get('sentiment_score'), 1):>5}  "
+            f"{str(d.get('stance') or '—'):<4}  "
+            f"{str(d.get('verdict') or 'NO_SCAN'):<12}  "
+            f"{d.get('buyable_n') or 0:>2}  {d.get('watch_n') or 0:>2}  {top1}")
+    if not rd.get("digests"):
+        lines.append("（本周无扫描记录）")
+
+    hot = _week_hot_sectors(rd)
+    lines += ["", "━━ 本周主线（热点板块）━━"]
+    if hot:
+        for i, s in enumerate(hot, 1):
+            lines.append(
+                f"{i}. {s['name']}  均涨{utils.pct(s['avg_chg'])}  "
+                f"出现{s['days']}天  涨停累计{s['limit_up']}家")
+    else:
+        lines.append("（本周无板块快照，需 seed-plan 落盘）")
+
+    picks = _week_seed_picks(since, until, cfg)
+    lines += ["", "━━ 本周选股 ━━"]
+    rule_picks = picks.get("rule") or []
+    if rule_picks:
+        lines.append("【规则通道 rule】")
+        lines.extend(_fmt_pick_line(r) for r in rule_picks)
+    else:
+        lines.append("【规则通道 rule】无落盘")
+    wr_picks = picks.get("winrate") or []
+    lines += ["", "【胜率影子 winrate】（只对照，不买）"]
+    if wr_picks:
+        lines.extend(_fmt_pick_line(r) for r in wr_picks)
+    else:
+        lines.append("  无")
+
+    reasons = rd.get("reasons") or {}
+    if reasons:
+        lines += ["", "━━ 落选原因 TOP ━━"]
+        for k, v in list(reasons.items())[:6]:
+            lines.append(f"  {v:>3}  {k}")
+
+    gap = followthrough.sample_gap_stats(cfg)
+    week_new = _week_sample_delta(since, until, cfg)
+    t3 = wk.get("t3_attribution") or {}
+    mc = wk.get("mode_channels") or {}
+    lines += ["", "━━ 样本积累 ━━",
+              (f"累计 {gap.get('total', 0)} 条  本周新增 {week_new}  |  "
+               f"待 T+1 {gap.get('pending_t1', 0)}  待 T+3 {gap.get('pending_t3', 0)}")]
+    if t3.get("total_n"):
+        tr = t3.get("total_rate") or 0.0
+        t3_line = f"T+3>0 全样本 {tr:.0%}（{t3.get('total_up', 0)}/{t3['total_n']}）"
+        if t3.get("mengya_n"):
+            mr = t3.get("mengya_rate") or 0.0
+            t3_line += f"  萌芽 {mr:.0%}（{t3.get('mengya_up', 0)}/{t3['mengya_n']}）"
+        shadow = t3.get("shadow") or {}
+        if shadow.get("n_t3"):
+            sr = shadow.get("t3_up_rate") or 0.0
+            flag = "达标" if shadow.get("ready") else "对照中"
+            t3_line += f"  影子桶 {sr:.0%}（{flag}）"
+        lines.append(t3_line)
+    for mode, label in (("rule", "规则"), ("winrate", "胜率")):
+        slot = mc.get(mode) or {}
+        if not slot.get("n"):
+            continue
+        extra = ""
+        if mode == "winrate" and slot.get("gate_blocked_n"):
+            extra = f"  高分被闸挡 {slot['gate_blocked_n']}"
+        lines.append(
+            f"{label} {slot['n']}条  可买{slot.get('buyable_n', 0)}  "
+            f"T+1 {stats.fmt_wr(slot.get('t1_rate'))}  "
+            f"T+3 {stats.fmt_wr(slot.get('t3_up_rate'))}{extra}")
+
+    lines += ["", "━━ 本周成交 ━━"]
+    if wk.get("week_trades"):
+        for t in wk["week_trades"]:
+            lines.append(
+                f"  {t.get('closed_date')}  {t.get('code')} {t.get('name')}  "
+                f"{utils.pct(t.get('pnl_pct'))}  R{utils.num(t.get('r_multiple'))}  "
+                f"{utils.money(t.get('pnl'))}")
+    else:
+        lines.append("  无平仓")
+
+    watch_n = len(wk.get("watch_items") or [])
+    if watch_n:
+        lines += ["", f"━━ 观察池（{watch_n}）━━"]
+        for i in (wk.get("watch_items") or [])[:5]:
+            lines.append(
+                f"  {i.get('code')} {i.get('name')}  {i.get('track')}  "
+                f"入池{i.get('added_date')}  共振{i.get('total_score')}")
+        if watch_n > 5:
+            lines.append(f"  …另有 {watch_n - 5} 只，见完整周报")
+
+    lines += ["", "---"]
+    if report_path:
+        lines.append(f"完整周报：{report_path}")
+    lines.append("电脑端：菜单 6 周复盘 / tea weekly")
+    return "\n".join(lines)
 
 
 # ------------------------------------------------------------------ 周报邮件（F17）
@@ -341,17 +567,14 @@ def email_subject(wk: dict, cfg: Optional[Config] = None) -> str:
     return f"选股周报 {wk.get('since')} ~ {wk.get('until')}"
 
 
-def email_body(wk: dict, cfg: Optional[Config] = None) -> str:
-    """邮件正文：摘要 + 完整 Markdown 周报。"""
+def email_body(wk: dict, cfg: Optional[Config] = None,
+              report_path: Optional[str] = None) -> str:
+    """邮件正文：精简摘要；完整 Markdown 仅落盘本地（可配置附在邮件末尾）。"""
     cfg = cfg or load_config()
-    summary = format_weekly(wk, cfg)
-    md = render_md(wk, cfg)
-    return (
-        "以下为 TEA 当周选股复盘摘要（引擎不自动下单，请结合盘面人工决策）。\n\n"
-        f"{summary}\n\n"
-        "======== 完整周报 ========\n\n"
-        f"{md}\n"
-    )
+    digest = format_email_digest(wk, cfg, report_path=report_path)
+    if cfg.get("weekly_email.include_full_report", False):
+        return digest + "\n\n======== 完整周报 ========\n\n" + render_md(wk, cfg)
+    return digest
 
 
 def send_email_report(days: int = 7, cfg: Optional[Config] = None,
@@ -392,7 +615,7 @@ def send_email_report(days: int = 7, cfg: Optional[Config] = None,
 
     prefix = str(cfg.get("weekly_email.subject_prefix") or "[TEA周报]")
     res = notify.send_email(cfg, subject=email_subject(wk, cfg),
-                            body=email_body(wk, cfg),
+                            body=email_body(wk, cfg, report_path=path),
                             subject_prefix=prefix, sender=sender)
     if not res.get("ok"):
         out["ok"] = False
@@ -446,4 +669,20 @@ def format_weekly(wk: Optional[dict] = None, cfg: Optional[Config] = None) -> st
         gap = t3.get("gap") or {}
         if gap.get("pending_t3"):
             lines.append(f"    待 T+3 回填 {gap['pending_t3']} 条")
+    mc = wk.get("mode_channels") or {}
+    if any((mc.get(m) or {}).get("n") for m in ("rule", "winrate")):
+        lines.append("  ---- rule vs winrate（B-P1-01）----")
+        for mode, label in (("rule", "规则"), ("winrate", "胜率")):
+            slot = mc.get(mode) or {}
+            n = slot.get("n") or 0
+            if not n:
+                continue
+            t1 = stats.fmt_wr(slot.get("t1_rate"))
+            t3 = stats.fmt_wr(slot.get("t3_up_rate"))
+            extra = ""
+            if mode == "winrate" and slot.get("gate_blocked_n"):
+                extra = f"  高分被闸挡 {slot['gate_blocked_n']}"
+            lines.append(
+                f"    {label} {n}条  可买{slot.get('buyable_n', 0)}"
+                f"  T+1 {t1}  T+3 {t3}{extra}")
     return "\n".join(lines)

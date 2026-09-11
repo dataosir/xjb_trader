@@ -43,7 +43,7 @@
 |---|---|---|
 | 身份 | `code` `name` `date` `mode`（`rule`/`winrate`）`scan_anchor`（`primary`/`manual`/`winrate`） | 主键与通道区分；锚点幂等 |
 | 板块 | `sector_*`、`pick_sector_bk/name/rank` | 入选一致性归因 |
-| 评分 | `score` `winrate_score` `tier` | 共振 vs 胜率 |
+| 评分 | `score` `winrate_score` `winrate_detail` `winrate_gate` `winrate_would_buy` `tier` | 共振 vs 胜率；硬闸归因 |
 | 标签 | `lowbuy` `buyable` / 观察原因 / `shadow_tag` | 低吸、可买分流、影子对照桶 |
 | 因子 | `bias_ma20` `bb_mid/upper/lower` `bb_pct_b` `bb_bandwidth` `vol_ratio` `atr_pct` `turnover` `intraday` … | 阶段 2 归因（布林只观测不落闸） |
 | 回填 | `next_chg`/`result`、`chg_t2`/`chg_t3`/`chg_t5` | 胜率与三日对照 |

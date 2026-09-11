@@ -21,7 +21,8 @@
 **In**
 
 - 新 CLI：`tea weekly-email`（单次发送，适合 launchd 周五触发）  
-- 报告体：复用 `weekly.collect` + `weekly.render_md`（与 `tea weekly --write` 同源）  
+- 报告体：复用 `weekly.collect` + `weekly.render_md`（与 `tea weekly --write` 同源，**完整版仅落盘本地**）  
+- 邮件正文：`format_email_digest` 精简摘要（核心一览 / 空仓对比 / 本周主线 / 选股名单 / 样本积累）；`weekly_email.include_full_report=true` 可恢复附完整 Markdown  
 - 邮件：复用 `notify.send_email`（SMTP 配置与 F16 共用 `notify.email.*`）  
 - 主题前缀：默认 `[TEA周报]`（与观察提醒 `[TEA观察]` 区分，可配置）  
 - 去重：`data/weekly_email_state.json`，同 ISO 周只发一封（`weekly_email.dedupe_per_week`）  
@@ -67,6 +68,7 @@ notify.send_email → 更新 state → tea.log
 | `weekly_email.dedupe_per_week` | `true` | 同 ISO 周只发一封 |
 | `weekly_email.require_friday` | `true` | 仅周五触发（`--force` 可跳过） |
 | `weekly_email.subject_prefix` | `[TEA周报]` | 邮件主题前缀 |
+| `weekly_email.include_full_report` | `false` | 邮件末尾附完整 Markdown（默认仅精简摘要） |
 | `notify.email.*` | 见 F16 | SMTP 共用 |
 
 ## 6. 代码锚点
@@ -79,7 +81,7 @@ notify.send_email → 更新 state → tea.log
 
 ## 7. 验收标准
 
-- [ ] 周五交易日 + 已配邮箱 → 收到含「纪律自查 / 每日流水 / 落选原因」的周报邮件  
+- [ ] 周五交易日 + 已配邮箱 → 收到含「核心一览 / 空仓对比 / 本周选股 / 样本积累」的精简周报邮件  
 - [ ] 同周重复触发只发一封  
 - [ ] `--force` 可忽略周五与去重（演练）  
 - [ ] `selftest` mock SMTP 覆盖发送与去重  

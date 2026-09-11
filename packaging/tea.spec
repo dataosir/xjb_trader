@@ -58,6 +58,8 @@ HIDDEN = [
     # 自测子包（按域拆分 check_*；编排仍在 selftest）
     "tea.tests",
     "tea.tests.checks",
+    "tea.tests.checks.followthrough",
+    "tea.tests.checks.reporting",
     # 分析层
     "tea.analysis",
     "tea.analysis.expectancy",

@@ -60,3 +60,9 @@
 - 阶段 B 先验：交叉桶 ≥30 前 HOLD（`WINRATE_PRIOR_PLAN`）  
 - 与规则通道长期对照后，再决策「谁驱动计划」  
 - 路线图阶段 3：共振重构后可能合并通道  
+
+## 9. 样本落盘（2026-09-11）
+
+- `winrate_gate` / `winrate_detail` / `winrate_would_buy` 随 `record_seed` 落盘（区分「分不够」vs「过热/突破等硬闸」）。  
+- 观察轨**全量**落盘；控制台仍截断 `seed.max_watch_output`。  
+- 周报 `mode_channel_stats`：`rule` vs `winrate` T+1/T+3 并排（B-P1-01）。  

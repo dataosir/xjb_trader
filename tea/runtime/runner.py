@@ -344,7 +344,9 @@ def _print_winrate_result(result: dict, io: IO) -> None:
     top = "、".join(f"{s.get('name')}(#{s.get('rank')})" for s in (result.get("sectors") or [])[:3])
     io.say(f"  板块 TOP：{top or '无'}")
     buyable = result.get("buyable") or []
-    watch = result.get("watch") or []
+    watch_all = result.get("watch") or []
+    watch_limit = int(result.get("watch_display_limit") or 3)
+    watch = watch_all[:watch_limit] if watch_limit > 0 else watch_all
     if buyable:
         io.say(f"  ---- 胜率可买（{len(buyable)}）----")
         for e in buyable:
@@ -378,10 +380,15 @@ def _ft_entries(result: dict) -> List[dict]:
         "market_ma20_above": idx.get("ma20_above"),
         "market_idx_chg": idx.get("chg_pct"),
     }
+    threshold = result.get("winrate_threshold")
+    if threshold is None:
+        threshold = 3
     groups = [("可买", result.get("buyable")), (None, result.get("watch")),
               (None, result.get("eve"))]
     for default_track, evs in groups:
         for ev in (evs or []):
+            wr_score = ev.get("winrate_score")
+            score_met = wr_score is not None and wr_score >= threshold
             q = ev.get("quote") or {}
             ind = ev.get("ind") or {}
             sec = ev.get("sector") or {}
@@ -421,7 +428,10 @@ def _ft_entries(result: dict) -> List[dict]:
                 "tp_pct": ev.get("tp_pct"),
                 "veto_labels": (ev.get("veto") or {}).get("labels"),
                 "lowbuy": bool(ev.get("lowbuy")),
-                "winrate_score": ev.get("winrate_score"),
+                "winrate_score": wr_score,
+                "winrate_detail": ev.get("winrate_detail"),
+                "winrate_gate": ev.get("winrate_gate"),
+                "winrate_would_buy": bool(score_met),
                 "mode": result.get("mode", "rule"),
                 "pick_sector_bk": ev.get("pick_sector_bk"),
                 "pick_sector_name": ev.get("pick_sector_name"),

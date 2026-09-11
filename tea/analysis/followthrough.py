@@ -159,6 +159,9 @@ def record_seed(entries: List[dict], cfg: Optional[Config] = None,
             "veto_labels": e.get("veto_labels"),
             "lowbuy": bool(e.get("lowbuy")),
             "winrate_score": e.get("winrate_score"),
+            "winrate_detail": e.get("winrate_detail"),
+            "winrate_gate": e.get("winrate_gate"),
+            "winrate_would_buy": e.get("winrate_would_buy"),
             "mode": e.get("mode", "rule"),
             "scan_anchor": scan_anchor or e.get("scan_anchor"),
             "pick_sector_bk": e.get("pick_sector_bk"),
@@ -589,6 +592,85 @@ def shadow_t3_stats(cfg: Optional[Config] = None) -> dict:
         "ready": bool(rate is not None and len(with_t3) >= min_n and rate >= target),
         "by_tag": by_tag,
     }
+
+
+def _empty_mode_slot() -> dict:
+    return {
+        "n": 0, "t1_n": 0, "t1_wins": 0,
+        "t3_n": 0, "t3_up": 0,
+        "buyable_n": 0, "watch_n": 0,
+        "score_met_n": 0, "gate_blocked_n": 0,
+        "gate_reasons": {},
+    }
+
+
+def mode_channel_stats(cfg: Optional[Config] = None) -> Dict[str, dict]:
+    """rule vs winrate 通道对照：T+1 胜率、T+3>0、硬闸挡下高分样本。
+
+    只读统计，不改闸门；供周报与 B-P1-01 影子对照。
+    """
+    cfg = cfg or load_config()
+    out: Dict[str, dict] = {"rule": _empty_mode_slot(), "winrate": _empty_mode_slot()}
+    for r in load_records(cfg):
+        mode = r.get("mode") or "rule"
+        if mode not in out:
+            out[mode] = _empty_mode_slot()
+        slot = out[mode]
+        slot["n"] += 1
+        track = r.get("track")
+        if track == "可买":
+            slot["buyable_n"] += 1
+        elif track:
+            slot["watch_n"] += 1
+        if r.get("winrate_would_buy"):
+            slot["score_met_n"] += 1
+        gate = r.get("winrate_gate")
+        if gate:
+            if r.get("winrate_would_buy"):
+                slot["gate_blocked_n"] += 1
+            reasons = slot["gate_reasons"]
+            key = str(gate).split("→")[0].strip() or str(gate)
+            reasons[key] = reasons.get(key, 0) + 1
+        if r.get("result") in ("win", "loss"):
+            slot["t1_n"] += 1
+            if r["result"] == "win":
+                slot["t1_wins"] += 1
+        if r.get("chg_t3") is not None:
+            slot["t3_n"] += 1
+            if float(r["chg_t3"]) > 0:
+                slot["t3_up"] += 1
+    for slot in out.values():
+        t1_n = slot["t1_n"]
+        t3_n = slot["t3_n"]
+        slot["t1_rate"] = (slot["t1_wins"] / t1_n) if t1_n else None
+        slot["t3_up_rate"] = (slot["t3_up"] / t3_n) if t3_n else None
+    return out
+
+
+def format_mode_channel_stats(cfg: Optional[Config] = None, compact: bool = False) -> str:
+    """rule vs winrate 对照可读文案。"""
+    st = mode_channel_stats(cfg)
+    lines = ["===== rule vs winrate 通道对照 ====="]
+    for mode, label in (("rule", "规则(9分共振)"), ("winrate", "胜率影子")):
+        slot = st.get(mode) or _empty_mode_slot()
+        if not slot.get("n"):
+            lines.append(f"  {label}：暂无样本")
+            continue
+        t1 = slot.get("t1_rate")
+        t3 = slot.get("t3_up_rate")
+        t1_txt = f"T+1 {t1:.0%}（{slot['t1_wins']}/{slot['t1_n']}）" if t1 is not None else "T+1 —"
+        t3_txt = (f"T+3>0 {t3:.0%}（{slot['t3_up']}/{slot['t3_n']}）"
+                  if t3 is not None else "T+3 —")
+        lines.append(
+            f"  {label}：{slot['n']} 条｜可买 {slot['buyable_n']}｜观察 {slot['watch_n']}"
+            f"｜{t1_txt}｜{t3_txt}")
+        if slot.get("gate_blocked_n"):
+            lines.append(f"    高分被硬闸挡 {slot['gate_blocked_n']} 条")
+        if not compact and slot.get("gate_reasons"):
+            parts = [f"{k} {v}" for k, v in sorted(slot["gate_reasons"].items(),
+                                                   key=lambda x: -x[1])[:5]]
+            lines.append(f"    硬闸 TOP：{'；'.join(parts)}")
+    return "\n".join(lines)
 
 
 def _t3_bucket_rank(rank: Optional[int]) -> str:

@@ -35,7 +35,7 @@ _LOG = logger_mod.get_logger("data")
 def fetch_raw(market: Market, io: Any = None, cfg: Optional[Config] = None) -> dict:
     """并行采集三路原始数据，单路失败不影响整体（降级为 None）。"""
     cfg = cfg or load_config()
-    fetch_timeout = float(cfg.get("sentiment.fetch_timeout_sec", 30.0))
+    fetch_timeout = float(cfg.get("sentiment.fetch_timeout_sec", 45.0))
     out: Dict[str, Any] = {"index": {}, "sectors": [], "breadth": {}, "limit_up": {}, "errors": []}
     labels = {"index": "大盘指数", "sectors": "板块排名", "hard": "涨跌家数/涨停池"}
     t0 = time.time()
@@ -58,6 +58,17 @@ def fetch_raw(market: Market, io: Any = None, cfg: Optional[Config] = None) -> d
                 res = fut.result(timeout=fetch_timeout)
             except FutureTimeout:
                 elapsed = time.time() - ch_t0
+                if name == "index":
+                    fb = market.index_disk_fallback()
+                    if fb:
+                        out["index"] = fb
+                        _LOG.warning(
+                            "市场天气 大盘指数 采集超时 elapsed=%.1fs limit=%.0fs，已回退磁盘缓存",
+                            elapsed, fetch_timeout)
+                        utils.tell(io,
+                                   f"    · 大盘指数 超时（>{fetch_timeout:g}s），"
+                                   f"回退磁盘缓存 ({time.time() - t0:.1f}s)")
+                        continue
                 out["errors"].append(f"{name}: 超时 {fetch_timeout:g}s")
                 _LOG.warning(
                     "市场天气 %s 采集超时 elapsed=%.1fs limit=%.0fs"

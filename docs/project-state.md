@@ -12,7 +12,7 @@
 | 产品 | XJB_TRADE（TEA）— A 股交易准入引擎 |
 | 代码版本 | `1.0.0`（`tea.__version__`） |
 | 文档框架 | 一人公司全栈：`prd` / `tech` / `ops` + CHANGELOG + 本文件；**清单权威源** `docs/INDEX.md` |
-| 更新日期 | 2026-09-10 |
+| 更新日期 | 2026-09-11 |
 
 ---
 
@@ -38,7 +38,7 @@
 
 **以攒证据为主**：缺口看板盯 T+1/T+3；影子桶（萌芽∪前三非突破）对照 **T+3>0≥60%**（验收门槛，非收益承诺）；巩固可买硬闸；低吸空池只观察。
 
-已落地（代码）：…**`tea launchd doctor` + `ops/install-launchd-all.sh`（仓库迁移自检）**、…**review launchd 直调 python（修复 Downloads 下 bash Operation not permitted）**、…**scan_anchor 主样本幂等**（primary/manual/winrate；`seed_records`/`scan_details`/accumulator 防早盘重复扫污染）、…**F16 观察池盘中邮件提醒**（…**邮件含建议挂单价/止损/止盈/计划止盈 T+1~T+3**；**种子可买/观察/前夕主列表 + 候选明细同步展示挂单价/计划止盈路径**；**挂单价改乖离自适应纪律回踩（非 MA20 锚定），回踩轨止损/止盈按挂单价重算**；**控制台/SEED 核心数据高亮**；**F01 市场天气屏语义色高亮（热点/情绪/涨跌比/连板涨停等）**）、**操作日录**（`logs/daily/{seed|review|watch_alert|weekly_email|ops_summary}/` 按天单文件，无操作无文件，**默认保留 7 天**）、**集中错误日志**（`logs/error.log`：Python ERROR + cron 失败 + **launchd stderr 增量同步** + 未捕获异常）、**日终运维摘要邮件**（`ops_summary`：`scheduled_review` 后自动发）、**F17 每周选股周报邮件**…
+已落地（代码）：…**`tea launchd doctor` + `ops/install-launchd-all.sh`（仓库迁移自检）**、…**review launchd 直调 python（修复 Downloads 下 bash Operation not permitted）**、…**scan_anchor 主样本幂等**（primary/manual/winrate；`seed_records`/`scan_details`/accumulator 防早盘重复扫污染）、…**F16 观察池盘中邮件提醒**（…**邮件含建议挂单价/止损/止盈/计划止盈 T+1~T+3**；**种子可买/观察/前夕主列表 + 候选明细同步展示挂单价/计划止盈路径**；**挂单价改乖离自适应纪律回踩（非 MA20 锚定），回踩轨止损/止盈按挂单价重算**；**控制台/SEED 核心数据高亮**；**F01 市场天气屏语义色高亮（热点/情绪/涨跌比/连板涨停等）**）、**操作日录**（`logs/daily/{seed|review|watch_alert|weekly_email|ops_summary}/` 按天单文件，无操作无文件，**默认保留 7 天**）、**集中错误日志**（`logs/error.log`：Python ERROR + cron 失败 + **launchd stderr 增量同步** + 未捕获异常）、**日终运维摘要邮件**（`ops_summary`：`scheduled_review` 后自动发）、**F17 每周选股周报邮件**（精简摘要 + 本地完整 `WEEKLY_*.md`）…
 
 ## 进行中
 
@@ -46,7 +46,7 @@
 |---|---|---|
 | B-P0-01 | 每日 `seed-plan` + 全量 `review` | 运营；launchd 已落地（`ops/05` 种子 + `06` 观察 + `07` 周五周报 + **`08` 盘后 review**）；菜单 3 只读 SEED、菜单 4 胜率盘面浏览、菜单 9 可手动补跑 review |
 | B-P0-02 / 07 | 因子与 `lowbuy` 样本积累 | 低吸**先观察**空池 diag，不放宽、不买入 |
-| B-P1-01 | rule vs winrate 影子对照 | 1–2 周，不写计划 |
+| B-P1-01 | rule vs winrate 影子对照 | 1–2 周，不写计划；**周报已分轨**（`mode_channel_stats`）+ 硬闸字段落盘 |
 | B-P1-06 | `shadow_tag` T+3 对照 | T+3 69% 已达标；**方案 A rank 5→3 已启动**（2026-09-09）；方案 E 周报 T+3 已落地 — [`archive/SHADOW_BUCKET_PLAN_2026-09-04.md`](archive/SHADOW_BUCKET_PLAN_2026-09-04.md) |
 | B-P1-04 | 逐因子归因 | **草稿已写** [`archive/FACTOR_ATTRIB_2026-09-04.md`](archive/FACTOR_ATTRIB_2026-09-04.md)；技术因子 n&lt;30 未定稿 |
 

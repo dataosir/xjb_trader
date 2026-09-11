@@ -61,6 +61,8 @@ packages = [
     "tea.screening",
     "tea.tests",
     "tea.tests.checks",
+    "tea.tests.checks.followthrough",
+    "tea.tests.checks.reporting",
 ]
 
 [tool.ruff]
