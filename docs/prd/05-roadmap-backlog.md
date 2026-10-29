@@ -29,11 +29,11 @@
 | ID | 项 | 功能 | 状态 | 说明 |
 |---|---|---|---|---|
 | B-P1-01 | `winrate-scan` 与规则可买并排对照 1–2 周 | F05 | 可用 | 不写计划 |
-| B-P1-02 | 补跟涨字段：`amount_yi`/`cap_yi`/`rank_pct`/`odds`/`veto_labels` 等 | F11 | 待做 | ROADMAP §5.3 |
+| B-P1-02 | 补跟涨字段：`amount_yi`/`cap_yi`/`rank_pct`/`odds`/`veto_labels` 等 | F11 | **已落地**（`_ft_entries` + `record_seed`；缺口看板 `factor_ok`） | ROADMAP §5.3 |
 | B-P1-03 | shadow_pool 板块次日涨跌回填 | F10/F11 | 待做 | 验证板块动量持续性 |
 | B-P1-04 | 逐因子归因（乖离/涨幅窗/身份/分时/各共振维） | F04/F11 | 等样本≥30/组 | ROADMAP 阶段2 |
-| B-P1-05 | 将归因结论反馈为闸门微调（非拍脑袋） | F03 | **方案 0 执行中** | 用户确认维持 2 周；~09-18 复盘后再议方案 A；须 param_change |
-| B-P1-06 | `shadow_tag`（萌芽∪前三非突破）T+3>0 对照 | F11 | **对照达标 + 方案 0 已确认** | T+3 69%；维持现状攒样本至 ~09-18 |
+| B-P1-05 | 将归因结论反馈为闸门微调（非拍脑袋） | F03 | **方案 A 已启动**（2026-09-09 rank 5→3）；post-change n≥30 前禁止再调 | 须 param_change + scorecard |
+| B-P1-06 | `shadow_tag`（萌芽∪前三非突破）T+3>0 对照 | F11 | **对照达标 + 方案 A 观察中** | 历史 T+3 69%；weekly/缺口看板持续对照 |
 | B-P1-07 | 样本缺口看板（待 T+1/T+3、低吸、新闸门可买） | F11 | **已落地** | `format_sample_gap`；运营日看 |
 | B-P1-08 | 观察池盘中邮件提醒（launchd 每分钟） | F16/F10 | **已落地** | [`F16-watch-alert-notify`](03-features/F16-watch-alert-notify.md)；含 F18 macOS/Bark |
 | B-P1-09 | `scan_anchor` 主样本幂等（primary/manual/winrate） | F03/F11 | **已落地** | `seed_records`/`scan_details`/accumulator 防重复扫污染 |

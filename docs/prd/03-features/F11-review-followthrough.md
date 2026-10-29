@@ -17,7 +17,8 @@
 **In**
 
 - `record_seed`：候选全字段落盘（含因子、布林观测字段、`winrate_gate`/`winrate_detail`/`winrate_would_buy`、模式、`shadow_tag`）  
-- **分轨对照**：`mode_channel_stats`（rule vs winrate T+1/T+3 + 硬闸 TOP）供周报  
+- **分轨对照**：`mode_channel_stats`（rule vs winrate T+1/T+3 + 硬闸 TOP + **挡下高分个案**）供周报  
+- **后验遗漏**：`tea retrospective` / `reporting.retrospective`（硬/软否决、观察轨、**近失** 中 D+5>3%）  
 - T+n 回填与胜负口径（默认 T+1 涨≥3% 计胜）  
 - 低吸样本进度统计  
 - **样本缺口看板**：待 T+1 / 待 T+3 / 今日待下一交易日 / 低吸 / 因子覆盖 / 新闸门后可买  
@@ -70,7 +71,7 @@
 - `tea/analysis/followthrough.py`（含 `sample_gap_stats` / `shadow_t3_stats` / `compute_shadow_tag`）  
 - `tea/portfolio/accumulator.py`  
 - `tea/runtime/runner.py` · `close_review` / `maybe_auto_backfill` / `_ft_entries`  
-- CLI：`review` / `followthrough`；菜单 `8` 盘后复核
+- CLI：`review` / `followthrough` / **`retrospective [--write]`**；菜单 `8` 盘后复核；复盘工具 `8` 后验遗漏
 
 ## 7. 验收标准
 

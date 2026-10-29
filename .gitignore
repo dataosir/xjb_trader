@@ -26,3 +26,4 @@ aider.conf.yml
 /reports/
 /logs/
 tea_config.json
+ops/nas-deploy-private.md

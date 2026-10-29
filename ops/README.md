@@ -2,6 +2,14 @@
 
 > 机器侧调度与安装脚本，**不在 TEA 进程内**做 cron。命令语义仍以 `docs/prd/02-daily-workflow.md` 为准。
 
+## 市场天气缺口重试（cron）
+
+| 文件 | 用途 |
+|---|---|
+| [`weather-retry-cron.sh`](weather-retry-cron.sh) | 每 3 分钟探测缺口，必要时 `weather --refresh`（不跑 seed） |
+
+SOP 见 [`docs/ops/11-weather-retry-scheduler.md`](../docs/ops/11-weather-retry-scheduler.md)。Linux 一键安装已写入 [`install-cron-linux.sh`](install-cron-linux.sh)。
+
 ## 种子扫描定时（方案 A）
 
 | 文件 | 用途 |

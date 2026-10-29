@@ -107,7 +107,8 @@
 2. 新闸后可买本周新增几条？EMPTY 是否可接受？  
 3. rank 4–5 是否出现「被错杀」的有效个案（仅记录，不据此放宽）？
 
-复盘锚点：**~2026-09-18**；详细背景见 [`archive/SHADOW_BUCKET_PLAN_2026-09-04.md`](../archive/SHADOW_BUCKET_PLAN_2026-09-04.md)。
+复盘锚点：**~2026-09-18**；详细背景见 [`archive/SHADOW_BUCKET_PLAN_2026-09-04.md`](../archive/SHADOW_BUCKET_PLAN_2026-09-04.md)。  
+**已填周表（占位）**：[`archive/EVIDENCE_SCORECARD_2026-10-29.md`](../archive/EVIDENCE_SCORECARD_2026-10-29.md) — 记录 NAS 断采与 Kill 触发，数字待 review 恢复后更新。
 
 ---
 

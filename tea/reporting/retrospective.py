@@ -154,10 +154,12 @@ def generate_retrospective(start_ymd: str, end_ymd: str,
     # 高亮遗漏
     lines.append("## 遗漏关注")
     lines.append("")
-    lines.append("以下为硬否决/软否决/观察轨中 **后续 D+5 涨幅 > 3%** 的股票，请人工复核策略是否过严。")
+    lines.append(
+        "以下为硬否决/软否决/观察轨/近失中 **后续 D+5 涨幅 > 3%** 的股票，请人工复核策略是否过严。"
+    )
     lines.append("")
     flagged = []
-    for label in ["硬否决", "软否决", "观察轨"]:
+    for label in ["硬否决", "软否决", "观察轨", "近失"]:
         for item in groups.get(label, []):
             code = item.get("code", "")
             date = item.get("scan_date", "")

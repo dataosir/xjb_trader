@@ -64,6 +64,16 @@ JOBS: Dict[str, LaunchdJob] = {
         stderr_log="launchd-seed.stderr.log",
         description="种子扫描 seed-plan",
     ),
+    "winrate_scan": LaunchdJob(
+        job_id="winrate_scan",
+        label="com.tea.winrate-scan",
+        config_prefix="scheduler.winrate_scan",
+        kind="calendar",
+        tea_argv=("winrate-scan", "--scheduled"),
+        stdout_log="launchd-winrate.stdout.log",
+        stderr_log="launchd-winrate.stderr.log",
+        description="胜率影子扫描 winrate-scan",
+    ),
     "review": LaunchdJob(
         job_id="review",
         label="com.tea.review",

@@ -16,6 +16,7 @@
 
 - 多轨道（`KNOWN_TRACKS`，默认观察轨）  
 - 纳入 / 剔除 / 盘后复核 / 超时 prune  
+- **观察轨 / 启动待定轨资格复检**：预审不再满足入池口径（如观察轨已无软否决且非 PASS、近失等）→ 自动剔除（`watch.auto_prune_ineligible`；`review` 与盘中 `scan_alerts`）  
 - 与种子报告、持仓对照协同展示  
 
 **Out**

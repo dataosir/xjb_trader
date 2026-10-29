@@ -67,7 +67,10 @@ DEFAULTS: Dict[str, Any] = {
         "shadow_pool_file": "shadow_pool.json",
         "watch_alert_state_file": "watch_alert_state.json",
         "weekly_email_state_file": "weekly_email_state.json",
+        "winrate_email_state_file": "winrate_email_state.json",
+        "seed_email_state_file": "seed_email_state.json",
         "review_scheduled_state_file": "review_scheduled_state.json",
+        "winrate_scheduled_state_file": "winrate_scheduled_state.json",
         "launchd_stderr_state_file": "launchd_stderr_state.json",
         "ops_summary_state_file": "ops_summary_state.json",
     },
@@ -484,6 +487,27 @@ DEFAULTS: Dict[str, Any] = {
     # preflight.winrate_score），达标即胜率可买；只落盘 mode=winrate，不写计划不买入。
     "winrate": {
         "buyable_threshold": 3,
+        # T+3>0 获利概率：板块/阶段/涨幅桶综合（几何均值），供胜率通道展示与可选硬闸
+        "t3_prob": {
+            "gate_enabled": True,
+            "min_prob": 0.35,
+            "min_samples": 8,
+            "combine": "geomean",
+            # 默认率来自 FACTOR_ATTRIB 2026-09-04；live 回填 n≥min_samples 时优先
+            "fallback": {
+                "rank": {"rank≤3": 0.607, "rank4-5": 0.40, "rank>5": 0.205, "rank未知": 0.378},
+                "stage": {"萌芽": 0.60, "突破": 0.18, "过热": 0.38, "-": 0.378},
+                "chg": {"3~5.5%": 0.38, "5.5~7.5%": 0.35, ">7.5%": 0.30, "涨幅未知": 0.378},
+            },
+        },
+        # 胜率选股有候选时发邮件（影子通道，不写计划；NAS 生产端默认开）
+        "email": {
+            "enabled": True,
+            # 同 code 同日只发一封；盘中多只符合条件时各发一次
+            "dedupe_per_day": True,
+            "subject_prefix": "[TEA胜率]",
+        },
+        "scheduled_enabled": True,           # launchd 工作日自动影子扫描（时刻见 scheduler.winrate_scan）
     },
     # ---------------------------------------------------------- 种子扫描细则
     "seed": {
@@ -598,6 +622,13 @@ DEFAULTS: Dict[str, Any] = {
                 {"min": 0.0, "max": 1000.0, "score": 4.0},
             ],
         },
+        # 14:30 种子扫描完成后发邮件（主通道；有可买则写次日计划）
+        "email": {
+            "enabled": True,
+            "dedupe_per_day": True,
+            "send_on_empty": True,
+            "subject_prefix": "[TEA种子]",
+        },
     },
     # ---------------------------------------------------------- 仓位
     "position": {
@@ -692,6 +723,11 @@ DEFAULTS: Dict[str, Any] = {
             "minute": 30,
             "weekdays": [1, 2, 3, 4, 5],
         },
+        "winrate_scan": {
+            "hour": 14,
+            "minute": 35,
+            "weekdays": [1, 2, 3, 4, 5],
+        },
         "review": {
             "hour": 15,
             "minute": 1,
@@ -738,6 +774,8 @@ DEFAULTS: Dict[str, Any] = {
         "pullback_max_intraday": 0.65,
         "pullback_keep_days": 3,
         "auto_prune_on_review": True,
+        # 观察轨/启动待定轨：预审不再满足入池口径时自动剔除（review + 盘中 scan_alerts）
+        "auto_prune_ineligible": True,
         "tracks": ["趋势轨", "观察轨", "启动待定轨", "萌芽观察轨", "前夕观察轨"],
     },
     # ---------------------------------------------------------- 报告

@@ -264,7 +264,7 @@ def diagnose(cfg,
     fixes: List[str] = []
     if issues:
         fixes.append(f"cd {expected_home} && ./ops/install-launchd-all.sh")
-        fixes.append("或单独重装：./ops/install-launchd-{seed-plan,review,watch-alert,weekly-email}.sh")
+        fixes.append("或单独重装：./ops/install-launchd-{seed-plan,winrate-scan,review,watch-alert,weekly-email}.sh")
         if any("stderr 含旧版误报" in i.get("message", "") for i in issues):
             fixes.append("清空旧 stderr：tea launchd doctor --fix")
 

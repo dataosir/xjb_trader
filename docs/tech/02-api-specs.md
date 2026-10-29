@@ -22,9 +22,9 @@
 | 命令 | Runner / 模块锚点 | 副作用 |
 |---|---|---|
 | `weather` | sentiment + timing | 只读 |
-| `seed-plan` | `Screener` 四步流 → `plan` 写次日计划 → `maybe_auto_backfill(seed)` | 写计划 / 观察池 / 种子记录；**仅** `TEA_LAUNCHD=1` 或 `--force`；**后台**轻量回填 |
+| `seed-plan` | `Screener` 四步流 → `plan` 写次日计划 → `send_seed_email` → `maybe_auto_backfill(seed)` | 写计划 / 观察池 / 种子记录 + **精简邮件**；**仅** `TEA_LAUNCHD=1` 或 `--force`；**后台**轻量回填 |
 | `seed-show` | `seed_report.show_latest` 读 `reports/SEED_*.md` | **只读**；不扫描、不写样本 |
-| `winrate-scan` | `Screener.winrate_scan`（菜单 `4`） | **只落盘 `mode=winrate` 影子样本，不写计划、不入观察池** |
+| `winrate-scan` | `Screener.winrate_scan`（菜单 `4`） | **只落盘 `mode=winrate` 影子样本，不写计划、不入观察池**；**launchd** 工作日 **14:35** `winrate-scan --scheduled`（日去重，见 ops/10） |
 | `plan-check` | `plan` 复核 | 变动则整单作废 |
 | `run` / `eval` | gates → phases Phase1–4；`eval` 不落仓 | `run` 可登记灰度仓 |
 | `review` | followthrough 回填 + watch 复核 + 缺口/影子看板 | 写 seed_records / 报告 |
@@ -33,6 +33,8 @@
 | `ops-summary` | `ops_summary.sync_launchd_stderr` + `send_daily_summary`；`scheduled_review` 后自动 | 写 `ops_summary_state.json` + `launchd_stderr_state.json`；stderr→`error.log`；**不发计划、不下单** |
 | `launchd list` / `render-plist` / `doctor` | `tea/config/schedules.py` + `launchd_doctor.py` | 按 `scheduler.*` 生成 plist；`doctor` 对比已安装 plist 与当前 `TEA_HOME`/Python（含 stderr 同步） |
 | `followthrough` | 跟涨胜率 + 样本缺口 + 影子桶 T+3 对照 | 只读（`--update` 可写回填） |
+| `retrospective [start] [end] [--write]` | `reporting.retrospective.generate/save`；菜单复盘工具 `8` | 默认上周；`--write` → `reports/retrospective_*.md`；**只读 scan_details，不改闸** |
+| `weekly` | `weekly.write_report` / `render_md`（含硬闸挡下高分个案段） | 写 `WEEKLY_*.md` |
 | （进菜单） | `maybe_auto_backfill(menu)` | 盘后/隔夜窗每天最多 1 次轻量回填（**默认后台**） |
 | `selftest` | `tea/selftest.py` | 临时 `$TEA_HOME` 沙箱，不碰真实数据 |
 
@@ -82,7 +84,10 @@
 
 ### 3.6 观察提醒（F16 + F18）
 
+- `watch_pool.ineligible_reason(item, ev, cfg)` → 剔除原因或 `None`（观察轨须软否决或 PASS；启动待定轨须差分 ≤ `seed.near_miss_gap`）  
+- `watch_pool.prune_ineligible(cfg, market)` — 批量剔除资格失效项  
 - `watch_pool.scan_alerts(cfg, market)` → `[{code, name, track, order_price, stop, target, tp_pct, body, ...}]`  
+- 资格剔除：`review` 内嵌 + `watch_alert` 扫描前调用 `prune_ineligible`  
 - `watch_pool.format_alert_body(candidate, condition)` — 邮件正文（挂单价/止损/止盈/计划止盈 T+1~T+3；核心数字【】强调）  
 - `watch_pool.suggest_limit_price(ev, condition)` → `{order_price, stop, target, basis, sl_pct, tp_pct, ma20_ref}`  
   - **可买（追高）**：挂单价=现价；止损/止盈沿用预审 ATR 结构（扫描价口径）  

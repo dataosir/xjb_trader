@@ -145,6 +145,82 @@ def find(code: str, cfg: Optional[Config] = None) -> Optional[dict]:
     return next((i for i in items(cfg) if i.get("code") == code), None)
 
 
+# ------------------------------------------------------------------ 轨道资格复检
+
+def ineligible_reason(item: dict, ev: dict, cfg: Optional[Config] = None) -> Optional[str]:
+    """当前预审下是否不应再留在 item 所属轨道。
+
+    返回剔除原因；None 表示保留。PASS 预审保留（可走回踩就绪 / 升格），不因「已无软否决」剔除。
+    """
+    cfg = cfg or load_config()
+    track = item.get("track")
+    vt = ev.get("veto") or {}
+    verdict = ev.get("verdict")
+    gap = ev.get("gap")
+    if gap is None:
+        th, total = ev.get("pass_threshold"), ev.get("total_score")
+        if th is not None and total is not None:
+            gap = int(th) - int(total)
+        else:
+            gap = 99
+    gap_watch = int(cfg.get("seed.near_miss_gap", 1))
+
+    if track == TRACK_WATCH:
+        if verdict == preflight.VERDICT_PASS:
+            return None
+        if vt.get("watchable"):
+            return None
+        if verdict == preflight.VERDICT_NEAR_MISS:
+            return f"近失（共振差 {gap} 分），非软否决观察轨"
+        if verdict == preflight.VERDICT_REJECT and not vt.get("rejected"):
+            return "预审 REJECT"
+        if verdict == preflight.VERDICT_WATCH:
+            return f"已无软否决（差 {gap} 分，属启动待定/近失口径）"
+        return "不再符合观察轨（需软否决等回踩）"
+
+    if track == TRACK_PENDING:
+        if verdict == preflight.VERDICT_PASS:
+            return None
+        if vt.get("watchable"):
+            return "现为软否决观察口径，非启动待定轨"
+        if verdict == preflight.VERDICT_WATCH and gap <= gap_watch:
+            return None
+        if verdict == preflight.VERDICT_NEAR_MISS:
+            return f"共振差 {gap} 分 > {gap_watch}，非启动待定轨"
+        if verdict == preflight.VERDICT_REJECT and not vt.get("rejected"):
+            return "预审 REJECT"
+        return f"不再符合启动待定轨（差分须 ≤{gap_watch}）"
+
+    return None
+
+
+def prune_ineligible(market: Optional[Market] = None, cfg: Optional[Config] = None,
+                     sent: Optional[dict] = None, apply: bool = True) -> dict:
+    """剔除不再满足轨道资格的 active 项（默认观察轨 / 启动待定轨）。"""
+    cfg = cfg or load_config()
+    if not cfg.get("watch.auto_prune_ineligible", True):
+        return {"removed": [], "at": utils.now().strftime("%Y-%m-%d %H:%M")}
+    mk = market or Market(cfg)
+    out: Dict[str, Any] = {"removed": [], "at": utils.now().strftime("%Y-%m-%d %H:%M")}
+    for item in list(active_items(cfg)):
+        track = item.get("track")
+        if track not in (TRACK_WATCH, TRACK_PENDING):
+            continue
+        try:
+            ev = preflight.evaluate(item["code"], mk, cfg, sent=sent)
+        except Exception as exc:
+            continue
+        reason = ineligible_reason(item, ev, cfg)
+        if not reason:
+            continue
+        rec = {"code": item.get("code"), "name": item.get("name"),
+               "track": track, "reason": reason}
+        out["removed"].append(rec)
+        if apply:
+            remove(item["code"], f"轨道资格失效：{reason}", cfg)
+    return out
+
+
 # ------------------------------------------------------------------ 12.3 回踩就绪
 
 def pullback_ready(item: dict, ev: dict, cfg: Optional[Config] = None) -> dict:
@@ -510,6 +586,10 @@ def review(market: Optional[Market] = None, cfg: Optional[Config] = None,
             vt = ev.get("veto") or {}
             if vt.get("rejected"):
                 rec["reasons"].append("VETO 恶化：" + "；".join(i["label"] for i in vt["hard"]))
+            if cfg.get("watch.auto_prune_ineligible", True):
+                track_drop = ineligible_reason(item, ev, cfg)
+                if track_drop:
+                    rec["reasons"].append("轨道资格失效：" + track_drop)
             pb = pullback_ready(item, ev, cfg)
             rec["pullback"] = pb
             rec["now"] = preflight.snapshot(ev)

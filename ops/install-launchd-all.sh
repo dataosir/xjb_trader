@@ -20,7 +20,7 @@ TEA_HOME="${TEA_HOME:-$ROOT}"
 source "${ROOT}/ops/_launchd-common.sh"
 launchd_find_python
 
-for script in seed-plan review watch-alert weekly-email; do
+for script in seed-plan winrate-scan review watch-alert weekly-email; do
     echo "==> install-launchd-${script}.sh"
     "${ROOT}/ops/install-launchd-${script}.sh"
 done

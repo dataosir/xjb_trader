@@ -62,6 +62,7 @@ packages = [
     "tea.tests",
     "tea.tests.checks",
     "tea.tests.checks.followthrough",
+    "tea.tests.checks.screening",
     "tea.tests.checks.reporting",
 ]
 

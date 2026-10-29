@@ -55,6 +55,32 @@ def check_mode_channel_stats(t: Suite, cfg: Config) -> None:
     t.ok("周报含硬闸 TOP", "过热阶段" in md)
 
 
+def check_gate_blocked_recent(t: Suite, cfg: Config) -> None:
+    """硬闸挡下高分样本列表 + 近失纳入后验遗漏。"""
+    from tea.reporting import retrospective as retro_mod
+
+    t.head("跟涨样本 · 硬闸挡下高分列表")
+    ft_mod.save_records([
+        {"date": "2026-10-01", "code": "600201", "name": "A", "mode": "winrate",
+         "winrate_score": 5, "winrate_gate": "突破阶段 → 降级观察",
+         "winrate_would_buy": True, "sector_rank": 2, "chg_t3": 4.5},
+        {"date": "2026-10-02", "code": "600202", "name": "B", "mode": "winrate",
+         "winrate_score": 4, "winrate_gate": "rank超限 → 观察",
+         "winrate_would_buy": True, "sector_rank": 4, "chg_t3": -1.0},
+    ], cfg)
+    rows = ft_mod.gate_blocked_recent(cfg, since_ymd="2026-10-01", limit=5)
+    t.eq("挡下样本 2 条", len(rows), 2)
+    t.eq("T+3 最高排前", rows[0].get("code"), "600201")
+    txt = ft_mod.format_gate_blocked_recent(cfg, since_ymd="2026-10-01", limit=2)
+    t.ok("格式化含代码", "600201" in txt)
+    wk = weekly_mod.collect(7, cfg)
+    wk["since"] = "2026-10-01"
+    md = weekly_mod.render_md(wk, cfg)
+    t.ok("周报含挡下个案表", "硬闸挡下高分个案" in md)
+    intro = retro_mod.generate_retrospective("2026-10-01", "2026-10-02", cfg)
+    t.ok("后验说明含近失轨", "观察轨/近失" in intro or "近失" in intro.split("## 遗漏关注", 1)[0])
+
+
 def check_winrate_watch_full_persist(t: Suite, cfg: Config, _mk) -> None:
     """胜率选股观察轨全量保留（展示层截断，落盘不截断）。"""
     from tea.runtime.runner import _ft_entries

@@ -2009,12 +2009,15 @@ def check_winrate_gate(t: Suite, cfg: Config, mk: FakeMarket) -> None:
 
     # 关闭「突破一律否决」后，回退为「突破+排名>N」
     old_block = cfg.get("strategy.winrate_breakout_block")
+    old_t3_gate = cfg.get("winrate.t3_prob.gate_enabled")
     cfg.set("strategy.winrate_breakout_block", False)
+    cfg.set("winrate.t3_prob.gate_enabled", False)
     try:
         t.ok("兼容：突破+排名4>3 → 降级", bool(gate(4, "突破", wr_score=5)))
         t.ok("兼容：突破+排名3≤3 → 放行", gate(3, "突破", wr_score=5) is None)
     finally:
         cfg.set("strategy.winrate_breakout_block", old_block)
+        cfg.set("winrate.t3_prob.gate_enabled", old_t3_gate)
 
     # 关闭过热禁买 → 过热可按其他闸门放行
     old_oh = cfg.get("strategy.winrate_overheat_block")
@@ -2573,11 +2576,11 @@ def check_menu(t: Suite, cfg: Config) -> None:
         all_argv += [av[0] for _, _, av in sub]
     expect = {"weather", "status", "seed-show", "winrate-scan", "plan-check", "__plan__",
               "run", "pos", "__close__", "watch", "review", "accum", "trace",
-              "followthrough", "trades", "stats", "weekly", "weekly-email",
+              "followthrough", "trades", "stats", "weekly", "weekly-email", "retrospective",
               "__pos_add__", "__pos_rm__",
               "__confirm__", "__eval__", "config", "setup", "setup-email", "setup-notify",
               "selftest", "launchd", "plan-clear"}
-    t.eq("29 项功能一个不少", sorted(set(all_argv)), sorted(expect))
+    t.eq("30 项功能一个不少", sorted(set(all_argv)), sorted(expect))
 
     # 时段→建议：每个时段都得有东西可做，且不超过四条（否则就又回到平铺）。
     real_now = utils.now
@@ -3761,6 +3764,7 @@ def check_ops_summary(t: Suite, cfg: Config) -> None:
 
     day = utils.today_str()
     logger_mod.append_daily_log("seed", "probe seed", cfg, day=day, with_ts=False)
+    logger_mod.append_daily_log("winrate", "done winrate-scan added=1", cfg, day=day, with_ts=False)
     logger_mod.append_daily_log("review", "done review", cfg, day=day, with_ts=False)
     tea_log = os.path.join(log_dir, "tea.log")
     with open(tea_log, "a", encoding="utf-8") as fh:
@@ -3770,7 +3774,7 @@ def check_ops_summary(t: Suite, cfg: Config) -> None:
     t.ok("seed 状态正常", any(x.get("name") == "seed-plan" and x.get("ok") for x in status["tasks"]))
     t.ok("watch-alert 有心跳", status.get("alert_count", 0) >= 1)
     body = ops_mod.format_summary_text(status, cfg)
-    t.ok("摘要含定时任务", "seed-plan" in body and "watch-alert" in body)
+    t.ok("摘要含定时任务", "seed-plan" in body and "winrate-scan" in body and "watch-alert" in body)
 
     sent_box: List[dict] = []
 
@@ -3989,13 +3993,33 @@ def main(verbose: bool = True, cfg: Optional[Config] = None) -> int:
         check_end_to_end(t, c, mk, sent)
         check_followthrough(t, c)
         from tea.tests.checks.followthrough import (
+            check_gate_blocked_recent,
             check_mode_channel_stats,
             check_winrate_seed_fields,
             check_winrate_watch_full_persist,
         )
         check_winrate_seed_fields(t, c)
         check_mode_channel_stats(t, c)
+        check_gate_blocked_recent(t, c)
         check_winrate_watch_full_persist(t, c, mk)
+        from tea.tests.checks.screening import (
+            check_scan_at_persist,
+            check_seed_email,
+            check_winrate_email,
+            check_winrate_result_display,
+            check_winrate_sidecar_scan_details,
+            check_winrate_t3_prob,
+            check_scheduled_winrate_scan,
+        )
+        check_winrate_sidecar_scan_details(t, c, mk)
+        check_winrate_result_display(t, c)
+        check_winrate_t3_prob(t, c)
+        check_winrate_email(t, c)
+        check_scheduled_winrate_scan(t, c, mk)
+        check_seed_email(t, c)
+        check_scan_at_persist(t, c)
+        from tea.tests.checks.watch_pool import check_watch_track_prune
+        check_watch_track_prune(t, c)
         check_pricetrack(t, c, mk)
         check_watch_alert(t, c)
         check_email_setup(t, tmp)

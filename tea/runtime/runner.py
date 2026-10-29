@@ -8,6 +8,7 @@
     maybe_auto_backfill()  轻量/全量自动回填（seed / menu 触发）
     close_review()  盘后复核：T+1 回填 / 观察池复核 / 当日累积
     scheduled_review()  launchd 盘后自动复核（交易日 + 收盘后 + 每日去重）
+    scheduled_winrate_scan()  launchd 胜率影子扫描（交易日 + 每日去重）
     watch_alert()   盘中观察池扫描 + 邮件提醒（launchd 每分钟）
     weekly_email()  每周五选股周报邮件（launchd 周五 17:00）
     daily_status()  今日状态（门禁计数 / 计划 / 持仓）
@@ -282,6 +283,21 @@ def seed_plan(cfg: Optional[Config] = None, market: Optional[Market] = None,
         accumulator.record_seed(seed_report.summarize(result), cfg)
         result["plan"] = plan
 
+        try:
+            email_res = seed_report.send_seed_email(result, cfg)
+            result["email"] = email_res
+            if email_res.get("ok"):
+                io.say(f"  种子邮件已发送：{email_res.get('subject')}")
+            elif email_res.get("skip") == "already_sent":
+                io.say("  种子邮件：今日已发过，跳过")
+            elif email_res.get("skip") == "email_not_configured":
+                io.say("  种子邮件：SMTP 未配置或未开启 notify.email.enabled")
+            elif email_res.get("skip") not in ("empty", "seed_email_disabled"):
+                io.say(f"  ! 种子邮件未发送：{email_res.get('skip') or email_res.get('error')}")
+        except Exception as exc:
+            io.say(f"  ! 种子邮件发送失败：{exc}")
+            logger_mod.get_logger("scan").warning("种子邮件失败: %s", exc)
+
         logger_mod.append_daily_log(
             "seed",
             f"done seed-plan scan_id={result.get('scan_id')} "
@@ -304,63 +320,66 @@ def winrate_plan(cfg: Optional[Config] = None, market: Optional[Market] = None,
     sc = screener_mod.Screener(cfg, mk)
     t_start = time.time()
 
-    io.say("=" * 56)
-    io.say(f"XJB_TRADE · 胜率选股　{utils.now().strftime('%Y-%m-%d %H:%M')}")
-    io.say("=" * 56)
-    io.say("  ⏳ 开始胜率选股扫描（数据型通道，与 9 分共振并行对比）...")
+    with logger_mod.daily_log_session("winrate", cfg):
+        io.say("=" * 56)
+        io.say(f"XJB_TRADE · 胜率选股　{utils.now().strftime('%Y-%m-%d %H:%M')}")
+        io.say("=" * 56)
+        io.say("  ⏳ 开始胜率选股扫描（数据型通道，与 9 分共振并行对比）...")
 
-    sent = sent if sent is not None else weather(cfg, mk, io=io)
-    io.say(format_weather(sent))
+        sent = sent if sent is not None else weather(cfg, mk, io=io)
+        io.say(format_weather(sent))
 
-    from tea.screening.scan_anchor import ANCHOR_WINRATE
-    result = sc.winrate_scan(sent=sent, io=io)
-    result["scan_anchor"] = ANCHOR_WINRATE
-    net = mk.stats_line() if hasattr(mk, "stats_line") else ""
-    io.say(f"  ✓ 胜率选股扫描完成 ({time.time() - t_start:.1f}s)" + (f"，{net}" if net else ""))
-    gap_banner = format_data_gap_banner(sent, net)
-    if gap_banner:
-        io.say(gap_banner)
-        result.setdefault("notes", []).append(
-            "数据缺口/网络异常：" + "；".join(data_gap_summary(sent, net)))
+        from tea.screening.scan_anchor import ANCHOR_WINRATE
+        result = sc.winrate_scan(sent=sent, io=io)
+        result["scan_anchor"] = ANCHOR_WINRATE
+        net = mk.stats_line() if hasattr(mk, "stats_line") else ""
+        io.say(f"  ✓ 胜率选股扫描完成 ({time.time() - t_start:.1f}s)" + (f"，{net}" if net else ""))
+        gap_banner = format_data_gap_banner(sent, net)
+        if gap_banner:
+            io.say(gap_banner)
+            result.setdefault("notes", []).append(
+                "数据缺口/网络异常：" + "；".join(data_gap_summary(sent, net)))
 
-    _print_winrate_result(result, io)
+        _print_winrate_result(result, io)
 
-    # 跟涨样本落盘（mode=winrate，与 rule 通道区分）
-    entries = _ft_entries(result)
-    ft_res = (ft_mod.record_seed(entries, cfg, scan_anchor=ANCHOR_WINRATE)
-              if entries else {"added": 0, "skipped": 0, "updated": 0})
-    if ft_res.get("added") or ft_res.get("updated"):
-        io.say(f"  跟涨样本落盘 {ft_res.get('added') + ft_res.get('updated')} 条（mode=winrate），"
-               f"跑 `tea review` 回填 T+N")
-    result["plan"] = None
-    return result
+        # 有候选则发邮件（NAS 生产端；本机若 notify.email.enabled=false 则跳过）
+        try:
+            email_res = seed_report.send_winrate_email(result, cfg)
+            result["email"] = email_res
+            if email_res.get("ok"):
+                io.say(f"  胜率邮件已发送：{email_res.get('subject')}")
+            elif email_res.get("skip") == "all_codes_already_sent":
+                io.say("  胜率邮件：候选均已通知，跳过（按股票同日去重）")
+            elif email_res.get("skip") == "email_not_configured":
+                io.say("  胜率邮件：SMTP 未配置或未开启 notify.email.enabled")
+            elif email_res.get("skip") not in ("empty", "winrate_email_disabled"):
+                io.say(f"  ! 胜率邮件未发送：{email_res.get('skip') or email_res.get('error')}")
+        except Exception as exc:
+            io.say(f"  ! 胜率邮件发送失败：{exc}")
+            logger_mod.get_logger("scan").warning("胜率邮件失败: %s", exc)
+
+        # 跟涨样本落盘（mode=winrate，与 rule 通道区分）
+        entries = _ft_entries(result)
+        ft_res = (ft_mod.record_seed(entries, cfg, scan_anchor=ANCHOR_WINRATE)
+                  if entries else {"added": 0, "skipped": 0, "updated": 0})
+        result["followthrough"] = ft_res
+        if ft_res.get("added") or ft_res.get("updated"):
+            io.say(f"  跟涨样本落盘 {ft_res.get('added') + ft_res.get('updated')} 条（mode=winrate），"
+                   f"跑 `tea review` 回填 T+N")
+        result["plan"] = None
+
+        logger_mod.append_daily_log(
+            "winrate",
+            f"done winrate-scan scan_id={result.get('scan_id')} "
+            f"added={ft_res.get('added')} skipped={ft_res.get('skipped')}",
+            cfg)
+        logger_mod.write_daily_transcript("winrate", io.transcript, cfg)
+        return result
 
 
 def _print_winrate_result(result: dict, io: IO) -> None:
-    """胜率选股结果的精简展示（不像 SEED 报告那么重，重点是胜率分与归因明细）。"""
-    threshold = result.get("winrate_threshold", 3)
-    io.say(f"===== 胜率选股结果 =====\n"
-           f"  时间 {result.get('at')}  胜率门槛 ≥{threshold} 分（数据启发）")
-    top = "、".join(f"{s.get('name')}(#{s.get('rank')})" for s in (result.get("sectors") or [])[:3])
-    io.say(f"  板块 TOP：{top or '无'}")
-    buyable = result.get("buyable") or []
-    watch_all = result.get("watch") or []
-    watch_limit = int(result.get("watch_display_limit") or 3)
-    watch = watch_all[:watch_limit] if watch_limit > 0 else watch_all
-    if buyable:
-        io.say(f"  ---- 胜率可买（{len(buyable)}）----")
-        for e in buyable:
-            io.say(f"    {e.get('code')} {e.get('name')} [{e.get('sector_name')}] "
-                   f"胜率分 {e.get('winrate_score')}")
-            io.say(f"        {e.get('winrate_detail')}")
-    else:
-        io.say("  ---- 胜率可买（0）----  无达标")
-    if watch:
-        io.say(f"  ---- 胜率观察（{len(watch)}）----")
-        for e in watch:
-            io.say(f"    {e.get('code')} {e.get('name')} [{e.get('sector_name')}] "
-                   f"胜率分 {e.get('winrate_score')} | {e.get('winrate_detail')}")
-    io.say("  注：胜率选股只落盘观察、不写计划、不买入，用于与 9 分共振（rule）对比积累数据")
+    """胜率选股控制台摘要（操作建议与种子扫描一致，胜率分 X/7）。"""
+    io.say(seed_report.format_winrate_result(result, cfg=load_config()))
 
 
 def _ft_entries(result: dict) -> List[dict]:
@@ -432,7 +451,10 @@ def _ft_entries(result: dict) -> List[dict]:
                 "winrate_detail": ev.get("winrate_detail"),
                 "winrate_gate": ev.get("winrate_gate"),
                 "winrate_would_buy": bool(score_met),
+                "winrate_t3_prob": ev.get("winrate_t3_prob"),
+                "winrate_t3_detail": ev.get("winrate_t3_detail"),
                 "mode": result.get("mode", "rule"),
+                "scan_at": result.get("at"),
                 "pick_sector_bk": ev.get("pick_sector_bk"),
                 "pick_sector_name": ev.get("pick_sector_name"),
                 "pick_sector_rank": ev.get("pick_sector_rank"),
@@ -676,6 +698,55 @@ def _save_review_state(cfg: Config, state: dict) -> None:
     utils.write_json(_review_state_path(cfg), state)
 
 
+def _winrate_state_path(cfg: Config) -> str:
+    return cfg.data_file("winrate_scheduled_state_file")
+
+
+def _load_winrate_state(cfg: Config) -> dict:
+    return utils.read_json(_winrate_state_path(cfg), default={}) or {}
+
+
+def _save_winrate_state(cfg: Config, state: dict) -> None:
+    utils.write_json(_winrate_state_path(cfg), state)
+
+
+def scheduled_winrate_scan(cfg: Optional[Config] = None, market: Optional[Market] = None,
+                           io: Optional[IO] = None, force: bool = False) -> dict:
+    """launchd 胜率影子扫描：交易日 + 每日去重一次（默认 14:35，seed-plan 后 5 分钟）。"""
+    cfg = cfg or load_config()
+    io = io or IO(interactive=False, quiet=True)
+    log = logger_mod.get_logger("scan")
+    today = utils.today_str()
+    out: Dict[str, Any] = {"date": today}
+
+    if not force and not cfg.get("winrate.scheduled_enabled", True):
+        log.info("tea.winrate skip: scheduled_disabled")
+        out["skip"] = "scheduled_disabled"
+        logger_mod.append_daily_log("winrate", "skip scheduled_disabled", cfg)
+        return out
+
+    if not force and not utils.is_trading_day(utils.now().date()):
+        log.info("tea.winrate skip: not_trading_day")
+        out["skip"] = "not_trading_day"
+        return out
+
+    state = _load_winrate_state(cfg)
+    if not force and state.get("last_date") == today:
+        log.info("tea.winrate skip: already_done")
+        out["skip"] = "already_done"
+        logger_mod.append_daily_log("winrate", "skip already_done", cfg)
+        return out
+
+    log.info("tea.winrate scheduled start date=%s force=%s", today, force)
+    result = winrate_plan(cfg=cfg, market=market, io=io)
+    out.update(result)
+    ft = result.get("followthrough") or {}
+    _save_winrate_state(cfg, {"last_date": today, "last_run": utils.now().isoformat(timespec="seconds")})
+    log.info("tea.winrate scheduled done added=%s skipped=%s",
+             ft.get("added"), ft.get("skipped"))
+    return out
+
+
 def _finish_scheduled_ops(cfg: Config, review_out: dict) -> None:
     """scheduled_review 收尾：stderr→error.log + 日终运维摘要邮件。"""
     log = logger_mod.get_logger("review")
@@ -794,6 +865,18 @@ def watch_alert(cfg: Optional[Config] = None, market: Optional[Market] = None,
 
     condition = str(cfg.get("alert.condition") or watch_pool.CONDITION_PULLBACK)
     log.info("tea.alert scan start n=%d condition=%s", len(active), condition)
+
+    pruned = watch_pool.prune_ineligible(mk, cfg, sent=sent, apply=True)
+    if pruned.get("removed"):
+        log.info("tea.alert pruned ineligible n=%d", len(pruned["removed"]))
+        for p in pruned["removed"]:
+            io.say(f"  − 观察池剔除 {p.get('code')}：{p.get('reason')}")
+        active = watch_pool.active_items(cfg)
+        if not active:
+            log.info("tea.alert skip: empty_pool after prune")
+            out["skip"] = "empty_pool"
+            out["pruned"] = pruned
+            return out
 
     scan = watch_pool.scan_alerts(mk, cfg, sent=sent)
     out["scan"] = scan

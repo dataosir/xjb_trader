@@ -9,7 +9,7 @@ P0 纠偏后：**共振 PASS 不足以可买**，还需硬闸（突破/过热禁
 
 - 14:30 launchd `seed-plan`：产出少量可买 + 观察池候选 + SEED 报告（**菜单不提供手动扫描**，避免污染样本锚点）。  
 - 盘中只读：`seed-show` / 菜单 `3` 查看最新 SEED 报告。  
-- 交易者不希望中游板块（rank>5）、「突破」或「过热」阶段票写成可买计划。
+- 交易者不希望中游板块（**板块 rank>3**）、「突破」或「过热」阶段票写成可买计划。
 
 ## 3. 功能范围
 
@@ -44,7 +44,7 @@ P0 纠偏后：**共振 PASS 不足以可买**，还需硬闸（突破/过热禁
 | 键 | 默认意图 |
 |---|---|
 | `strategy.pass_threshold` | 共振可买门槛（如 6） |
-| `strategy.seed_min_sector_rank` | 可买板块排名上限（如 5） |
+| `strategy.seed_min_sector_rank` | 可买板块排名上限（**方案 A 默认 3**） |
 | `strategy.winrate_gate_enabled` | 总闸 |
 | `strategy.winrate_breakout_block` | 突破一律不得可买 |
 | `strategy.winrate_overheat_block` | 过热一律不得可买 |
@@ -66,7 +66,7 @@ P0 纠偏后：**共振 PASS 不足以可买**，还需硬闸（突破/过热禁
 - [ ] 突破阶段候选不得进入可买（`winrate_breakout_block=true`）  
 - [ ] 过热阶段候选不得进入可买（`winrate_overheat_block=true`）  
 - [ ] 可买必有 `pick_sector_*` 且 rank≤上限；与预审板块一致  
-- [ ] `ok_nozt` / 多元化路径不可引入 rank>5 可买  
+- [ ] `ok_nozt` / 多元化路径不可引入 **rank>3** 可买（与 `seed_min_sector_rank` / 方案 A 一致）  
 - [ ] selftest 覆盖闸门开/关行为  
 - [ ] 关闭 `winrate_gate_enabled` 可回滚总闸  
 - [ ] 候选明细每条必带「原因」（含软/硬否决的 veto_detail 或 labels 兜底）  

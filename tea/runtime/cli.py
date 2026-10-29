@@ -108,8 +108,12 @@ def cmd_seed_show(args, cfg: Config) -> int:
 
 def cmd_winrate_scan(args, cfg: Config) -> int:
     io = _io()
+    if getattr(args, "scheduled", False):
+        runner.scheduled_winrate_scan(cfg=cfg, io=io, force=getattr(args, "force", False))
+        return 0
     io.say("  提示：胜率选股只落盘 mode=winrate 影子样本，不写计划、不入观察池；"
-           "主样本仍以 14:30 自动 seed-plan 为准。")
+           "主样本仍以 14:30 自动 seed-plan 为准；"
+           "工作日 14:35 launchd 也会自动跑（见 ops/10）。")
     res = runner.winrate_plan(cfg=cfg, io=io)
     return 0 if res.get("buyable") else 1
 
@@ -340,6 +344,31 @@ def cmd_weekly_email(args, cfg: Config) -> int:
     return 0 if res.get("ok") else 1
 
 
+def cmd_retrospective(args, cfg: Config) -> int:
+    from tea.reporting import retrospective as retro_mod
+
+    io = _io()
+    if args.start and args.end:
+        start, end = args.start, args.end
+    else:
+        start, end = retro_mod._default_week()
+    if args.write:
+        try:
+            path = retro_mod.save_retrospective(start, end, cfg)
+        except Exception as ex:
+            io.say(f"生成后验报告失败：{ex}")
+            return 1
+        io.say(f"后验分析报告已生成：{path}")
+        return 0
+    try:
+        text = retro_mod.generate_retrospective(start, end, cfg)
+    except Exception as ex:
+        io.say(f"生成后验报告失败：{ex}")
+        return 1
+    io.say(text)
+    return 0
+
+
 def cmd_ops_summary(args, cfg: Config) -> int:
     from tea.reporting import ops_summary as ops_mod
 
@@ -566,6 +595,7 @@ SUBMENUS = {
         ("5", "统计与归因", ["stats"]),
         ("6", "周复盘报告", ["weekly"]),
         ("7", "周报邮件（周五自动发）", ["weekly-email"]),
+        ("8", "后验遗漏分析", ["retrospective"]),
     ],
     "配置与维护": [
         ("1", "配置一览", ["config", "list"]),
@@ -899,6 +929,9 @@ def build_parser() -> argparse.ArgumentParser:
     ss.set_defaults(func=cmd_seed_show)
 
     wr = sub.add_parser("winrate-scan", help="胜率选股（数据型通道，只落盘对比，不写计划）")
+    wr.add_argument("--scheduled", action="store_true",
+                    help="launchd 模式：交易日 + 每日去重（见 ops/10）")
+    wr.add_argument("--force", action="store_true", help="忽略去重守卫（漏扫补救）")
     wr.set_defaults(func=cmd_winrate_scan)
 
     pc = sub.add_parser("plan-check", help="计划复核（任一变动整单作废）")
@@ -994,6 +1027,12 @@ def build_parser() -> argparse.ArgumentParser:
     we.add_argument("--force", action="store_true", help="忽略周五/去重守卫（演练）")
     we.set_defaults(func=cmd_weekly_email)
 
+    rt = sub.add_parser("retrospective", help="后验分析：否决/观察/近失中 D+5 强势股")
+    rt.add_argument("start", nargs="?", help="起始日期 YYYY-MM-DD（默认上周一）")
+    rt.add_argument("end", nargs="?", help="结束日期 YYYY-MM-DD（默认上周五）")
+    rt.add_argument("--write", action="store_true", help="写入 reports/retrospective_*.md")
+    rt.set_defaults(func=cmd_retrospective)
+
     osm = sub.add_parser("ops-summary", help="运维摘要：stderr→error.log + 日终邮件")
     osm.add_argument("--force", action="store_true", help="忽略去重/非交易日守卫")
     osm.add_argument("--dry-run", action="store_true", help="只打印摘要，不发邮件")
@@ -1046,7 +1085,7 @@ def build_parser() -> argparse.ArgumentParser:
     ld_list.set_defaults(func=cmd_launchd)
     ld_render = ld_sub.add_parser("render-plist", help="按 scheduler.* 生成 plist XML")
     ld_render.add_argument("job", choices=list(schedules.JOBS.keys()),
-                           help="任务名（seed_plan / review / watch_alert / weekly_email）")
+                           help="任务名（seed_plan / winrate_scan / review / watch_alert / weekly_email）")
     ld_render.add_argument("--tea-home", help="TEA_HOME（默认当前配置目录）")
     ld_render.add_argument("--python", help="Python 解释器路径（默认 python3）")
     ld_render.add_argument("-o", "--output", help="写入文件（默认 stdout）")

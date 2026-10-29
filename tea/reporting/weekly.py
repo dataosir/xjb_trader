@@ -276,6 +276,18 @@ def render_md(wk: Optional[dict] = None, cfg: Optional[Config] = None) -> str:
                       "| 原因 | 次数 |", "| --- | --- |"]
             for k, v in sorted(reasons.items(), key=lambda x: -x[1])[:8]:
                 lines.append(f"| {k} | {v} |")
+        blocked = followthrough.gate_blocked_recent(cfg, since_ymd=wk.get("since"), limit=8)
+        if blocked:
+            lines += ["", "**硬闸挡下高分个案（本周，T+3 优先）**", "",
+                      "| 日期 | 代码 | 名称 | 分数 | rank | T+3 | 硬闸 |",
+                      "| --- | --- | --- | --- | --- | --- | --- |"]
+            for r in blocked:
+                t3 = r.get("chg_t3")
+                t3_cell = f"{float(t3):+.1f}%" if t3 is not None else "—"
+                lines.append(
+                    f"| {r.get('date')} | {r.get('code')} | {r.get('name')} "
+                    f"| {r.get('winrate_score')} | {r.get('sector_rank')} "
+                    f"| {t3_cell} | {str(r.get('winrate_gate') or '')[:40]} |")
     lines.append("")
 
     # ---- 跟涨经验
@@ -365,9 +377,17 @@ def _week_sample_delta(since: str, until: str, cfg: Config) -> int:
 
 
 def _fmt_pick_score(rec: dict) -> str:
+    from tea.screening.preflight import (
+        WINRATE_SCORE_MAX, format_resonance_score, format_winrate_score,
+    )
     if rec.get("mode") == "winrate":
-        return f"胜率{rec.get('winrate_score', '—')}"
-    return f"共振{rec.get('total_score', '—')}/{rec.get('pass_threshold', '—')}"
+        score = rec.get("winrate_score")
+        if score is None:
+            return "胜率—"
+        th = int(rec.get("winrate_threshold") or 3)
+        return "胜率" + format_winrate_score(score, th, WINRATE_SCORE_MAX)
+    return "共振" + format_resonance_score(
+        rec.get("total_score"), rec.get("pass_threshold"))
 
 
 def _fmt_pick_follow(rec: dict) -> str:
@@ -493,6 +513,11 @@ def format_email_digest(wk: dict, cfg: Optional[Config] = None,
             f"{label} {slot['n']}条  可买{slot.get('buyable_n', 0)}  "
             f"T+1 {stats.fmt_wr(slot.get('t1_rate'))}  "
             f"T+3 {stats.fmt_wr(slot.get('t3_up_rate'))}{extra}")
+    blk_txt = followthrough.format_gate_blocked_recent(cfg, since_ymd=since, limit=4)
+    if blk_txt:
+        lines += ["", "━━ 硬闸挡下高分（只记录）━━"]
+        for ln in blk_txt.splitlines()[1:]:
+            lines.append(ln.strip())
 
     lines += ["", "━━ 本周成交 ━━"]
     if wk.get("week_trades"):
@@ -685,4 +710,10 @@ def format_weekly(wk: Optional[dict] = None, cfg: Optional[Config] = None) -> st
             lines.append(
                 f"    {label} {n}条  可买{slot.get('buyable_n', 0)}"
                 f"  T+1 {t1}  T+3 {t3}{extra}")
+        blk_txt = followthrough.format_gate_blocked_recent(
+            cfg, since_ymd=wk.get("since"), limit=5)
+        if blk_txt:
+            lines.append("  ---- 硬闸挡下高分（误杀复核，只记录）----")
+            for ln in blk_txt.splitlines()[1:]:
+                lines.append(f"    {ln.strip()}")
     return "\n".join(lines)

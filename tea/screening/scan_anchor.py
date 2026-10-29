@@ -7,7 +7,7 @@
 锚点（高 → 低）：
   primary  — launchd 14:30 官方扫描（TEA_LAUNCHD=1）
   manual   — tea seed-plan --force 漏扫补救
-  winrate  — 胜率选股（影子通道，不写 scan_details 主文件）
+  winrate  — 胜率选股（影子通道，写 sidecar，不写主文件）
 """
 from __future__ import annotations
 

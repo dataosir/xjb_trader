@@ -59,7 +59,9 @@ HIDDEN = [
     "tea.tests",
     "tea.tests.checks",
     "tea.tests.checks.followthrough",
+    "tea.tests.checks.screening",
     "tea.tests.checks.reporting",
+    "tea.tests.checks.watch_pool",
     # 分析层
     "tea.analysis",
     "tea.analysis.expectancy",

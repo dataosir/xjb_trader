@@ -826,6 +826,15 @@ class Screener:
             th = int(cfg.get("winrate.buyable_threshold", 3))
             if wr_score < th:
                 return f"胜率分 {wr_score} < {th} → 降级观察"
+        # T+3 获利概率硬闸：综合板块/阶段/涨幅桶后仍偏低时降级。
+        if cfg.get("winrate.t3_prob.gate_enabled", True):
+            if ev.get("winrate_t3_prob") is None:
+                preflight.apply_winrate_t3(ev, cfg)
+            prob = ev.get("winrate_t3_prob")
+            min_p = float(ev.get("winrate_t3_min")
+                          or cfg.get("winrate.t3_prob.min_prob", 0.35))
+            if prob is not None and prob < min_p:
+                return f"T+3获利概率 {prob:.0%} < {min_p:.0%} → 降级观察"
         return None
 
     # ============================================================== 第 4 步
@@ -847,6 +856,7 @@ class Screener:
             wr = preflight.winrate_score(ev, cfg)
             ev["winrate_score"] = wr["score"]
             ev["winrate_detail"] = wr.get("detail")
+            preflight.apply_winrate_t3(ev, cfg)
             # 胜率因子门槛（阶段 A）：历史低胜率特征从「可买」降级观察。PASS 的 gap≤0，
             # 降级为 WATCH 后自然落入下面的「差1分→观察轨」分支（gap≤1 恒成立）。
             if ev.get("verdict") == preflight.VERDICT_PASS:
@@ -991,6 +1001,9 @@ class Screener:
         utils.ensure_dir(cfg.data_dir())
         try:
             if scan_anchor == ANCHOR_WINRATE:
+                side = sidecar_scan_details_name(
+                    today, scan_anchor, str(result.get("scan_id") or ""))
+                utils.write_json(os.path.join(cfg.data_dir(), side), payload)
                 return
             existing = None
             if os.path.isfile(canonical):
@@ -1121,11 +1134,14 @@ class Screener:
             "sentiment": sent,
             "sectors": [{k: v for k, v in s.items() if k != "members"} for s in sectors],
             "winrate_threshold": threshold,
+            "winrate_max": preflight.WINRATE_SCORE_MAX,
             "tier": None, "buyable": [], "watch": [], "candidates": [],
             "notes": [], "verdict": VERDICT_EMPTY,
         }
         if not sectors:
             result["notes"].append("无板块通过硬门槛")
+            from tea.screening.scan_anchor import ANCHOR_WINRATE
+            self._write_scan_log(result, scan_anchor=ANCHOR_WINRATE)
             return result
 
         cands, tier, notes = self.screen_with_downgrade(sectors, step1["max_sector_chg"],
@@ -1138,20 +1154,25 @@ class Screener:
             wr = preflight.winrate_score(ev, cfg)
             ev["winrate_score"] = wr["score"]
             ev["winrate_detail"] = wr["detail"]
+            preflight.apply_winrate_t3(ev, cfg)
             # 与规则通道共用可买硬闸（突破/板块上限/入选一致性）；胜率分门槛仍用本通道阈值。
+            score_met = wr["score"] >= threshold
+            ev["winrate_would_buy"] = score_met
             wr_note = self._winrate_gate(ev)
             if wr_note:
                 ev["track"] = watch_pool.TRACK_WATCH
                 ev["winrate_gate"] = wr_note
                 ev["triggers"] = followthrough.trigger_conditions(ev, cfg)
                 watch.append(ev)
-            elif wr["score"] >= threshold:
+            elif score_met:
+                ev["track"] = "可买"
                 buyable.append(ev)
             else:
                 ev["track"] = watch_pool.TRACK_WATCH
                 ev["triggers"] = followthrough.trigger_conditions(ev, cfg)
                 watch.append(ev)
-        buyable.sort(key=lambda e: -e.get("winrate_score", -99))
+        buyable.sort(key=lambda e: (-e.get("winrate_score", -99),
+                                    -(e.get("winrate_t3_prob") or 0)))
 
         result["buyable"] = buyable
         result["watch"] = watch
@@ -1165,4 +1186,6 @@ class Screener:
             result["verdict"] = VERDICT_PENDING
         result["notes"].append(f"胜率评分门槛 {threshold} 分（数据启发，见 docs/archive/WINRATE_ROADMAP）")
         watch_pool.attach_output_order_hints(result, cfg)
+        from tea.screening.scan_anchor import ANCHOR_WINRATE
+        self._write_scan_log(result, scan_anchor=ANCHOR_WINRATE)
         return result

@@ -190,6 +190,17 @@ def collect_daily_status(day: Optional[str] = None, cfg: Optional[Config] = None
     else:
         seed = _task_status("seed-plan", True, "非交易日（跳过）", "skip")
 
+    winrate_daily = _daily_log_exists("winrate", day, cfg)
+    winrate_log_n = _count_log_substrings(log_dir, day, ("tea.winrate scheduled", "done winrate-scan"))
+    if winrate_daily or winrate_log_n:
+        winrate = _task_status(
+            "winrate-scan", True,
+            f"日录={'有' if winrate_daily else '无'} tea.log={winrate_log_n} 次")
+    elif trading:
+        winrate = _task_status("winrate-scan", False, "今日未见胜率影子扫描", "warn")
+    else:
+        winrate = _task_status("winrate-scan", True, "非交易日（跳过）", "skip")
+
     review_skip = (review_out or {}).get("skip")
     review_daily = _daily_log_exists("review", day, cfg)
     if review_out and not review_skip:
@@ -232,7 +243,7 @@ def collect_daily_status(day: Optional[str] = None, cfg: Optional[Config] = None
     else:
         err_st = _task_status("error.log", True, "今日无 ERROR")
 
-    tasks = [seed, review, watch, stderr_st, err_st]
+    tasks = [seed, winrate, review, watch, stderr_st, err_st]
     issues = [t for t in tasks if t.get("level") == "warn"]
     return {
         "date": day,

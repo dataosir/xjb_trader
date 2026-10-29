@@ -26,6 +26,11 @@ VERDICT_REJECT = "REJECT"
 VERDICT_WATCH = "WATCH"
 VERDICT_NEAR_MISS = "NEAR_MISS"
 
+# 共振名义满分（消息面中性化时实际 max 可能为 8）
+RESONANCE_SCORE_MAX = 9
+# 胜率选股满分（板块+3、阶段+1、身份+1、涨幅+1、量价+1）
+WINRATE_SCORE_MAX = 7
+
 
 # ------------------------------------------------------------------ 5.3 盈亏比
 
@@ -588,7 +593,75 @@ def winrate_score(ev: dict, cfg: Optional[Config] = None) -> dict:
             score -= 1
             parts.append("放量下跌 -1")
 
-    return {"score": score, "parts": parts, "detail": "；".join(parts) if parts else "无胜率信号"}
+    return {
+        "score": score,
+        "parts": parts,
+        "detail": "；".join(parts) if parts else "无胜率信号",
+        "max": WINRATE_SCORE_MAX,
+    }
+
+
+def format_resonance_score(score: Optional[int], threshold: Optional[int],
+                           max_score: Optional[int] = None,
+                           style: str = "plain") -> str:
+    """共振分展示：6/9 门槛7（得分/满分，门槛动态）。style: plain | console | md"""
+    if score is None or threshold is None:
+        return "—"
+    mx = int(max_score if max_score is not None else RESONANCE_SCORE_MAX)
+    text = f"{score}/{mx} 门槛{threshold}"
+    if style == "console":
+        from tea.core import utils as _utils
+        color = _utils.COLOR_PROFIT if score >= threshold else _utils.COLOR_WARN
+        return _utils.hl(text, color)
+    if style == "md":
+        return f"**{text}**"
+    return text
+
+
+def format_winrate_score(score: Optional[int], threshold: int,
+                         max_score: int = WINRATE_SCORE_MAX,
+                         style: str = "plain") -> str:
+    """胜率分展示：3/7 门槛≥3（满分 7，门槛默认 3）。style: plain | console | md"""
+    if score is None:
+        return "—"
+    text = f"{score}/{max_score} 门槛≥{threshold}"
+    if style == "console":
+        from tea.core import utils as _utils
+        color = _utils.COLOR_PROFIT if score >= threshold else _utils.COLOR_WARN
+        return _utils.hl(text, color)
+    if style == "md":
+        return f"**{text}**"
+    return text
+
+
+def format_winrate_t3_prob(prob: Optional[float], min_prob: Optional[float] = None,
+                           cfg: Optional[Config] = None,
+                           style: str = "plain") -> str:
+    """T+3>0 获利概率展示：34% 门槛≥35%（实证对照，非收益承诺）。"""
+    if prob is None:
+        return "—"
+    cfg = cfg or load_config()
+    th = float(min_prob if min_prob is not None
+               else cfg.get("winrate.t3_prob.min_prob", 0.35))
+    text = f"{prob:.0%} 门槛≥{th:.0%}"
+    if style == "console":
+        from tea.core import utils as _utils
+        color = _utils.COLOR_PROFIT if prob >= th else _utils.COLOR_WARN
+        return _utils.hl(text, color)
+    if style == "md":
+        return f"**{text}**"
+    return text
+
+
+def apply_winrate_t3(ev: dict, cfg: Optional[Config] = None) -> dict:
+    """计算并写入 ``winrate_t3_prob`` / ``winrate_t3_detail`` / ``winrate_t3_min``。"""
+    from tea.analysis import followthrough as ft
+    cfg = cfg or load_config()
+    t3 = ft.estimate_t3_up_prob(ev, cfg)
+    ev["winrate_t3_prob"] = t3.get("prob")
+    ev["winrate_t3_detail"] = t3.get("detail")
+    ev["winrate_t3_min"] = t3.get("min_prob")
+    return t3
 
 
 # ------------------------------------------------------------------ 预审主函数

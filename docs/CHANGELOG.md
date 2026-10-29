@@ -4,6 +4,101 @@
 
 ## [Unreleased]
 
+### 文档（2026-10-29：证据债 + INDEX/F03 对齐方案 A）
+
+- **`project-state`**：更新至 2026-10-29；NAS 断采、`only_on_issues`、docs rsync、Ops-2 首份占位。  
+- **`INDEX` / F03 / backlog**：方案 0→A 表述；rank 上限 **3**；B-P1-02 标记已落地。  
+- **`archive/EVIDENCE_SCORECARD_2026-10-29.md`**：Ops-2 首份运营占位（Kill 已触发项勾选）。  
+- **`ops/04-evidence-scorecard.md`**：链到上述归档。
+
+### 报告（2026-10-29：后验 + 硬闸挡下个案）
+
+- **`followthrough.gate_blocked_recent`**：高分被硬闸挡下样本列表（T+3 优先排序）；周报 Markdown / 邮件 / 控制台摘要固定一节。  
+- **`retrospective`**：「遗漏关注」纳入 **近失** 轨；CLI **`tea retrospective [--write]`**；菜单复盘工具 `8`。  
+- **自测**：`tea/tests/checks/followthrough.py` · `check_gate_blocked_recent`。
+
+### 观察池（2026-10-21：观察轨资格失效自动剔除）
+
+- **`watch_pool.ineligible_reason` / `prune_ineligible`**：观察轨须保持软否决或预审 PASS；启动待定轨须差分 ≤ `seed.near_miss_gap`；否则 `review` 与盘中 `scan_alerts` 前自动剔除。  
+- **配置**：`watch.auto_prune_ineligible`（默认 `true`）。  
+- **自测**：`tea/tests/checks/watch_pool.py`。
+
+### 运维（2026-10-15：市场天气缺口 cron 重试）
+
+- **`ops/weather-retry-cron.sh`**：交易日 09:25–15:10 探测 `sector_stale` / 数据缺口，有缺口时 `weather(refresh=True)`；日志 `logs/daily/weather_retry/`。  
+- **`ops/install-cron-linux.sh`**：默认增加 `*/3` 调用上述脚本（不自动 seed-plan）。  
+- **文档**：[`ops/11-weather-retry-scheduler.md`](ops/11-weather-retry-scheduler.md)。
+
+### 运维（2026-10-13：NAS 代码同步 + cron 五项）
+
+- **NAS 生产**：`rsync` 推代码（不覆盖 `data/`、`reports/`、`tea_config.json`、`logs/`）后执行 `ops/install-cron-linux.sh`（含 14:35 `winrate-scan`）。  
+- **补跑**：离线/重启错过盘中窗口时，在 NAS 上手动执行 `seed-plan-cron.sh` / `winrate-scan-cron.sh` / `review-cron.sh`（2026-10-13 已补）。  
+- **文档**：`ops/nas-deploy-private.md`（五项 cron + 本机仅 launchd 种子/复核）；`docs/ops/README.md` 补 `08-review-scheduler`；`project-state` 双机分工与日期。
+
+### 调度（2026-09-21：winrate-scan launchd 自动影子扫描）
+
+> 关联：B-P1-01；`seed-plan` 后 5 分钟自动跑 `winrate-scan --scheduled`，加速 rule vs winrate 对照样本。
+
+- **`scheduler.winrate_scan`**：默认工作日 **14:35**；`schedules.py` 注册 `com.tea.winrate-scan`。  
+- **`scheduled_winrate_scan`**：交易日 + 日去重（`winrate_scheduled_state.json`）；`winrate.scheduled_enabled` 可关。  
+- **CLI**：`tea winrate-scan --scheduled` / `--force`；菜单 4 仍可手动。  
+- **Ops**：`ops/winrate-scan-cron.sh`、`install-launchd-winrate-scan.sh`、并入 `install-launchd-all.sh` 与 `install-cron-linux.sh`。  
+- **日录**：`logs/daily/winrate/`；运维摘要邮件纳入 `winrate-scan` 心跳。  
+- **文档**：[`ops/10-winrate-scan-scheduler.md`](ops/10-winrate-scan-scheduler.md)。  
+- **自测**：`check_scheduled_winrate_scan`。
+
+### 通知（2026-09-15：种子扫描精简邮件）
+
+> 关联：F03 / F04；`seed-plan` 完成后 SMTP 通知，格式与胜率邮件一致（关键指标 + 详情见报告）。
+
+- **`send_seed_email`**：`seed.email.enabled`（默认开）+ `dedupe_per_day`（同日只发一封）+ `send_on_empty`（空仓也通知）。  
+- **正文**：`[买入]`/`[观察]`、共振/胜率/T+3 达标标记、裁决小结；不含归因/挂单价/触发条件。  
+- **配置**：`seed.email.*`、`paths.seed_email_state_file`。  
+- **自测**：`check_seed_email`。
+
+### 策略（2026-09-15：胜率选股 T+3 获利概率）
+
+> 关联：F05 / F11；`estimate_t3_up_prob` 按板块/阶段/涨幅桶估算 T+3>0，展示 + 可选硬闸。
+
+- **`followthrough.estimate_t3_up_prob`**：live 回填 n≥8 优先，否则 `winrate.t3_prob.fallback`；几何均值综合。  
+- **硬闸**：`winrate.t3_prob.gate_enabled` + `min_prob`（默认 35%）低于则降级观察。  
+- **展示**：胜率/种子控制台与邮件并列 `T+3获利 34% 门槛≥35%` + 因子明细。  
+- **落盘**：`winrate_t3_prob` / `winrate_t3_detail` 进 seed_records。  
+- **自测**：`check_winrate_t3_prob` · `check_winrate_result_display` 更新。
+
+### 通知（2026-09-15：胜率选股有候选发邮件）
+
+> 关联：F05；`winrate-scan` / 菜单 4 有可买或观察候选时 SMTP 通知；不写计划。
+
+- **`send_winrate_email`**：`winrate.email.enabled`（默认开）+ `dedupe_per_day`（**同 code 同日只发一封**，盘中新股票仍发）；正文与控制台一致（plain）。  
+- **配置**：`winrate.email.*`、`paths.winrate_email_state_file`。  
+- **自测**：`check_winrate_email`。
+
+### 展示（2026-09-15：双分制说明文字）
+
+> 关联：F04 / F05；展示层不改算法，共振 `6/9 门槛7`、胜率 `3/7 门槛≥3` 并列说明。
+
+- **种子/胜率控制台**：头部 `分制说明`；标的行共振与胜率双分对照；种子可买/观察展示胜率硬闸与归因。  
+- **格式化**：`format_resonance_score` / `format_winrate_score` 统一 `得分/满分 门槛` 文案。  
+- **周报**：`_fmt_pick_score` 同步新格式。
+
+### 展示（2026-09-15：胜率选股操作建议与 X/7 分制）
+
+> 关联：F05；与种子扫描 `[买入]`/`[观察]` 标签一致，胜率分显示为 `3/7`（满分 7）。
+
+- **控制台**：`format_winrate_result` 输出操作建议、硬闸原因、归因明细；胜率分 `score/7`。  
+- **落盘**：`winrate_scan` 可买标 `track=可买` 并写 `winrate_would_buy`。  
+- **周报**：胜率影子样本分显示 `胜率3/7`。  
+- **自测**：`tea/tests/checks/screening.py` · `check_winrate_result_display`。
+
+### 数据（2026-09-11：winrate scan_details sidecar + scan_at）
+
+> 关联：F05 / F11 / B-P1-01；VETO 漏斗可追溯、同日 rule vs winrate 时点对齐。
+
+- **scan_details**：`winrate_scan` 写入 `scan_details_{date}_winrate_{id}.json` sidecar（含 VETO 淘汰候选），不写主文件。  
+- **落盘**：`seed_records` 新增 `scan_at`（`YYYY-MM-DD HH:MM`，来自扫描 `result.at`）。  
+- **自测**：`tea/tests/checks/screening.py` 两则断言。
+
 ### 报告（2026-09-11：周报邮件精简摘要）
 
 > 关联：F17；手机邮件只看核心，完整 Markdown 落盘 `reports/WEEKLY_*.md`。

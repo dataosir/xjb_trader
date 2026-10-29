@@ -34,6 +34,7 @@ _pruned_categories: Set[str] = set()
 # 操作日录类别 → 默认同步写入的 logger 子名（相对 tea.*）
 DAILY_CATEGORIES: Dict[str, Tuple[str, ...]] = {
     "seed": ("scan", "data", "score", "veto", "ft"),
+    "winrate": ("scan", "data", "score", "veto", "ft"),
     "review": ("review", "ft"),
     "watch_alert": ("alert",),
     "weekly_email": ("weekly_email", "review"),

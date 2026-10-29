@@ -77,6 +77,8 @@
 | [`ops/06-watch-alert-scheduler.md`](ops/06-watch-alert-scheduler.md) | 观察池盘中提醒 launchd（每分钟 `watch-alert` + SMTP） |
 | [`ops/07-weekly-email-scheduler.md`](ops/07-weekly-email-scheduler.md) | 每周五选股周报邮件 launchd（`weekly-email` + SMTP） |
 | [`ops/08-review-scheduler.md`](ops/08-review-scheduler.md) | 盘后复核自动调度（工作日 15:01 `review --scheduled` + T+3 回填；`scheduler.*` 统一配置） |
+| [`ops/10-winrate-scan-scheduler.md`](ops/10-winrate-scan-scheduler.md) | 胜率影子扫描自动调度（工作日 14:35 `winrate-scan --scheduled` + 日去重；B-P1-01 对照加速） |
+| [`ops/11-weather-retry-scheduler.md`](ops/11-weather-retry-scheduler.md) | 市场天气缺口 cron 重试（每 3 分钟 `weather-retry-cron.sh`，仅刷新天气） |
 
 ---
 
@@ -91,6 +93,7 @@
 | [`archive/STRATEGY_ADJUSTMENT_2026-08-18.md`](archive/STRATEGY_ADJUSTMENT_2026-08-18.md) | 早期策略死锁修复 |
 | [`archive/CODE_REVIEW_2026-08-18.md`](archive/CODE_REVIEW_2026-08-18.md) | 代码评审纪要 |
 | [`archive/FACTOR_ATTRIB_2026-09-04.md`](archive/FACTOR_ATTRIB_2026-09-04.md) | 阶段 2 归因草稿（板块/影子桶/轨道；技术因子待补） |
-| [`archive/SHADOW_BUCKET_PLAN_2026-09-04.md`](archive/SHADOW_BUCKET_PLAN_2026-09-04.md) | 影子桶策略 Plan（**方案 0 已确认**：维持 2 周攒样本） |
+| [`archive/SHADOW_BUCKET_PLAN_2026-09-04.md`](archive/SHADOW_BUCKET_PLAN_2026-09-04.md) | 影子桶策略 Plan（方案 0→**方案 A 已启动** 2026-09-09；post-change 待 scorecard 验收） |
+| [`archive/EVIDENCE_SCORECARD_2026-10-29.md`](archive/EVIDENCE_SCORECARD_2026-10-29.md) | 证据周 scorecard 首份占位（NAS 断采 / Kill 触发 / 方案 A 待 n≥30） |
 
 现行 backlog 以 [`prd/05-roadmap-backlog.md`](prd/05-roadmap-backlog.md) 为准；归档不写新主文档。

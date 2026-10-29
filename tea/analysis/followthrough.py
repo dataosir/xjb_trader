@@ -162,7 +162,10 @@ def record_seed(entries: List[dict], cfg: Optional[Config] = None,
             "winrate_detail": e.get("winrate_detail"),
             "winrate_gate": e.get("winrate_gate"),
             "winrate_would_buy": e.get("winrate_would_buy"),
+            "winrate_t3_prob": e.get("winrate_t3_prob"),
+            "winrate_t3_detail": e.get("winrate_t3_detail"),
             "mode": e.get("mode", "rule"),
+            "scan_at": e.get("scan_at"),
             "scan_anchor": scan_anchor or e.get("scan_anchor"),
             "pick_sector_bk": e.get("pick_sector_bk"),
             "pick_sector_name": e.get("pick_sector_name"),
@@ -647,6 +650,57 @@ def mode_channel_stats(cfg: Optional[Config] = None) -> Dict[str, dict]:
     return out
 
 
+def gate_blocked_recent(cfg: Optional[Config] = None, since_ymd: Optional[str] = None,
+                        limit: int = 10) -> List[dict]:
+    """高分被硬闸挡下样本（`winrate_would_buy` 且 `winrate_gate`），供周报误杀复核。
+
+    优先展示 T+3 已回填且涨幅更高的行，便于对照「挡下后是否仍走强」。
+    """
+    cfg = cfg or load_config()
+    rows: List[dict] = []
+    for r in load_records(cfg):
+        if not r.get("winrate_would_buy") or not r.get("winrate_gate"):
+            continue
+        d = r.get("date") or ""
+        if since_ymd and d < since_ymd:
+            continue
+        t3 = r.get("chg_t3")
+        rows.append({
+            "date": d,
+            "code": r.get("code"),
+            "name": r.get("name"),
+            "mode": r.get("mode") or "rule",
+            "winrate_score": r.get("winrate_score"),
+            "winrate_gate": r.get("winrate_gate"),
+            "sector_rank": r.get("sector_rank") or r.get("pick_sector_rank"),
+            "chg_t3": t3,
+        })
+
+    def _sort_key(row: dict) -> tuple:
+        t3 = row.get("chg_t3")
+        return (t3 is not None, float(t3) if t3 is not None else -999.0, row.get("date") or "")
+
+    rows.sort(key=_sort_key, reverse=True)
+    return rows[: max(0, int(limit))]
+
+
+def format_gate_blocked_recent(cfg: Optional[Config] = None, since_ymd: Optional[str] = None,
+                               limit: int = 8) -> str:
+    """硬闸挡下高分样本的可读列表（控制台/邮件用）。"""
+    rows = gate_blocked_recent(cfg, since_ymd=since_ymd, limit=limit)
+    if not rows:
+        return ""
+    lines = ["硬闸挡下高分样本（只记录，不据此放宽）"]
+    for r in rows:
+        t3 = r.get("chg_t3")
+        t3_txt = f"T+3 {float(t3):+.1f}%" if t3 is not None else "T+3 —"
+        gate = str(r.get("winrate_gate") or "")[:28]
+        lines.append(
+            f"  {r.get('date')} {r.get('code')} {r.get('name')}  "
+            f"分{r.get('winrate_score')}  rank{r.get('sector_rank')}  {t3_txt}  {gate}")
+    return "\n".join(lines)
+
+
 def format_mode_channel_stats(cfg: Optional[Config] = None, compact: bool = False) -> str:
     """rule vs winrate 对照可读文案。"""
     st = mode_channel_stats(cfg)
@@ -803,3 +857,78 @@ def format_shadow_status(cfg: Optional[Config] = None) -> str:
     return (f"影子桶 T+3>0：{st['t3_up']}/{st['n_t3']} = {rate:.0%}"
             f"（目标 ≥{st['target']:.0%}，{flag}；已标 {st['n_tagged']}）"
             f"　{detail}")
+
+
+# ------------------------------------------------------------------ T+3 获利概率（胜率通道辅助）
+
+def _t3_rate_lookup(dim: str, bucket: str, attr: dict,
+                    cfg: Optional[Config] = None) -> Tuple[Optional[float], int, str]:
+    """查单维 T+3>0 比例：优先 live 回填（n≥min_samples），否则 config 默认。"""
+    cfg = cfg or load_config()
+    min_n = int(cfg.get("winrate.t3_prob.min_samples", 8))
+    live = (attr.get(dim) or {}).get(bucket) or {}
+    n = int(live.get("n") or 0)
+    rate = live.get("rate")
+    if n >= min_n and rate is not None:
+        return float(rate), n, "回填"
+    fb = (cfg.get("winrate.t3_prob.fallback") or {}).get(dim) or {}
+    fb_rate = fb.get(bucket)
+    if fb_rate is not None:
+        return float(fb_rate), 0, "默认"
+    total = attr.get("total_rate")
+    if total is not None:
+        return float(total), int(attr.get("total_n") or 0), "全样本"
+    return None, 0, "—"
+
+
+def _combine_t3_rates(rates: List[float], mode: str) -> Optional[float]:
+    if not rates:
+        return None
+    if mode == "min":
+        return min(rates)
+    prod = 1.0
+    for r in rates:
+        prod *= r
+    return prod ** (1.0 / len(rates))
+
+
+def estimate_t3_up_prob(ev: dict, cfg: Optional[Config] = None) -> dict:
+    """估算 T+3>0 获利概率（板块/阶段/涨幅桶几何均值，实证对照，非收益承诺）。
+
+    供胜率选股展示与可选硬闸；live 样本够时用 ``t3_attribution``，否则用
+    ``winrate.t3_prob.fallback``（来源 docs/archive/FACTOR_ATTRIB_2026-09-04）。
+    """
+    cfg = cfg or load_config()
+    attr = t3_attribution(cfg)
+    rank = (ev.get("sector") or {}).get("rank")
+    stage = (ev.get("stage") or {}).get("stage") or "-"
+    chg = (ev.get("quote") or {}).get("chg_pct")
+
+    factors: List[Tuple[str, str, str]] = [
+        ("rank", _t3_bucket_rank(rank), "板块"),
+        ("stage", str(stage), "阶段"),
+        ("chg", _t3_bucket_chg(chg), "涨幅"),
+    ]
+    rates: List[float] = []
+    parts: List[str] = []
+    for dim, bucket, label in factors:
+        rate, n, src = _t3_rate_lookup(dim, bucket, attr, cfg)
+        if rate is None:
+            continue
+        rates.append(rate)
+        src_note = f"{n}样本" if src == "回填" else src
+        parts.append(f"{label}{bucket} {rate:.0%}({src_note})")
+
+    combine = str(cfg.get("winrate.t3_prob.combine") or "geomean")
+    prob = _combine_t3_rates(rates, combine)
+    min_prob = float(cfg.get("winrate.t3_prob.min_prob", 0.35))
+    detail = "；".join(parts)
+    if prob is not None:
+        detail += f" → 综合{prob:.0%}（{'几何均值' if combine != 'min' else '保守取低'}，非收益承诺）"
+    return {
+        "prob": round(prob, 4) if prob is not None else None,
+        "min_prob": min_prob,
+        "parts": parts,
+        "detail": detail or "T+3 因子不足",
+        "combine": combine,
+    }
