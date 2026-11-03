@@ -237,6 +237,18 @@ class FakeMarket(Market):
     def get_limit_up_stats(self, date: Optional[str] = None) -> dict:
         return dict(self.limit_up)
 
+    def get_sector_fund_flow_top(self, force: bool = False, topn: Optional[int] = None) -> List[dict]:
+        rows = [
+            {"bk": "BK1200", "name": "电力设备", "chg": 0.31,
+             "main_net_inflow": 3431974656.0, "rank": 1},
+            {"bk": "BK1033", "name": "电池", "chg": 1.63,
+             "main_net_inflow": 2531912960.0, "rank": 2},
+            {"bk": "BK1303", "name": "锂电池", "chg": 0.68,
+             "main_net_inflow": 1047369216.0, "rank": 3},
+        ]
+        n = int(topn or 3)
+        return rows[:n]
+
 
 # ==================================================================== 各项检查
 
@@ -1374,6 +1386,15 @@ def check_sentiment(t: Suite, cfg: Config, mk: FakeMarket) -> dict:
     t.ok("单行天气摘要复用 format_sentiment_summary",
          "\033[" in sent_mod.format_sentiment_summary(w, style="console")
          and "51.0" in sent_mod.format_sentiment_summary(w, style="console"))
+    w_ff = dict(w, fund_flow_top=[
+        {"name": "电力设备", "main_net_inflow": 3431974656.0},
+        {"name": "电池", "main_net_inflow": 2531912960.0},
+    ])
+    plain_ff = sent_mod.format_weather(w_ff, style="plain")
+    t.ok("天气屏含资金流向行", "资金流向：" in plain_ff and "电力设备+34.32亿" in plain_ff, plain_ff)
+    t.ok("get_sentiment 带 fund_flow_top",
+         isinstance(sent.get("fund_flow_top"), list) and len(sent.get("fund_flow_top") or []) >= 1,
+         str(sent.get("fund_flow_top")))
     return sent
 
 

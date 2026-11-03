@@ -244,7 +244,14 @@ def check_seed_email(t: Suite, cfg: Config) -> None:
         "at": "2026-09-15 14:30",
         "scan_id": "seed-mail-test",
         "verdict": VERDICT_PENDING,
-        "sentiment": {"score": 37, "stance": "空仓", "cycle": "禁止新开"},
+        "sentiment": {
+            "score": 37, "stance": "空仓", "cycle": "禁止新开",
+            "fund_flow_top": [
+                {"name": "电力设备", "main_net_inflow": 3431974656.0},
+                {"name": "电池", "main_net_inflow": 2531912960.0},
+                {"name": "锂电池", "main_net_inflow": 1047369216.0},
+            ],
+        },
         "sectors": [{"name": "风电设备", "rank": 3}],
         "buyable": [],
         "watch": [{
@@ -291,6 +298,8 @@ def check_seed_email(t: Suite, cfg: Config) -> None:
 
     body = seed_report.seed_email_body(result, cfg)
     t.ok("正文无 ANSI", "\033[" not in body)
+    t.ok("正文含市场天气", "道 · 市场天气" in body and "情绪分" in body and "上证" in body)
+    t.ok("正文含资金流向前三", "资金流向：" in body and "电力设备+34.32亿" in body)
     t.ok("正文含操作建议", "【观察】" in body and "603092" in body)
     t.ok("正文含关键分", "共振" in body and "胜率" in body and "T+3" in body)
     t.ok("正文精简", "分制说明" not in body and "触发：" not in body and "裁决：" not in body)

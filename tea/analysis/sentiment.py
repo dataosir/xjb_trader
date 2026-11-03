@@ -1,6 +1,6 @@
 """道 — 市场天气：情绪评分 / 周期判定 / 交易姿态 / 冰点降仓。
 
-数据并行 3 路：大盘指数（涨跌幅+MA20）、热点板块前 20、情绪硬指标（涨跌家数+最高连板）。
+数据并行 4 路：大盘指数（涨跌幅+MA20）、热点板块前 20、情绪硬指标（涨跌家数+最高连板）、板块主力净流入 TopN。
 结果内存缓存 120 秒，同会话连评多只票不重复拉行情。
 """
 from __future__ import annotations
@@ -36,8 +36,14 @@ def fetch_raw(market: Market, io: Any = None, cfg: Optional[Config] = None) -> d
     """并行采集三路原始数据，单路失败不影响整体（降级为 None）。"""
     cfg = cfg or load_config()
     fetch_timeout = float(cfg.get("sentiment.fetch_timeout_sec", 45.0))
-    out: Dict[str, Any] = {"index": {}, "sectors": [], "breadth": {}, "limit_up": {}, "errors": []}
-    labels = {"index": "大盘指数", "sectors": "板块排名", "hard": "涨跌家数/涨停池"}
+    out: Dict[str, Any] = {
+        "index": {}, "sectors": [], "breadth": {}, "limit_up": {},
+        "fund_flow_top": [], "errors": [],
+    }
+    labels = {
+        "index": "大盘指数", "sectors": "板块排名", "hard": "涨跌家数/涨停池",
+        "fund_flow": "板块资金流向",
+    }
     t0 = time.time()
 
     def _index():
@@ -49,10 +55,17 @@ def fetch_raw(market: Market, io: Any = None, cfg: Optional[Config] = None) -> d
     def _hard():
         return market.get_breadth(), market.get_limit_up_stats()
 
-    with ThreadPoolExecutor(max_workers=3) as ex:
+    def _fund_flow():
+        topn = int(cfg.get("market.sector_fund_flow_topn", 3))
+        return market.get_sector_fund_flow_top(topn=topn)
+
+    with ThreadPoolExecutor(max_workers=4) as ex:
         f_idx, f_sec, f_hard = ex.submit(_index), ex.submit(_sectors), ex.submit(_hard)
+        f_ff = ex.submit(_fund_flow)
         # 在主线程按固定顺序收结果再打印，避开三个线程抢着往屏上写。
-        for name, fut in (("index", f_idx), ("sectors", f_sec), ("hard", f_hard)):
+        for name, fut in (
+            ("index", f_idx), ("sectors", f_sec), ("hard", f_hard), ("fund_flow", f_ff),
+        ):
             ch_t0 = time.time()
             try:
                 res = fut.result(timeout=fetch_timeout)
@@ -88,12 +101,15 @@ def fetch_raw(market: Market, io: Any = None, cfg: Optional[Config] = None) -> d
                 out["index"] = res or {}
             elif name == "sectors":
                 out["sectors"] = res or []
-            else:
+            elif name == "hard":
                 out["breadth"], out["limit_up"] = res[0] or {}, res[1] or {}
+            else:
+                out["fund_flow_top"] = res or []
     if out["errors"]:
         _LOG.warning("市场天气采集存在缺口: %s", "; ".join(out["errors"]))
     # 板块排名是否来自磁盘兜底（可能是昨日排序），透传出去给天气屏提示。
     out["sector_stale"] = bool(getattr(market, "sector_stale", False))
+    out["fund_flow_stale"] = bool(getattr(market, "fund_flow_stale", False))
     return out
 
 
@@ -299,7 +315,7 @@ def get_sentiment(market: Optional[Market] = None, cfg: Optional[Config] = None,
         cached["cached"] = True
         return cached
 
-    utils.tell(io, "  ⏳ 正在采集市场天气（指数 / 板块 / 涨停）...")
+    utils.tell(io, "  ⏳ 正在采集市场天气（指数 / 板块 / 涨停 / 资金流向）...")
     t0 = time.time()
     mk = market or Market(cfg)
     raw = fetch_raw(mk, io, cfg)
@@ -331,6 +347,17 @@ def get_sentiment(market: Optional[Market] = None, cfg: Optional[Config] = None,
         "avg5": sec.get("avg5"),
         "hot_sectors": [{"name": s["name"], "chg": s["chg"], "rank": s["rank"]} for s in sec.get("hot_sectors", [])],
         "top5": [{"name": s["name"], "chg": s["chg"]} for s in sec.get("top5", [])],
+        "fund_flow_top": [
+            {
+                "name": s.get("name"),
+                "bk": s.get("bk"),
+                "chg": s.get("chg"),
+                "main_net_inflow": s.get("main_net_inflow"),
+                "rank": s.get("rank"),
+            }
+            for s in (raw.get("fund_flow_top") or [])
+        ],
+        "fund_flow_stale": raw.get("fund_flow_stale", False),
         "deltas": scored["deltas"],
         "notes": cls["notes"],
         "errors": raw.get("errors", []),
@@ -450,6 +477,23 @@ def format_hot_sector(x: dict, style: str = "console") -> str:
     return f"{name}{chg_s}"
 
 
+def format_fund_flow_sector(x: dict, style: str = "console") -> str:
+    """单个板块主力净流入：名称 + 净流入（亿/万，正数带 +）。"""
+    name = x.get("name") or "?"
+    inflow = x.get("main_net_inflow")
+    if inflow is None:
+        flow_s = "—"
+    elif inflow >= 0:
+        flow_s = f"+{utils.money(inflow)}"
+    else:
+        flow_s = utils.money(inflow)
+    if style == "console":
+        return utils.hl(name, utils.COLOR_INFO) + utils.hl(flow_s, utils.sign_color(inflow))
+    if style == "md":
+        return f"**{name}** **{flow_s}**"
+    return f"{name}{flow_s}"
+
+
 def format_sentiment_summary(s: Optional[dict], style: str = "console") -> str:
     """单行天气摘要（种子结果头 / 报告复用）。"""
     if not s:
@@ -536,6 +580,9 @@ def format_weather(s: dict, style: str = "console") -> str:
     if s.get("sector_stale"):
         msg = "⚠️  板块排名为磁盘兜底缓存（可能是昨日排序，板块强度不计入共振分，建议稍后重跑）"
         lines.append(em(msg, utils.COLOR_WARN, style) if style != "plain" else msg)
+    if s.get("fund_flow_stale"):
+        msg = "· 板块资金流向为缓存回退值（实时取数失败，非实时）"
+        lines.append(em(msg, utils.COLOR_WARN, style) if style != "plain" else msg)
     if s.get("hot_sectors"):
         hot = "  ".join(format_hot_sector(x, style) for x in s["hot_sectors"][:6])
         prefix = "热点："
@@ -545,6 +592,16 @@ def format_weather(s: dict, style: str = "console") -> str:
             lines.append(f"- **热点：** {hot}")
         else:
             lines.append(f"{prefix}{hot}")
+    ff_list = s.get("fund_flow_top") or []
+    if ff_list:
+        ff = "  ".join(format_fund_flow_sector(x, style) for x in ff_list)
+        prefix = "资金流向："
+        if style == "console":
+            lines.append(em(prefix, utils.COLOR_INFO, style) + ff)
+        elif style == "md":
+            lines.append(f"- **资金流向：** {ff}")
+        else:
+            lines.append(f"{prefix}{ff}")
     for n in s.get("notes", []):
         msg = f"· {n}"
         lines.append(em(msg, utils.COLOR_WARN, style) if style != "plain" else msg)
@@ -563,7 +620,10 @@ def format_weather(s: dict, style: str = "console") -> str:
 
 # ------------------------------------------------------------------ 数据缺口横幅
 
-_ERR_LABEL = {"index": "大盘指数", "sectors": "板块排名", "hard": "涨跌家数/涨停池"}
+_ERR_LABEL = {
+    "index": "大盘指数", "sectors": "板块排名", "hard": "涨跌家数/涨停池",
+    "fund_flow": "板块资金流向",
+}
 
 
 def data_gap_summary(s: dict, net_line: str = "") -> List[str]:

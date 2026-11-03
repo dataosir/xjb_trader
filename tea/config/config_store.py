@@ -60,6 +60,7 @@ DEFAULTS: Dict[str, Any] = {
         "seed_trace_md": "SEED_TRACE.md",
         "accumulator_file": "accumulator.jsonl",
         "sector_cache_file": ".tea_sector_cache.json",
+        "sector_fund_flow_cache_file": ".tea_sector_fund_flow_cache.json",
         # 无备源的东财接口（涨跌家数/涨停池）磁盘兜底缓存：实时取数失败时回退最近值。
         "breadth_cache_file": ".tea_breadth_cache.json",
         "ztpool_cache_file": ".tea_ztpool_cache.json",
@@ -93,6 +94,10 @@ DEFAULTS: Dict[str, Any] = {
         "index_kline_limit": 25,
         "sector_fs": "m:90+t:2",
         "sector_fields": "f3,f12,f14,f104,f105",
+        "sector_fund_flow_fields": "f3,f12,f14,f62",
+        "sector_fund_flow_topn": 3,
+        "sector_fund_flow_max_pages": 1,
+        "sector_fund_flow_retries": 3,
         # clist 硬限 100 行/页（pz 填再大也不多给），下面的上限是「最多翻几页」。
         # 实际翻几页看接口自报的 data.total，抽到够数就停。
         "sector_max_pages": 12,
@@ -192,6 +197,8 @@ DEFAULTS: Dict[str, Any] = {
         "quote_cache_sec": 20,
         "kline_cache_sec": 300,
         "sector_cache_sec": 600,
+        "sector_fund_flow_cache_sec": 600,
+        "sector_fund_flow_disk_cache_hours": 6.0,
         "sector_disk_cache_hours": 24,
         "member_cache_sec": 600,
         "breadth_cache_sec": 120,

@@ -9,7 +9,7 @@ import sys
 from typing import Any, Dict, List, Optional
 
 from tea.config.config_store import Config, load_config
-from tea.analysis.sentiment import format_sentiment_summary
+from tea.analysis.sentiment import format_sentiment_summary, format_weather
 from tea.core import notify, utils
 from tea.data.indicators import format_bollinger
 from . import preflight
@@ -1011,10 +1011,16 @@ def mark_seed_email_sent(cfg: Optional[Config] = None, meta: Optional[dict] = No
 
 
 def format_seed_email_digest(result: dict, cfg: Optional[Config] = None) -> str:
-    """种子邮件精简摘要：单行候选 + 总结；详情见 SEED 报告或 seed-show。"""
+    """种子邮件摘要：完整市场天气（plain）+ 单行候选 + 总结；详情见 SEED 报告或 seed-show。"""
     cfg = cfg or load_config()
     at = result.get("at") or utils.now().strftime("%Y-%m-%d %H:%M")
     lines = [f"TEA 种子扫描  {at}"]
+
+    sent = result.get("sentiment")
+    if isinstance(sent, dict) and sent:
+        lines.append("")
+        lines.append(format_weather(sent, style="plain"))
+        lines.append("")
 
     buyable = result.get("buyable") or []
     watch = result.get("watch") or []

@@ -50,6 +50,7 @@ class Market:
         # 上次板块排名是否来自磁盘兜底（实时取数失败）。板块排名直接影响选股，
         # 种子扫描据此给用户醒目告警，避免拿昨天的板块排序选今天的股。
         self.sector_stale = False
+        self.fund_flow_stale = False
 
     # -------------------------------------------------- clist 翻页
     def _retry_scope(self, key: str, default: int) -> "ContextManager[Any]":
@@ -191,6 +192,61 @@ class Market:
         self._sector_disk_save(sectors)
         self.sector_stale = False
         return self.cache.put(key, sectors)
+
+    def get_sector_fund_flow_top(self, force: bool = False,
+                                 topn: Optional[int] = None) -> List[dict]:
+        """行业板块主力净流入 TopN（东财 clist fid=f62，单位：元）。"""
+        topn = int(topn or self.cfg.get("market.sector_fund_flow_topn", 3))
+        key = "sector_fund_flow"
+        ttl = float(self.cfg.get("market.sector_fund_flow_cache_sec", 600))
+        if not force:
+            hit = self.cache.get(key, ttl)
+            if hit:
+                self.f.stats["cache_hits"] += 1
+                return hit[:topn]
+        try:
+            with self._retry_scope("sector_fund_flow_retries", 3):
+                rows = self._fetch_sector_fund_flow_top(topn)
+        except MarketError as exc:
+            disk = self._kv_disk_load(
+                "sector_fund_flow",
+                float(self.cfg.get("market.sector_fund_flow_disk_cache_hours", 6.0)),
+            )
+            if disk is not None:
+                self.fund_flow_stale = True
+                logger_mod.get_logger("data").warning(
+                    "板块资金流向实时取数失败，回退磁盘缓存：%s", exc)
+                cached = disk if isinstance(disk, list) else disk.get("sectors") or []
+                return self.cache.put(key, [{**s, "stale": True} for s in cached])[:topn]
+            raise
+        self._kv_disk_save("sector_fund_flow", {"sectors": rows})
+        self.fund_flow_stale = False
+        return self.cache.put(key, rows)
+
+    def _fetch_sector_fund_flow_top(self, topn: int) -> List[dict]:
+        pages = int(self.cfg.get("market.sector_fund_flow_max_pages", 1))
+        rows = self._clist_all({
+            "po": 1, "np": 1, "fltt": 2, "invt": 2,
+            "fs": self.cfg.get("market.sector_fs"),
+            "fields": self.cfg.get("market.sector_fund_flow_fields"),
+            "fid": "f62",
+            "ut": "b2884a393a59ad64002292a3e90d46a5",
+        }, pages)
+        sectors: List[dict] = []
+        for d in rows:
+            inflow = utils.to_float(d.get("f62"))
+            if inflow is None:
+                continue
+            sectors.append({
+                "bk": str(d.get("f12") or ""),
+                "name": d.get("f14") or "",
+                "chg": utils.to_float(d.get("f3")),
+                "main_net_inflow": inflow,
+            })
+        sectors.sort(key=lambda x: x["main_net_inflow"], reverse=True)
+        for i, s in enumerate(sectors[:topn], 1):
+            s["rank"] = i
+        return sectors[:topn]
 
     def _fetch_sector_ranking(self) -> List[dict]:
         pages = int(self.cfg.get("market.sector_max_pages", 12))

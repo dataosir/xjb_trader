@@ -4,6 +4,18 @@
 
 ## [Unreleased]
 
+### 道 · 市场天气 / 种子邮件（2026-11-03：板块主力净流入 Top3）
+
+- **`Market.get_sector_fund_flow_top`**：东财 clist `fid=f62` 拉行业板块主力净流入，默认 Top3；6h 磁盘兜底。  
+- **`fetch_raw` / `format_weather`**：天气屏与种子邮件 plain 正文增加 `资金流向：` 行（与涨幅热点并列，不参与情绪分）。  
+- **配置**：`market.sector_fund_flow_*`；缓存文件 `paths.sector_fund_flow_cache_file`。  
+- **自测**：`check_sentiment` · `check_seed_email` 断言资金流向行。
+
+### 通知（2026-11-03：种子邮件含完整市场天气）
+
+- **`format_seed_email_digest`**：正文前置 `format_weather(sentiment, style="plain")`（与 CLI `weather` / 种子扫描控制台同屏）。  
+- **自测**：`check_seed_email` 断言含「道 · 市场天气」与上证行。
+
 ### 文档（2026-10-29：证据债 + INDEX/F03 对齐方案 A）
 
 - **`project-state`**：更新至 2026-10-29；NAS 断采、`only_on_issues`、docs rsync、Ops-2 首份占位。  
@@ -52,7 +64,7 @@
 > 关联：F03 / F04；`seed-plan` 完成后 SMTP 通知，格式与胜率邮件一致（关键指标 + 详情见报告）。
 
 - **`send_seed_email`**：`seed.email.enabled`（默认开）+ `dedupe_per_day`（同日只发一封）+ `send_on_empty`（空仓也通知）。  
-- **正文**：`[买入]`/`[观察]`、共振/胜率/T+3 达标标记、裁决小结；不含归因/挂单价/触发条件。  
+- **正文**：`format_weather(plain)` + `[买入]`/`[观察]`、共振/胜率/T+3 达标标记、裁决小结；不含归因/挂单价/触发条件。  
 - **配置**：`seed.email.*`、`paths.seed_email_state_file`。  
 - **自测**：`check_seed_email`。
 
