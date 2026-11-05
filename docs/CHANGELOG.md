@@ -6,6 +6,7 @@
 
 ### 运维
 
+- **`ops/12-handoff-2026-11-05-nas-sync.md`**：本机修复 push 后的 NAS 同步验收清单 + 后续 AI 跟进（P2 限频/摘要增强待 Plan）。
 - **`ops/_log-daily.sh` · `error_log_append`**：修正 Python argv（source/正文曾颠倒），cron 失败写入 `error.log` 时恢复 `[weather-retry-cron]` 等来源与完整说明。
 
 ### 道 · 市场天气

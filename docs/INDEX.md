@@ -80,6 +80,7 @@
 | [`ops/08-review-scheduler.md`](ops/08-review-scheduler.md) | 盘后复核自动调度（工作日 15:01 `review --scheduled` + T+3 回填；`scheduler.*` 统一配置） |
 | [`ops/10-winrate-scan-scheduler.md`](ops/10-winrate-scan-scheduler.md) | 胜率影子扫描自动调度（工作日 14:35 `winrate-scan --scheduled` + 日去重；B-P1-01 对照加速） |
 | [`ops/11-weather-retry-scheduler.md`](ops/11-weather-retry-scheduler.md) | 市场天气缺口 cron 重试（每 3 分钟 `weather-retry-cron.sh`，仅刷新天气） |
+| [`ops/12-handoff-2026-11-05-nas-sync.md`](ops/12-handoff-2026-11-05-nas-sync.md) | 交接：2026-11-05 error_log / fund_flow 修复后 NAS 同步与 AI 跟进清单 |
 
 ---
 

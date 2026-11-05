@@ -12,7 +12,7 @@
 | 产品 | XJB_TRADE（TEA）— A 股交易准入引擎 |
 | 代码版本 | `1.0.0`（`tea.__version__`） |
 | 文档框架 | 一人公司全栈：`prd` / `tech` / `ops` + CHANGELOG + 本文件；**清单权威源** `docs/INDEX.md` |
-| 更新日期 | 2026-11-03 |
+| 更新日期 | 2026-11-05 |
 
 ---
 
@@ -68,7 +68,8 @@
 2. **方案 A 已启动**（rank 5→3）：攒 post-change 样本；盯 rank≤3 T+3、新闸后可买 n≥10；~09-18 复盘对照。归因见 `archive/FACTOR_ATTRIB_2026-09-04.md`。  
 3. 低吸：空池只读 diag；`lowbuy` 回填 ≥30 前不上买入。  
 4. **Ops-2（已建）**：每周日填 [`ops/04-evidence-scorecard.md`](ops/04-evidence-scorecard.md)；首份占位 [`archive/EVIDENCE_SCORECARD_2026-10-29.md`](archive/EVIDENCE_SCORECARD_2026-10-29.md)（NAS 断采 + 方案 A 待验收）。  
-5. **NAS 运维（2026-10-28 排查）**：交易日 **09:00 前在线**（覆盖 14:30–15:10）；`/vol1` 满盘会截断 docs rsync；`ops_summary.only_on_issues=true` 时全绿日不发运维信 — 与 DEFAULTS 不一致时本机改 config，非改闸。
+5. **NAS 运维（2026-10-28 排查）**：交易日 **09:00 前在线**（覆盖 14:30–15:10）；`/vol1` 满盘会截断 docs rsync；`ops_summary.only_on_issues=true` 时全绿日不发运维信 — 与 DEFAULTS 不一致时本机改 config，非改闸。  
+6. **NAS 同步交接（2026-11-05）**：本机已 push `error_log_append` / `fund_flow` 守卫等；回家后在 NAS 执行 [`ops/12-handoff-2026-11-05-nas-sync.md`](ops/12-handoff-2026-11-05-nas-sync.md) §2，填 §6 验收表。
 
 ---
 
