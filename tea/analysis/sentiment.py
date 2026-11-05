@@ -33,7 +33,7 @@ _LOG = logger_mod.get_logger("data")
 # ------------------------------------------------------------------ 采集
 
 def fetch_raw(market: Market, io: Any = None, cfg: Optional[Config] = None) -> dict:
-    """并行采集三路原始数据，单路失败不影响整体（降级为 None）。"""
+    """并行采集四路原始数据，单路失败不影响整体（降级为 None）。"""
     cfg = cfg or load_config()
     fetch_timeout = float(cfg.get("sentiment.fetch_timeout_sec", 45.0))
     out: Dict[str, Any] = {
@@ -55,17 +55,26 @@ def fetch_raw(market: Market, io: Any = None, cfg: Optional[Config] = None) -> d
     def _hard():
         return market.get_breadth(), market.get_limit_up_stats()
 
+    has_fund_flow = callable(getattr(market, "get_sector_fund_flow_top", None))
+
     def _fund_flow():
         topn = int(cfg.get("market.sector_fund_flow_topn", 3))
         return market.get_sector_fund_flow_top(topn=topn)
 
     with ThreadPoolExecutor(max_workers=4) as ex:
         f_idx, f_sec, f_hard = ex.submit(_index), ex.submit(_sectors), ex.submit(_hard)
-        f_ff = ex.submit(_fund_flow)
+        f_ff = ex.submit(_fund_flow) if has_fund_flow else None
         # 在主线程按固定顺序收结果再打印，避开三个线程抢着往屏上写。
         for name, fut in (
             ("index", f_idx), ("sectors", f_sec), ("hard", f_hard), ("fund_flow", f_ff),
         ):
+            if fut is None:
+                if name == "fund_flow":
+                    msg = "旧版 Market（缺少 get_sector_fund_flow_top），请同步 tea 后重跑"
+                    out["errors"].append(f"fund_flow: {msg}")
+                    _LOG.warning("市场天气 %s 跳过: %s", labels[name], msg)
+                    utils.tell(io, f"    · {labels[name]} 跳过（{msg}）")
+                continue
             ch_t0 = time.time()
             try:
                 res = fut.result(timeout=fetch_timeout)

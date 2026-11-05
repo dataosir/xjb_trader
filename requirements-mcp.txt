@@ -1,0 +1,2 @@
+# TEA MCP Server（stdio）；与 enterprise-kb-py 对齐 mcp 2.x
+mcp>=2.0,<3

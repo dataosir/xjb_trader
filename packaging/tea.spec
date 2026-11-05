@@ -126,6 +126,14 @@ HIDDEN = [
     "tea.runtime",
     "tea.runtime.cli",
     "tea.runtime.runner",
+    # MCP（独立 stdio Server，动态入口 scripts/mcp_tea_server.py）
+    "tea.mcp",
+    "tea.mcp.handlers",
+    "tea.mcp.health",
+    "tea.mcp.result",
+    "tea.mcp.sanitize",
+    "tea.mcp.server",
+    "tea.mcp.tools",
     # 筛选与风控
     "tea.screening",
     "tea.screening.gates",

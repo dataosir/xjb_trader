@@ -58,6 +58,7 @@
 | [`tech/00-engineering-standards.md`](tech/00-engineering-standards.md) | 工程规范 + 铁律摘要 | tech/00 |
 | [`tech/01-architecture.md`](tech/01-architecture.md) | 分层 / 数据流 / 包↔PRD | tech/01 |
 | [`tech/02-api-specs.md`](tech/02-api-specs.md) | CLI / 模块调用契约 | tech/02 |
+| [`tech/MCP.md`](tech/MCP.md) | MCP Server（stdio）只读 `tea_*` Tools | tech/MCP |
 | [`tech/03-db-schema.md`](tech/03-db-schema.md) | JSON/JSONL 持久化 | tech/03 |
 
 ---

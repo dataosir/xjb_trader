@@ -4,6 +4,21 @@
 
 ## [Unreleased]
 
+### 运维
+
+- **`ops/_log-daily.sh` · `error_log_append`**：修正 Python argv（source/正文曾颠倒），cron 失败写入 `error.log` 时恢复 `[weather-retry-cron]` 等来源与完整说明。
+
+### 道 · 市场天气
+
+- **`fetch_raw`**：旧版 `Market` 无 `get_sector_fund_flow_top` 时跳过资金流向路并提示同步 tea，不再抛 AttributeError。
+
+### MCP（P0：独立 stdio Server）
+
+- **`tea/mcp/`** + **`scripts/mcp_tea_server.py`**：只读 `tea_health`、`tea_weather`、`tea_seed_show`、`tea_status`、`tea_followthrough`、`tea_watch_summary`、`tea_tools_catalog`；JSON 契约与 enterprise-kb 内嵌 `tea_*` 对齐。  
+- **文档**：`docs/tech/MCP.md`；可选依赖 `pip install -r requirements-mcp.txt`。  
+- **测试**：`tests/test_mcp_tools.py`（unittest，不依赖行情网）。  
+- **打包**：`packaging/tea.spec` 补 `tea.mcp.*` hiddenimports（selftest 断言）。
+
 ### 道 · 市场天气 / 种子邮件（2026-11-03：板块主力净流入 Top3）
 
 - **`Market.get_sector_fund_flow_top`**：东财 clist `fid=f62` 拉行业板块主力净流入，默认 Top3；6h 磁盘兜底。  

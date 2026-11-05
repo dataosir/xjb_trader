@@ -34,7 +34,8 @@ error_log_append() {
         echo "error_log_append: PY not set" >&2
         return 1
     fi
-    "$PY" -c "import sys; from tea.core.logger import append_error_log; append_error_log(sys.argv[2], source=sys.argv[1])" _ "$source" "$*"
+    # argv[1]=source, argv[2:]=message（勿用占位符 _，否则 source 会变成 [_]、正文丢失）
+    "$PY" -c "import sys; from tea.core.logger import append_error_log; append_error_log(' '.join(sys.argv[2:]), source=sys.argv[1])" "$source" "$@"
 }
 
 # launchd stderr 增量同步到 logs/error.log（cron 失败时可顺带扫 stderr）
