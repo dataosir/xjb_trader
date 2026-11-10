@@ -2,6 +2,10 @@
 
 从历史种子记录（seed_records.jsonl）按 阶段×档位×轨道 聚合 T+1 胜率
 （T+1 涨幅 ≥3% 计为赢），样本 ≥8 才有效；用于种子排序与半仓系数调整。
+
+归因统计只吃 ``data_status = valid`` 的样本（见 ``record_status``）：2026-08 之前
+落盘的结构没有 pass_threshold / scoring_dims / mode，参与归因只会让「过没过线」
+无法复核。这些旧样本标 ``legacy`` 后仍保留行情回填值，但不进分子分母。
 """
 from __future__ import annotations
 
@@ -22,6 +26,78 @@ def records_path(cfg: Optional[Config] = None) -> str:
 
 def load_records(cfg: Optional[Config] = None) -> List[dict]:
     return utils.read_jsonl(records_path(cfg))
+
+
+#: 结构性字段缺失（gate 门槛 / 通道标记）的样本视为无效：它们来自 2026-08 之前的
+#: 落盘结构，没有 pass_threshold、scoring_dims、mode，参与归因只会让「过没过线」
+#: 无法复核。数据本身留着（T+N 回填是真实行情），只是统计时不进分子分母。
+STATUS_VALID = "valid"
+STATUS_LEGACY = "legacy"
+
+#: 各周期涨幅字段 → 对应的「收盘 > 阈值」成败标记。
+_HORIZON_RESULTS = (("next_chg", "result_t1"), ("chg_t2", "result_t2"),
+                    ("chg_t3", "result_t3"), ("chg_t5", "result_t5"))
+
+
+def record_status(r: dict) -> str:
+    """样本是否可用于归因：只认显式 data_status，缺省视为 valid。
+
+    不在读取时按结构字段推断：新增字段是渐进的，缺字段不等于样本失效；
+    失效只由维护动作显式标记（见 docs/CHANGELOG「失效历史样本」）。
+    """
+    return str(r.get("data_status") or STATUS_VALID)
+
+
+def load_valid_records(cfg: Optional[Config] = None) -> List[dict]:
+    """只取有效性为 valid 的样本（归因/统计用）。"""
+    return [r for r in load_records(cfg) if record_status(r) == STATUS_VALID]
+
+
+def data_health(cfg: Optional[Config] = None) -> dict:
+    """样本健康度：总条数、失效条数、各周期已回填数、与口径不一致的条数。"""
+    recs = load_records(cfg)
+    legacy = [r for r in recs if record_status(r) == STATUS_LEGACY]
+    valid = [r for r in recs if record_status(r) == STATUS_VALID]
+    out = {"total": len(recs), "valid": len(valid), "legacy": len(legacy),
+           "legacy_range": None, "pending": {}, "missing_result": {}}
+    if legacy:
+        dates = sorted(str(r.get("date")) for r in legacy)
+        out["legacy_range"] = (dates[0], dates[-1])
+    for field, flag in _HORIZON_RESULTS:
+        out["pending"][field] = sum(1 for r in valid if r.get(field) is None)
+        out["missing_result"][flag] = sum(
+            1 for r in valid if r.get(field) is not None and r.get(flag) is None)
+    out["pending_all"] = {f: sum(1 for r in recs if r.get(f) is None)
+                          for f, _ in _HORIZON_RESULTS}
+    return out
+
+
+def horizon_winrates(cfg: Optional[Config] = None) -> Dict[str, dict]:
+    """T+1/T+2/T+3/T+5 同口径（收盘 > 0）胜率对照，外加原 result（T+1 ≥3%）。
+
+    result 是老的跟涨经验口径（+3% 才算赢），与归因用的「涨了没有」不是一回事，
+    并排给出才能看出「是选错了票」还是「只是没到 +3%」。
+    """
+    cfg = cfg or load_config()
+    pool = load_valid_records(cfg)
+    out: Dict[str, dict] = {}
+    for field, flag in _HORIZON_RESULTS:
+        n = up = 0
+        for r in pool:
+            st = r.get(flag)
+            if st not in ("win", "loss"):
+                continue
+            n += 1
+            up += 1 if st == "win" else 0
+        out[field] = {"n": n, "up": up, "rate": (up / n) if n else None}
+    n = w = 0
+    for r in pool:
+        if r.get("result") not in ("win", "loss"):
+            continue
+        n += 1
+        w += 1 if r["result"] == "win" else 0
+    out["result_t1_pct3"] = {"n": n, "up": w, "rate": (w / n) if n else None}
+    return out
 
 
 # 轨道优先级：同一天同一只票按「更接近可成交」的轨道保留。早盘先以观察/启动待定
@@ -136,6 +212,7 @@ def record_seed(entries: List[dict], cfg: Optional[Config] = None,
             "stage": e.get("stage"), "tier": e.get("tier"), "track": e.get("track"),
             "chg_pct": e.get("chg_pct"), "total_score": e.get("total_score"),
             "pass_threshold": e.get("pass_threshold"),
+            "core_score": e.get("core_score"), "core_threshold": e.get("core_threshold"),
             "identity_tier": e.get("identity_tier"), "identity_score": e.get("identity_score"),
             "sector_name": e.get("sector_name"), "sector_rank": e.get("sector_rank"),
             "sector_chg": e.get("sector_chg"),
@@ -175,6 +252,8 @@ def record_seed(entries: List[dict], cfg: Optional[Config] = None,
                                e.get("stage"), e.get("sector_rank"),
                                e.get("pick_sector_rank"))),
             "close": e.get("price"), "next_chg": None, "result": None,
+            "result_t1": None, "result_t2": None, "result_t3": None, "result_t5": None,
+            "data_status": STATUS_VALID,
             "chg_t2": None, "chg_t3": None, "chg_t5": None,
         }
         if key not in by_key:
@@ -188,6 +267,8 @@ def record_seed(entries: List[dict], cfg: Optional[Config] = None,
         if _should_replace_record(old, rec, scan_anchor or ""):
             rec["next_chg"] = old.get("next_chg")
             rec["result"] = old.get("result")
+            for _, flag in _HORIZON_RESULTS:
+                rec[flag] = old.get(flag)
             rec["chg_t2"] = old.get("chg_t2")
             rec["chg_t3"] = old.get("chg_t3")
             rec["chg_t5"] = old.get("chg_t5")
@@ -237,7 +318,10 @@ def update_results(market: Optional[Market] = None, cfg: Optional[Config] = None
     """回填 T+1/T+2/T+3/T+5 多周期结果：用日 K 找记录日之后的第 N 个交易日涨幅。
 
     「选了 3 天全跌」这类复盘只靠 T+1 看不出来，所以一次把 T+1~T+5 都算好落盘。
-    result（win/loss）仍按 T+1 ≥ win_chg_pct 判定，保持既有跟涨胜率口径不变。
+    result（win/loss）仍按 T+1 ≥ win_chg_pct 判定，保持既有跟涨胜率口径不变；
+    另出 result_t3（T+3 收盘涨≥0 记 win），因为 T+1 与 T+3 符号在 119 条样本里
+    有 40 条相反——拿 T+1 的 result 去做 T+3 归因等于两套口径互跳，所以 T+3 的
+    成败必须单独落一列，而不是原地改 result 的语义。
 
     io 传入时每约 10% 报一次进度：几十条 K 线逐条抓会沉默很久，屏上像卡死，
     报个数让人知道还在跑。
@@ -248,12 +332,14 @@ def update_results(market: Optional[Market] = None, cfg: Optional[Config] = None
         return {"updated": 0, "pending": 0, "total": 0}
     mk = market or Market(cfg)
     win_th = float(cfg.get("followthrough.win_chg_pct", 3.0))
+    t3_th = float(cfg.get("followthrough.t3_win_chg_pct", 0.0))
     today = utils.today_str()
     horizons = ((1, "next_chg"), (2, "chg_t2"), (3, "chg_t3"), (5, "chg_t5"))
 
     pending = sum(1 for r in recs if r.get("code") and r.get("date") == today)
     needs = [r for r in recs if r.get("code") and r.get("date") != today
-             and (r.get("result") is None or r.get("chg_t5") is None)]
+             and (r.get("result") is None or r.get("chg_t5") is None
+                  or r.get("result_t3") is None)]
     total = len(needs)
     step = max(1, total // 10) if total else 1
     updated = 0
@@ -274,8 +360,15 @@ def update_results(market: Optional[Market] = None, cfg: Optional[Config] = None
         for off, field in horizons:
             if idx + off < len(kl) and kl[idx + off].get("close"):
                 r[field] = round((kl[idx + off]["close"] - base) / base * 100.0, 2)
+        r.setdefault("data_status", STATUS_VALID)
         if r.get("next_chg") is not None:
             r["result"] = "win" if r["next_chg"] >= win_th else "loss"
+        # T+1/T+2/T+3 用同一把尺子（收盘 > 阈值，默认 0），避免「T+1 的 result 按
+        # +3%、T+3 按 >0」两套口径互相解释不通。
+        for field, flag in _HORIZON_RESULTS:
+            val = r.get(field)
+            if val is not None:
+                r[flag] = "win" if float(val) >= t3_th else "loss"
         updated += 1
         if io is not None and (done % step == 0 or done == total):
             io.say(f"  ⏳ 回填 {done}/{total} 条...")
@@ -307,7 +400,7 @@ def aggregate(cfg: Optional[Config] = None) -> Dict[str, dict]:
     cfg = cfg or load_config()
     min_n = int(cfg.get("followthrough.min_samples", 8))
     out: Dict[str, dict] = {}
-    for r in load_records(cfg):
+    for r in load_valid_records(cfg):
         if r.get("result") not in ("win", "loss"):
             continue
         k = key_of(r.get("stage"), r.get("tier"), r.get("track"))
@@ -428,7 +521,7 @@ def stage_b_bucket_stats(cfg: Optional[Config] = None, min_samples: int = 30) ->
     """
     cfg = cfg or load_config()
     buckets: Dict[str, dict] = {}
-    for r in load_records(cfg):
+    for r in load_valid_records(cfg):
         if r.get("result") not in ("win", "loss"):
             continue
         rank = r.get("sector_rank")
@@ -503,7 +596,7 @@ def sample_gap_stats(cfg: Optional[Config] = None) -> dict:
     cfg = cfg or load_config()
     today = utils.today_str()
     gate = str(cfg.get("followthrough.p0_gate_date", "2026-08-26") or "2026-08-26")
-    recs = load_records(cfg)
+    recs = load_valid_records(cfg)
     pending_t1 = pending_t3 = today_waiting = 0
     factor_ok = 0
     post_buyable = 0
@@ -525,8 +618,11 @@ def sample_gap_stats(cfg: Optional[Config] = None) -> dict:
             if r.get("chg_t3") is not None:
                 post_buyable_t3 += 1
     lb = lowbuy_sample_stats(cfg)
+    health = data_health(cfg)
     return {
         "total": len(recs),
+        "legacy": health["legacy"],
+        "all_total": health["total"],
         "pending_t1": pending_t1,
         "pending_t3": pending_t3,
         "today_waiting": today_waiting,
@@ -567,7 +663,7 @@ def shadow_t3_stats(cfg: Optional[Config] = None) -> dict:
     target = float(cfg.get("followthrough.t3_up_target", 0.60))
     min_n = int(cfg.get("followthrough.shadow_min_samples", 15))
     tagged: List[dict] = []
-    for r in load_records(cfg):
+    for r in load_valid_records(cfg):
         tag = resolve_shadow_tag(r)
         if not tag:
             continue
@@ -614,7 +710,7 @@ def mode_channel_stats(cfg: Optional[Config] = None) -> Dict[str, dict]:
     """
     cfg = cfg or load_config()
     out: Dict[str, dict] = {"rule": _empty_mode_slot(), "winrate": _empty_mode_slot()}
-    for r in load_records(cfg):
+    for r in load_valid_records(cfg):
         mode = r.get("mode") or "rule"
         if mode not in out:
             out[mode] = _empty_mode_slot()
@@ -658,7 +754,7 @@ def gate_blocked_recent(cfg: Optional[Config] = None, since_ymd: Optional[str] =
     """
     cfg = cfg or load_config()
     rows: List[dict] = []
-    for r in load_records(cfg):
+    for r in load_valid_records(cfg):
         if not r.get("winrate_would_buy") or not r.get("winrate_gate"):
             continue
         d = r.get("date") or ""
@@ -747,18 +843,48 @@ def _t3_bucket_chg(chg: Optional[float]) -> str:
     return ">7.5%"
 
 
+#: 共振分里「真正会变」的维度。消息面在自动扫描下恒为 0/0（max=0 已不占满分）；
+#: 止损结构在止损规则内恒为 +1/+1——两维对排序零贡献，只把满分垫高，让「6/9」
+#: 看起来比实际宽松。有效分只数这两类之外的分，便于看出门槛到底意味着什么。
+_VOLATILE_DIMS = ("板块强度", "大盘趋势", "市值区间", "量价结构")
+
+
+def resonance_core_score(dims: Optional[List[dict]]) -> Tuple[Optional[int], Optional[int]]:
+    """从共振六维里取「有效分/有效满分」：只数会变化的维度。"""
+    if not dims:
+        return None, None
+    core = [d for d in dims if d.get("name") in _VOLATILE_DIMS]
+    if not core:
+        return None, None
+    return (int(sum(int(d.get("score") or 0) for d in core)),
+            int(sum(int(d.get("max") or 0) for d in core)))
+
+
+def _t3_bucket_res(dims: Optional[List[dict]]) -> Optional[str]:
+    """有效分桶：把 0~6 的有效分压成三档，避免桶太碎每条只有 1~2 样本。"""
+    core, _ = resonance_core_score(dims)
+    if core is None:
+        return None
+    if core >= 6:
+        return "有效6"
+    if core >= 4:
+        return "有效4-5"
+    return "有效≤3"
+
+
 def t3_attribution(cfg: Optional[Config] = None) -> dict:
     """多维 T+3>0 归因（方案 E：只读报告，不改闸门）。
 
-    维度：板块排名 / 阶段 / 涨幅桶 / 轨道 + 影子桶摘要。
+    维度：板块排名 / 阶段 / 涨幅桶 / 轨道 / 共振有效分 + 影子桶摘要。
     """
     cfg = cfg or load_config()
     dims: Dict[str, Dict[str, dict]] = {
-        "rank": {}, "stage": {}, "chg": {}, "track": {},
+        "rank": {}, "stage": {}, "chg": {}, "track": {}, "res": {},
     }
+    diff_n = diff_mismatch = 0
     total_n = total_up = 0
     mengya_n = mengya_up = 0
-    for r in load_records(cfg):
+    for r in load_valid_records(cfg):
         if r.get("chg_t3") is None:
             continue
         up = float(r["chg_t3"]) > 0
@@ -771,6 +897,18 @@ def t3_attribution(cfg: Optional[Config] = None) -> dict:
         rk = _t3_bucket_rank(r.get("sector_rank"))
         _slot(dims["rank"], rk)["n"] += 1
         _slot(dims["rank"], rk)["up"] += 1 if up else 0
+
+        res_b = _t3_bucket_res(r.get("scoring_dims"))
+        if res_b is not None:
+            _slot(dims["res"], res_b)["n"] += 1
+            _slot(dims["res"], res_b)["up"] += 1 if up else 0
+
+        # T+1 的 result 与 T+3 方向不同的比例：这个数越大，「按 T+1 胜率选票、
+        # 按 T+3 复盘」就越像两套系统各说各话。
+        if r.get("result") in ("win", "loss"):
+            diff_n += 1
+            if (r["result"] == "win") != up:
+                diff_mismatch += 1
 
         stage = str(r.get("stage") or "-")
         _slot(dims["stage"], stage)["n"] += 1
@@ -806,6 +944,10 @@ def t3_attribution(cfg: Optional[Config] = None) -> dict:
         "stage": _finalize(dims["stage"]),
         "chg": _finalize(dims["chg"]),
         "track": _finalize(dims["track"]),
+        "res": _finalize(dims["res"]),
+        "t1_t3_disagree_n": diff_mismatch,
+        "t1_t3_compare_n": diff_n,
+        "t1_t3_disagree_rate": (diff_mismatch / diff_n) if diff_n else None,
         "shadow": shadow,
         "gap": sample_gap_stats(cfg),
     }
@@ -823,10 +965,14 @@ def format_t3_attribution(cfg: Optional[Config] = None, compact: bool = False) -
     if st["mengya_n"]:
         mr = st["mengya_rate"] or 0.0
         lines.append(f"  萌芽专看 T+3>0：{st['mengya_up']}/{st['mengya_n']} = {mr:.0%}")
+    if st.get("t1_t3_compare_n"):
+        lines.append(f"  T+1 与 T+3 方向不一致：{st['t1_t3_disagree_n']}/{st['t1_t3_compare_n']}"
+                     f" = {st['t1_t3_disagree_rate']:.0%}（说明 result 只看 T+1 不够用）")
     gap = st.get("gap") or {}
     lines.append(f"  待回填：T+1 {gap.get('pending_t1', 0)}｜T+3 {gap.get('pending_t3', 0)}")
     if not compact:
-        for dim, title in (("rank", "板块排名"), ("chg", "涨幅桶"), ("stage", "阶段")):
+        for dim, title in (("rank", "板块排名"), ("chg", "涨幅桶"), ("stage", "阶段"),
+                           ("res", "共振有效分")):
             parts = []
             for k, v in sorted((st.get(dim) or {}).items(), key=lambda x: -x[1]["n"]):
                 rr = v["rate"]

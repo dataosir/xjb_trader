@@ -1157,7 +1157,9 @@ class Screener:
             preflight.apply_winrate_t3(ev, cfg)
             # 与规则通道共用可买硬闸（突破/板块上限/入选一致性）；胜率分门槛仍用本通道阈值。
             score_met = wr["score"] >= threshold
-            ev["winrate_would_buy"] = score_met
+            gate_met = (ev.get("total_score") is None or ev.get("pass_threshold") is None
+                        or ev.get("total_score") >= ev.get("pass_threshold"))
+            ev["winrate_would_buy"] = score_met and gate_met
             wr_note = self._winrate_gate(ev)
             if wr_note:
                 ev["track"] = watch_pool.TRACK_WATCH

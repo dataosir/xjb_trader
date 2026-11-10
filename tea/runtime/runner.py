@@ -408,6 +408,12 @@ def _ft_entries(result: dict) -> List[dict]:
         for ev in (evs or []):
             wr_score = ev.get("winrate_score")
             score_met = wr_score is not None and wr_score >= threshold
+            # 「胜率通道放行」= 胜率分过线 且 共振分也过线。只数胜率分会把
+            # 共振 6<门槛7、胜率 6/7 的票记成 would_buy=True，这个字段随后被用来
+            # 统计「硬闸误杀」，那种样本只会把误杀率算虚。共振分缺失（胜率通道
+            # 未接入预审）时退回只看胜率分。
+            gate_met = (ev.get("total_score") is None or ev.get("pass_threshold") is None
+                        or ev.get("total_score") >= ev.get("pass_threshold"))
             q = ev.get("quote") or {}
             ind = ev.get("ind") or {}
             sec = ev.get("sector") or {}
@@ -419,6 +425,8 @@ def _ft_entries(result: dict) -> List[dict]:
                 "chg_pct": q.get("chg_pct"), "price": q.get("price"),
                 "total_score": ev.get("total_score"),
                 "pass_threshold": ev.get("pass_threshold"),
+                "core_score": (ev.get("scoring") or {}).get("core_total"),
+                "core_threshold": ev.get("core_threshold"),
                 "identity_tier": (ev.get("identity") or {}).get("tier"),
                 "identity_score": (ev.get("identity") or {}).get("score"),
                 "sector_name": sec.get("name"),
@@ -450,7 +458,7 @@ def _ft_entries(result: dict) -> List[dict]:
                 "winrate_score": wr_score,
                 "winrate_detail": ev.get("winrate_detail"),
                 "winrate_gate": ev.get("winrate_gate"),
-                "winrate_would_buy": bool(score_met),
+                "winrate_would_buy": bool(score_met and gate_met),
                 "winrate_t3_prob": ev.get("winrate_t3_prob"),
                 "winrate_t3_detail": ev.get("winrate_t3_detail"),
                 "mode": result.get("mode", "rule"),

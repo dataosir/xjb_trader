@@ -253,7 +253,57 @@ def collect_daily_status(day: Optional[str] = None, cfg: Optional[Config] = None
         "error_lines": err_lines,
         "stderr_sync": stderr_res,
         "alert_count": alert_n,
+        "sample": sample_health_line(cfg),
+        "focus": daily_focus(cfg),
     }
+
+
+def sample_health_line(cfg: Optional[Config] = None) -> str:
+    """样本健康一行：有效/失效条数 + 各周期待回填。"""
+    from tea.analysis import followthrough as ft
+    cfg = cfg or load_config()
+    h = ft.data_health(cfg)
+    label = {"next_chg": "T+1", "chg_t2": "T+2", "chg_t3": "T+3", "chg_t5": "T+5"}
+    pend = "｜".join(f"{label.get(f, f)} {n} 条" for f, n in (h.get("pending") or {}).items() if n)
+    txt = f"有效 {h.get('valid', 0)} 条"
+    if h.get("legacy"):
+        lo, hi = h.get("legacy_range") or ("—", "—")
+        txt += f"，失效 {h['legacy']} 条（{lo}~{hi}，不计入归因）"
+    if pend:
+        txt += f"；待回填 {pend}"
+    return txt
+
+
+def daily_focus(cfg: Optional[Config] = None, top_n: int = 3) -> List[str]:
+    """日报关注项：样本是否够、失效数据、最近桶表现与回填缺口。"""
+    from tea.analysis import followthrough as ft
+    cfg = cfg or load_config()
+    out: List[str] = []
+    h = ft.data_health(cfg)
+    if h.get("legacy"):
+        out.append(f"有 {h['legacy']} 条失效历史样本（结构改版前），已排除出归因；"
+                   "不要用它们和当前样本混算胜率。")
+    pend = max((h.get("pending") or {}).values() or [0])
+    if pend:
+        out.append(f"有周期字段待回填（最多 {pend} 条），盘后 review 会自动补；"
+                   "若明天仍未补齐，先查 review 是否在跑。")
+    t3 = ft.t3_attribution(cfg)
+    if t3.get("total_n"):
+        rate = t3.get("total_rate") or 0.0
+        if rate < 0.45:
+            out.append(f"T+3>0 全样本仅 {rate:.0%}（{t3.get('total_up')}/{t3['total_n']}），"
+                       "当前门槛偏松，别为个别票放宽条件。")
+        elif rate >= 0.6:
+            out.append(f"T+3>0 全样本 {rate:.0%}（{t3.get('total_up')}/{t3['total_n']}），"
+                       "可按周报对照桶胜率决定是否继续收紧。")
+        buckets = [(k, v) for k, v in (t3.get("res") or {}).items()
+                   if v.get("n", 0) >= 8 and (v.get("rate") or 1) < 0.45]
+        for k, v in buckets[:1]:
+            out.append(f"共振有效分「{k}」T+3>0 仅 {v['up']}/{v['n']}={v.get('rate', 0):.0%}，"
+                       "这类票继续观察，不要当可买样板。")
+    if not out:
+        out.append("样本与回填正常，按日常节奏累积即可。")
+    return out[:top_n]
 
 
 def format_summary_text(status: dict, cfg: Optional[Config] = None) -> str:
@@ -286,6 +336,15 @@ def format_summary_text(status: dict, cfg: Optional[Config] = None) -> str:
             cnt = m.get("count") or 1
             suffix = f" (×{cnt})" if cnt > 1 else ""
             lines.append(f"  [{m.get('source')}] {m.get('message')}{suffix}")
+
+    if status.get("sample"):
+        lines.extend(["", "—— 样本健康 ——", f"  {status['sample']}"])
+
+    focus = status.get("focus") or []
+    if focus:
+        lines.extend(["", "—— 明天该关注 ——"])
+        for pt in focus:
+            lines.append(f"  · {pt}")
 
     lines.extend([
         "",

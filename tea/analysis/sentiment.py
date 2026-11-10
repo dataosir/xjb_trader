@@ -12,7 +12,8 @@ from typing import Any, Dict, List, Optional
 
 from tea.config.config_store import Config, load_config
 from tea.core import logger as logger_mod, utils
-from tea.data import Market
+from tea.data import Market, probe_and_apply
+from tea.data.providers.base import source_label as source_zh
 
 CYCLE_ICE = "冰点"
 CYCLE_REPAIR = "修复"
@@ -327,7 +328,11 @@ def get_sentiment(market: Optional[Market] = None, cfg: Optional[Config] = None,
     utils.tell(io, "  ⏳ 正在采集市场天气（指数 / 板块 / 涨停 / 资金流向）...")
     t0 = time.time()
     mk = market or Market(cfg)
+    # 采集前先花一两秒探活：DNS 劫持 / 证书缺失的源本次直接跳过，
+    # 不再让它们把重试次数和超时预算吃光（见 tea/data/probe.py）。
+    probe = probe_and_apply(cfg, mk, io=io)
     raw = fetch_raw(mk, io, cfg)
+    raw["probe"] = probe
     scored = compute_score(raw, cfg)
     cls = classify(scored, cfg)
     sec = scored["sector_summary"]
@@ -367,6 +372,8 @@ def get_sentiment(market: Optional[Market] = None, cfg: Optional[Config] = None,
             for s in (raw.get("fund_flow_top") or [])
         ],
         "fund_flow_stale": raw.get("fund_flow_stale", False),
+        "probe": {k: v for k, v in (raw.get("probe") or {}).items()
+                  if k in ("verdict", "skipped", "elapsed")},
         "deltas": scored["deltas"],
         "notes": cls["notes"],
         "errors": raw.get("errors", []),
@@ -591,6 +598,11 @@ def format_weather(s: dict, style: str = "console") -> str:
         lines.append(em(msg, utils.COLOR_WARN, style) if style != "plain" else msg)
     if s.get("fund_flow_stale"):
         msg = "· 板块资金流向为缓存回退值（实时取数失败，非实时）"
+        lines.append(em(msg, utils.COLOR_WARN, style) if style != "plain" else msg)
+    probe = s.get("probe") or {}
+    if probe.get("skipped"):
+        names = "、".join(source_zh(n) for n in probe["skipped"])
+        msg = f"· 本次跳过不可达数据源：{names}（其余源已够用；`tea weather --no-probe` 可关闭预探测）"
         lines.append(em(msg, utils.COLOR_WARN, style) if style != "plain" else msg)
     if s.get("hot_sectors"):
         hot = "  ".join(format_hot_sector(x, style) for x in s["hot_sectors"][:6])

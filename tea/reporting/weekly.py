@@ -43,6 +43,8 @@ def collect(days: int = 7, cfg: Optional[Config] = None) -> Dict[str, Any]:
         "followthrough": followthrough.aggregate(cfg),
         "mode_channels": followthrough.mode_channel_stats(cfg),
         "t3_attribution": followthrough.t3_attribution(cfg),
+        "data_health": followthrough.data_health(cfg),
+        "horizon_rates": followthrough.horizon_winrates(cfg),
         "watch_items": watch_pool.items(cfg),
         "empty_days": (rd.get("verdicts") or {}).get("EMPTY", 0)
                       + (rd.get("verdicts") or {}).get("NO_SCAN", 0),
@@ -148,7 +150,78 @@ def check_discipline(wk: dict, cfg: Optional[Config] = None) -> List[dict]:
         "advice": (f"待 T+3 回填 {pending_t3} 条，周五周报前会自动 review"
                    if pending_t3 else "T+3 已齐，看周报「三日持有」段对照 rank≤3 / 影子桶"),
     })
+
+    health = wk.get("data_health") or followthrough.data_health(cfg)
+    if health.get("legacy"):
+        lo, hi = health.get("legacy_range") or ("—", "—")
+        out.append({
+            "item": "失效历史样本",
+            "value": f"{health['legacy']} 条（{lo}~{hi}）",
+            "ok": False,
+            "advice": "已标 data_status=legacy，不进归因分子分母；"
+                      "这些是结构改版前的旧落盘（无门槛/六维/通道），不要拿来调参",
+        })
+    pend = sum((health.get("pending") or {}).values())
+    out.append({
+        "item": "有效样本回填",
+        "value": f"有效 {health.get('valid', 0)} 条，待回填 {pend} 个周期字段",
+        "ok": pend <= 1,
+        "advice": ("回填齐了，归因结论可用" if pend <= 1
+                   else "盘后 review 会自动补；若长期不齐，检查 review 定时任务是否在跑"),
+    })
     return out
+
+
+def focus_points(wk: dict, cfg: Optional[Config] = None, top_n: int = 4) -> List[str]:
+    """本周该盯什么：从样本缺口、桶胜率与通道对照里挑出最值得关注的方向。
+
+    只做提示，不改任何门槛——目的是让人知道下周该看哪个数字、补哪类样本。
+    """
+    cfg = cfg or load_config()
+    out: List[str] = []
+    health = wk.get("data_health") or followthrough.data_health(cfg)
+    t3 = wk.get("t3_attribution") or {}
+    min_n = int(cfg.get("winrate.t3_prob.min_samples", 8))
+
+    if health.get("legacy"):
+        out.append(f"失效样本 {health['legacy']} 条（结构改版前）已被排除，"
+                   "归因分母只看有效样本；无需删除，但不要拿它们做对比结论。")
+
+    buckets = [(k, v) for k, v in (t3.get("res") or {}).items() if v.get("n")]
+    for k, v in sorted(buckets, key=lambda x: x[1].get("rate") or 0):
+        if v["n"] < min_n:
+            continue
+        rate = v.get("rate") or 0.0
+        if rate < 0.45:
+            out.append(f"共振有效分「{k}」T+3>0 仅 {v['up']}/{v['n']}={rate:.0%}，"
+                       "低于一半：这批样本说明门槛仍需收紧，别再为它放宽条件。")
+        elif rate >= 0.75 and v["n"] < 30:
+            out.append(f"共振有效分「{k}」{v['up']}/{v['n']}={rate:.0%} 表现好但样本仅 {v['n']} 条，"
+                       f"差 {30 - v['n']} 条才够下结论，优先观察它在周内的出票。")
+        if len(out) >= top_n:
+            return out
+
+    chg = (t3.get("chg") or {})
+    weak = [(k, v) for k, v in chg.items() if v.get("n", 0) >= min_n
+            and (v.get("rate") or 0) < 0.4]
+    for k, v in weak:
+        out.append(f"涨幅桶「{k}」T+3>0 仅 {v['up']}/{v['n']}={v.get('rate', 0):.0%}，"
+                   "追高区间是主要亏损来源，盯住它是否继续拖累。")
+
+    mc = wk.get("mode_channels") or {}
+    rule_n = ((mc.get("rule") or {}).get("t3_n") or 0)
+    wr_n = ((mc.get("winrate") or {}).get("t3_n") or 0)
+    if rule_n and wr_n and abs(rule_n - wr_n) >= max(5, 0.5 * max(rule_n, wr_n)):
+        out.append(f"两条通道回填样本不均衡（规则 {rule_n} / 胜率 {wr_n}），"
+                   "对照结论暂不可信，先把少的一边补上来。")
+
+    shadow = t3.get("shadow") or {}
+    if shadow.get("n_tagged") and not shadow.get("n_t3"):
+        out.append("影子桶已标样本但还没有 T+3，检查 review 是否在盘后跑。")
+
+    if not out:
+        out.append("本周样本与桶胜率无异常，保持当前门槛，继续按日累积样本。")
+    return out[:top_n]
 
 
 # ------------------------------------------------------------------ Markdown
@@ -175,6 +248,12 @@ def render_md(wk: Optional[dict] = None, cfg: Optional[Config] = None) -> str:
     lines += ["## 纪律自查", "", "| 项目 | 实测 | 判定 | 建议 |", "| --- | --- | --- | --- |"]
     for c in check_discipline(wk, cfg):
         lines.append(f"| {c['item']} | {c['value']} | {'✅' if c['ok'] else '⚠️'} | {c['advice']} |")
+    lines.append("")
+
+    # ---- 下周该盯什么
+    lines += ["## 下周该关注（只提示，不改门槛）", ""]
+    for pt in focus_points(wk, cfg):
+        lines.append(f"- {pt}")
     lines.append("")
 
     # ---- 每日
@@ -232,7 +311,19 @@ def render_md(wk: Optional[dict] = None, cfg: Optional[Config] = None) -> str:
             mr = t3.get("mengya_rate") or 0.0
             lines.append(f"- **萌芽专看**（方案 E）：{t3.get('mengya_up', 0)}/{t3['mengya_n']} = **{mr:.0%}**")
         gap = t3.get("gap") or {}
-        lines.append(f"- 待回填：T+1 {gap.get('pending_t1', 0)}｜T+3 {gap.get('pending_t3', 0)}")
+        lines.append(f"- 待回填：T+1 {gap.get('pending_t1', 0)}｜T+3 {gap.get('pending_t3', 0)}"
+                     f"｜失效样本 {gap.get('legacy', 0)} 条（不计入统计）")
+        hr = wk.get("horizon_rates") or followthrough.horizon_winrates(cfg)
+        if hr:
+            cells = []
+            for key, label in (("next_chg", "T+1>0"), ("chg_t2", "T+2>0"),
+                               ("chg_t3", "T+3>0"), ("chg_t5", "T+5>0"),
+                               ("result_t1_pct3", "T+1≥3%(旧口径)")):
+                slot = hr.get(key) or {}
+                if slot.get("n"):
+                    cells.append(f"{label} {slot['up']}/{slot['n']}={slot['rate']:.0%}")
+            if cells:
+                lines.append("- **各周期同口径对照**（收盘>0）：" + "｜".join(cells))
         for dim, title in (("rank", "板块排名"), ("chg", "涨幅桶"), ("stage", "阶段"), ("track", "轨道")):
             bucket = t3.get(dim) or {}
             if not bucket:

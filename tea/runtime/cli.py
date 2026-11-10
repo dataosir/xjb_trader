@@ -210,6 +210,8 @@ def cmd_weather(args, cfg: Config) -> int:
     io = _io()
     if args.refresh:
         clear_cache()
+    if getattr(args, "no_probe", False):
+        cfg.set("market.probe_enabled", False)
     s = runner.weather(cfg, refresh=args.refresh, io=io)
     io.say(format_weather(s))
     io.say(f"  {Timing(cfg).describe()}")
@@ -960,6 +962,8 @@ def build_parser() -> argparse.ArgumentParser:
 
     w = sub.add_parser("weather", help="市场天气（情绪分 / 周期 / 姿态）")
     w.add_argument("--refresh", action="store_true", help="忽略 120s 缓存重算")
+    w.add_argument("--no-probe", action="store_true",
+                   help="跳过采集前的数据源探活（排障 / 离线时用）")
     w.set_defaults(func=cmd_weather)
 
     wa = sub.add_parser("watch-alert", help="盘中观察池扫描 + 邮件提醒（launchd 每分钟）")

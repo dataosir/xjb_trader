@@ -8,6 +8,7 @@ from __future__ import annotations
 from typing import List, Optional
 
 from tea.analysis import identity as ident_mod
+from tea.analysis.followthrough import resonance_core_score
 from tea.config.config_store import Config, load_config
 from tea.core import logger as logger_mod, utils
 from tea.core.timing import Timing
@@ -294,11 +295,12 @@ def score_nine(quote: dict, ind: dict, sector: dict, sent: Optional[dict],
         s1 = int(utils.clamp(s1, 0, int(c("sector_dim_cap", 2))))
     dims.append({"no": 1, "name": "板块强度", "max": 2, "score": s1, "detail": d1})
 
-    # ② 大盘趋势（分级扣分 -1~+1，扣分封顶 -1）
-    # 更稳的趋势定义：位置（点位 vs MA20，带缓冲）+ 方向（MA20 斜率）合成 -2~+2
-    # 的态势，再映射成共振分加减——弱势时扣除、强势时 +1，替代原来「涨 + MA20 上」
-    # 的二元 0/1 硬判定，也替代已被移除的大盘趋势硬闸。
-    # 扣分封顶 -1：弱势市满分 6 = 门槛 6，完美票仍有机会过，而不是被锁死。
+    # ② 大盘趋势（只扣不加：弱势 -1，其余 0）
+    # 趋势态势 = 位置（点位 vs MA20，带缓冲）+ 方向（MA20 斜率），合成 -2~+2。
+    # 只把「偏弱/弱势」映成 -1，震荡与偏强一律 0：119 条已回填样本里，大盘趋势
+    # +1 的 T+3 胜率 45%，-1 的反而是 67%——强趋势给 +1 分等于奖励了最差的桶。
+    # 只扣不加后门槛的含义变成「顺风时不许有明显短板」，与「-1 封顶、满分 6=门槛 6」
+    # 的宽容度一致：弱势市里完美票仍能过。
     idx = (sent or {}).get("index") or {}
     point, ma20 = idx.get("point"), idx.get("ma20")
     bias = idx.get("ma20_bias_pct")
@@ -315,18 +317,20 @@ def score_nine(quote: dict, ind: dict, sector: dict, sent: Optional[dict],
     def _sig(v: Optional[float]) -> str:
         return "—" if v is None else f"{v:+.2f}%"
 
-    if point is None and ma20 is None and slope is None:
-        s2, d2 = 0, "大盘数据缺失"
+    sig_txt = f"点位较 MA20 {_sig(bias)}、MA20 斜率 {_sig(slope)}"
+    # 位置与方向都取不到才算缺数据；只缺一路时按 0 处理，不能把「取数不齐」当成利空。
+    if pos == 0 and dirn == 0 and (bias is None or slope is None):
+        s2, d2 = 0, "大盘数据缺失（不加不减）"
     elif trend >= 2:
-        s2, d2 = 1, f"大盘强趋势（点位较 MA20 {_sig(bias)}、MA20 斜率 {_sig(slope)}）"
+        s2, d2 = 0, f"大盘强趋势（{sig_txt}；只扣不加，不额外加分）"
     elif trend == 1:
-        s2, d2 = 0, f"大盘偏强未确认（点位较 MA20 {_sig(bias)}、MA20 斜率 {_sig(slope)}）"
+        s2, d2 = 0, f"大盘偏强（{sig_txt}）"
     elif trend == 0:
-        s2, d2 = 0, f"大盘震荡（点位较 MA20 {_sig(bias)}、MA20 斜率 {_sig(slope)}）"
+        s2, d2 = 0, f"大盘震荡（{sig_txt}）"
     elif trend == -1:
-        s2, d2 = -1, f"大盘偏弱 → 共振 -1（点位较 MA20 {_sig(bias)}、MA20 斜率 {_sig(slope)}）"
+        s2, d2 = -1, f"大盘偏弱 → 共振 -1（{sig_txt}）"
     else:
-        s2, d2 = -1, f"大盘弱势 → 共振 -1（点位较 MA20 {_sig(bias)}、MA20 斜率 {_sig(slope)}）"
+        s2, d2 = -1, f"大盘弱势 → 共振 -1（{sig_txt}）"
     dims.append({"no": 2, "name": "大盘趋势", "max": 1, "score": s2, "detail": d2})
 
     # ③ 消息面（1）
@@ -423,14 +427,34 @@ def score_nine(quote: dict, ind: dict, sector: dict, sent: Optional[dict],
     dims.append({"no": 6, "name": "止损结构", "max": 1, "score": s6, "detail": d6})
 
     total = sum(d["score"] for d in dims)
+    # 有效分：消息面 0/0、止损结构恒满，两维不改变排序，只把满分垫高。
+    # 单独给出「有效 X/Y」便于复盘时判断这个门槛到底是在卡什么。
+    core_pts, core_max = resonance_core_score(dims)
     return {
         "total": int(total),
         # 满分由实际计入的维度决定：消息面中性化时其 max=0，满分从 9 降到 8，
         # 让「X/满分」诚实地反映当前可争取的上限，而不是恒定 9。
         "max": int(sum(d["max"] for d in dims)),
+        "core_total": core_pts,
+        "core_max": core_max,
         "dims": dims,
         "penalties": penalties,
     }
+
+
+def gate_failed(total: Optional[int], threshold: Optional[int],
+                core: Optional[int] = None, core_th: Optional[int] = None) -> bool:
+    """共振门槛是否未过：总分与有效分两把尺子，任一不过即不过。
+
+    单看总分会被两维常量维度放水（消息面 0/0 已不占满分，止损结构在止损规则内
+    恒 +1），于是 5/9 也能贴着 7 分的门槛说「差 2 分」；有效分（7 分制）扣掉这两维
+    后，同样的票是 4/7，差距才与账面一致。缺任一数据时退回只比总分。
+    """
+    if total is None or threshold is None:
+        return False
+    if total < threshold:
+        return True
+    return core is not None and core_th is not None and core < core_th
 
 
 def format_resonance_shortfall(ev: Optional[dict] = None, *,
@@ -442,6 +466,9 @@ def format_resonance_shortfall(ev: Optional[dict] = None, *,
 
     只报「共振 4/6」是黑盒：复盘时不知道掉在板块强度还是量价结构。与 plan.check_item
     的六维对比互补——这里面向单次快照，列出当前 score < max 的维度及简要原因。
+
+    判定与 ``gate_failed`` 一致：总分过线但有效分没过时也要展开（否则会看到
+    「5/9 门槛7 … 差 2 分达门槛 7」这种 5<7 却写差 2 的自相矛盾）。
     """
     sc = (ev or {}).get("scoring") or {}
     dims = dims or sc.get("dims") or (ev or {}).get("scoring_dims") or []
@@ -451,7 +478,9 @@ def format_resonance_shortfall(ev: Optional[dict] = None, *,
         total = sc.get("total") if sc else (ev or {}).get("total_score")
     if threshold is None:
         threshold = (ev or {}).get("pass_threshold")
-    if total is not None and threshold is not None and total >= threshold:
+    core = sc.get("core_total") if sc else (ev or {}).get("core_score")
+    core_th = (ev or {}).get("core_threshold")
+    if not gate_failed(total, threshold, core, core_th):
         return ""
 
     weak: List[dict] = []
@@ -475,19 +504,45 @@ def format_resonance_shortfall(ev: Optional[dict] = None, *,
 
     msg = prefix + "：" + "、".join(_brief(d) for d in weak)
     if total is not None and threshold is not None:
-        msg += f"（差 {threshold - total} 分达门槛 {threshold}）"
+        if total >= threshold and core is not None and core_th is not None:
+            msg += f"（总分 {total}/{threshold} 过线，但有效分 {core}/{core_th} 差 {core_th - core} 分）"
+        elif total >= threshold:
+            msg += f"（总分已过线 {total}/{threshold}）"
+        else:
+            msg += f"（差 {threshold - total} 分达门槛 {threshold}）"
     return msg
 
 
 # ------------------------------------------------------------------ 8.4 有效门槛
 
+#: 满分 9 里恒定拿满分/恒定 0 分的维度：消息面 1、止损结构 1。
+_CONSTANT_DIM_POINTS = 2
+
+
+def core_threshold(threshold: int, max_score: int = 9) -> int:
+    """把满分门槛按比例换算到有效分满分（默认 7 分）。"""
+    if max_score <= 0:
+        return int(threshold)
+    # 有效满分 = 满分 − 常量维（消息面 1、止损结构 1）。两者都在总分里占满额。
+    core_max = max_score - _CONSTANT_DIM_POINTS
+    if core_max <= 0:
+        return int(threshold)
+    return int(round(threshold * core_max / max_score))
+
+
 def effective_threshold(identity: Optional[dict] = None, sent: Optional[dict] = None,
                         insufficient_samples: bool = False,
-                        cfg: Optional[Config] = None) -> dict:
+                        cfg: Optional[Config] = None,
+                        max_score: int = 9) -> dict:
     """动态通过门槛：base 6 + 杂毛warn +1 + 样本不足 +1，龙头 -1（下限 6），防守 +1。
 
     龙头 -1 是门槛公式的一部分，不设调用方开关：种子扫描、计划复核、run 执行、
     eval/watch 全走同一套口径，避免「选票按 6 分、复核按 7 分」这类分叉。
+
+    另给 ``core_threshold``：把同一门槛换算到「有效分」（只数板块强度/大盘趋势/
+    市值区间/量价结构）。消息面恒 0/0、止损结构在止损规则内恒 +1，两维一起去掉
+    后满分从 9 降到 7，原样沿用 6/7 的门槛等价于比原来更严——换算成 4/7 才与
+    「共振 6/9 过线」是同一件事。
 
     顺序有意为之：龙头 -1 先于防守 +1，所以防守市里龙头也要按 7 分卡——
     防守 +1 不被龙头 -1 抵消（否则防守等于没收紧，逆势选票）。
@@ -516,7 +571,8 @@ def effective_threshold(identity: Optional[dict] = None, sent: Optional[dict] = 
         bump_defend = int(cfg.s("defend_stance_bump", 1))
         th += bump_defend
         notes.append(f"防守姿态 +{bump_defend}")
-    return {"threshold": int(th), "base": base, "notes": notes}
+    return {"threshold": int(th), "base": base, "notes": notes,
+            "core_threshold": core_threshold(th, max_score)}
 
 
 # ------------------------------------------------------------------ 胜率选股评分
@@ -719,28 +775,36 @@ def evaluate(code: str, market: Optional[Market] = None, cfg: Optional[Config] =
         levels = {}
 
     scored = score_nine(q, ind, sec, sent, levels, has_news, cfg)
-    th = effective_threshold(idn, sent, insufficient_samples, cfg)
+    th = effective_threshold(idn, sent, insufficient_samples, cfg,
+                             max_score=scored.get("max") or 9)
     total, threshold = scored["total"], th["threshold"]
 
     reasons: List[str] = []
     # 门槛用绝对分（total >= threshold），刻意不用 total/max 归一化：满分 max 会随
     # 消息面中性化在 8~9 之间浮动，绝对门槛 6 是一条固定保守线，避免 max 变化让门槛漂移。
+    core_pts, core_th = scored.get("core_total"), th.get("core_threshold")
     if vt["rejected"]:
         verdict = VERDICT_REJECT
         reasons.append("硬否决：" + "；".join(i["label"] for i in vt["hard"]))
     elif vt["watchable"]:
         verdict = VERDICT_WATCH
         reasons.append("软否决：" + "；".join(i["label"] for i in vt["soft"]) + " → 等回踩")
-    elif total >= threshold:
+    elif not gate_failed(total, threshold, core_pts, core_th):
         verdict = VERDICT_PASS
-    elif threshold - total <= int(cfg.get("seed.near_miss_gap", 1)):
+    elif total < threshold and threshold - total <= int(cfg.get("seed.near_miss_gap", 1)):
         verdict = VERDICT_WATCH
         reasons.append(f"共振分 {total}/{threshold} 差 {threshold - total} 分 → 观察轨")
-    else:
+    elif total < threshold:
         verdict = VERDICT_NEAR_MISS
         reasons.append(f"共振分 {total}/{threshold} 差 {threshold - total} 分 → 近失")
+    else:
+        verdict = VERDICT_NEAR_MISS
+        reasons.append(f"共振 {total}/{threshold} 过线，但有效分 {core_pts}/{core_th} "
+                       f"差 {core_th - core_pts} 分 → 近失")
     shortfall = format_resonance_shortfall(dims=scored.get("dims"),
-                                           total=total, threshold=threshold)
+                                           total=total, threshold=threshold,
+                                           ev={"scoring": scored, "pass_threshold": threshold,
+                                               "core_threshold": core_th})
     if shortfall:
         reasons.append(shortfall)
     if not (levels.get("odds_ok", True)):
@@ -771,6 +835,7 @@ def evaluate(code: str, market: Optional[Market] = None, cfg: Optional[Config] =
         "stage": stage, "veto": vt, "levels": levels,
         "scoring": scored, "threshold": th,
         "total_score": total, "pass_threshold": threshold,
+        "core_score": scored.get("core_total"), "core_threshold": th.get("core_threshold"),
         "gap": threshold - total,
         "odds": levels.get("odds"), "sl_pct": levels.get("sl_pct"), "tp_pct": levels.get("tp_pct"),
         "verdict": verdict, "reasons": reasons,
@@ -803,6 +868,9 @@ def snapshot(ev: dict) -> dict:
         "ma_bull": (ev.get("ind") or {}).get("ma_bull"),
         "intraday": ev.get("intraday"), "stage": (ev.get("stage") or {}).get("stage"),
         "total_score": ev.get("total_score"), "pass_threshold": ev.get("pass_threshold"),
+        # 有效分两把尺子：计划复核要用和选票时同一套判定，缺了就只能比总分。
+        "core_score": (ev.get("scoring") or {}).get("core_total"),
+        "core_threshold": ev.get("core_threshold"),
         # 六维拆解（不含 detail，只留可对比的得分）：计划复核时据此指出「共振分
         # 具体掉在哪一维」，而不是只报一句 6<7 让人猜。
         "scoring_dims": [

@@ -4,6 +4,25 @@
 
 ## [Unreleased]
 
+### 数 · 历史样本分层与周期留痕（2026-11-10：T+1/T+2/T+3/T+5 同口径 + 失效标记）
+
+- **`data_status` 字段**（`followthrough.record_status` / `load_valid_records`）：取值 `valid`（缺省）/ `legacy`。所有归因（`aggregate`、`stage_b_bucket_stats`、`mode_channel_stats`、`shadow_t3_stats`、`gate_blocked_recent`、`t3_attribution`、`sample_gap_stats`）只吃 `valid`。本次把 2026-08-08~08-21 的 62 条结构字段缺失样本原地标 `legacy`（附 `data_status_reason`），文件备份在 `/tmp/seed_records.backup.*.jsonl`；以后判失效只认显式字段，不再靠「缺 `pass_threshold`」猜。
+- **周期成败标记**：除 `result`（T+1 ≥ 3%，旧口径不动）外，新增 `result_t1/result_t2/result_t3/result_t5`，统一口径为「该周期收盘 > `followthrough.t3_win_chg_pct`（默认 0）」。`update_results` 在回填任一周期时顺带补齐所有已到期的标记，旧记录自动迁移。
+- **`data_health()` / `horizon_winrates()`**：给出有效/失效条数、失效区间、各周期待回填数，以及四个周期同口径胜率与旧 T+1≥3% 对照。
+- **日报**（`ops_summary`）：新增「样本健康」（有效/失效/待回填）与「明天该关注」两段，只看数据不改门槛。
+- **周报**（`weekly`）：纪律自查新增「失效历史样本」「有效样本回填」两行；T+3 段新增「待回填/失效 N 条」与「各周期同口径对照」；新增「下周该关注（只提示，不改门槛）」——由 `focus_points()` 从失效样本、T+3 最差分桶、两通道回填不均衡里挑最多 3 条。
+- **计划复核对齐两把尺子**（`portfolio/plan.check_item`）：复核走 `preflight.gate_failed`，与选票同一判定；`snapshot()` 另存 `core_score`/`core_threshold`，旧快照缺字段时退回只比总分。
+
+### 术 · 共振门槛与 T+3 口径（2026-11-10：600732 复盘后的三处修正）
+
+样本回看（122 条落盘、119 条已回填 T+3）暴露三个问题，本次逐一处理：
+
+- **`result_t3` 新增**（`followthrough.update_results`）：`result` 仍按 T+1 ≥ `followthrough.win_chg_pct`（3%）判，**不改语义**；另落 `result_t3`（T+3 收盘 ≥ `followthrough.t3_win_chg_pct`，默认 0）。实证 T+1 与 T+3 方向不一致 40/119 = 34%，拿 T+1 的成败去解释 T+3 的涨跌是两套口径互跳。历史记录已按 `chg_t3` 原地补齐。
+- **大盘趋势只扣不加**（`preflight.score_nine` ②）：原规则强趋势 +1、弱势 -1。实测 +1 桶 T+3 胜率 45%、-1 桶 67%，加成方向是反的；改为弱势 -1、其余 0，且只缺一路数据（斜率或缺点位）不再当利空扣分。
+- **共振有效分 / 两把尺子**（`preflight.resonance_core_score`、`core_threshold`、`gate_failed`）：消息面在自动扫描下恒 0/0、止损结构在止损规则内恒 +1，两维对排序零贡献却把满分垫高。新增「有效分」= 只数板块强度/大盘趋势/市值区间/量价结构（满分 7），门槛按比例换算（6/9 → 5/7），判定改为总分与有效分任一不过即不过，修掉「5/9 门槛7 → 差 2 分」这类自相矛盾的文案。有效分同时随样本落盘，T+3 归因新增「共振有效分」桶。
+- **`winrate_would_buy` 加共振闸**（`runner._ft_entries`、`screener.winrate_scan`）：原先只看胜率分，共振 6<门槛7 的票也被记成 `would_buy=True`，污染「硬闸误杀」统计；现要求胜率分与共振分同时过线。
+- **自测**：`check_scoring`（强趋势 0 / 弱势 -1 / 缺斜率不扣分 / 有效分与门槛换算 / 两把尺子）、`check_followthrough`（`result_t3`）、`check_t3_attribution_and_scheduled_review`（方向分歧计数、有效分桶）。
+
 ### 运维
 
 - **`ops/12-handoff-2026-11-05-nas-sync.md`**：本机修复 push 后的 NAS 同步验收清单 + 后续 AI 跟进（P2 限频/摘要增强待 Plan）。

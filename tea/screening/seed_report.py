@@ -269,7 +269,10 @@ def _scoring_dims_lines(ev: dict) -> List[str]:
     if total is None:
         total = ev.get("total_score")
     maxv = sc.get("max")
-    lines = [f"  - 共振六维（{total}/{maxv}）："]
+    core = sc.get("core_total")
+    core_max = sc.get("core_max")
+    suffix = f"，有效 {core}/{core_max}" if core is not None and core_max else ""
+    lines = [f"  - 共振六维（{total}/{maxv}{suffix}）："]
     for i, d in enumerate(dims, 1):
         no = d.get("no") or i
         lines.append(f"    - {no}. {d.get('name')} {d.get('score')}/{d.get('max')} — {d.get('detail')}")
@@ -837,6 +840,12 @@ def compact_email_stock_line(ev: dict, op: str, cfg: Config,
         mx = _reso_max(ev)
         mark = _pass_status(sc >= th)
         line += f"共振{sc}/{mx} {mark}"
+        core = (ev.get("scoring") or {}).get("core_total")
+        core_max = (ev.get("scoring") or {}).get("core_max")
+        core_th = ev.get("core_threshold")
+        if core is not None and core_max:
+            th_txt = f"≥{core_th}" if core_th is not None else ""
+            line += f"（有效{core}/{core_max}{th_txt}）"
 
     stage = (ev.get("stage") or {}).get("stage")
     if stage:

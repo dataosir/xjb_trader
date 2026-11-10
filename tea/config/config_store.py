@@ -158,6 +158,11 @@ DEFAULTS: Dict[str, Any] = {
         # （配合 _preferred_host 记忆），尝试次数由 retries 严格控制。
         "retries": 2,
         "retry_backoff": 1.7,
+        # 采集前探活：先并发探一遍各家源与 CDN 节点（约 1~3 秒），把 DNS 劫持 /
+        # 证书缺失 / 无该接口的源本次直接跳过，不再让它们吃光重试与超时预算。
+        # 排障或离线时可关掉（`tea weather --no-probe`）。
+        "probe_enabled": True,
+        "probe_timeout_sec": 2.5,
         "delay_base": 0.35,
         "delay_spread": 0.25,
         "delay_after_error": 1.2,
@@ -672,6 +677,9 @@ DEFAULTS: Dict[str, Any] = {
     "followthrough": {
         "min_samples": 8,
         "win_chg_pct": 3.0,
+        # T+3 成败口径（result_t3）：只看收盘是否高于选票日，不用 +3% 门槛——
+        # T+3 归因本身按「>0」算，两处口径必须一致，否则统计和落盘互相打架。
+        "t3_win_chg_pct": 0.0,
         "score_high": 0.45,
         "mult_high": 1.0,
         "score_mid": 0.30,

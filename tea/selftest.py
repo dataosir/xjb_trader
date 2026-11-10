@@ -1398,6 +1398,137 @@ def check_sentiment(t: Suite, cfg: Config, mk: FakeMarket) -> dict:
     return sent
 
 
+def check_probe(t: Suite, cfg: Config) -> None:
+    """采集前探活：坏源跳过、结论说清故障类型、探测开销不混进采集统计。
+
+    真实踩坑：一次采集「网络请求 24 次｜失败 24」——本机 DNS 把网易/凤凰解析到保留
+    网段、Python 的 CA 库又是空的，主流程却仍按配置顺序一家家撞重试。
+    """
+    import socket
+    import ssl
+    import urllib.error
+    import urllib.parse
+
+    from .data.fetcher import classify_error
+    from .data.probe import _verdict, apply_probe, probe_and_apply, probe_providers
+    from .data.providers import DEFAULT_SOURCES as ALL, build_provider
+
+    t.head("数据层 · 采集前探活")
+
+    # ---- 故障分类：以前一律叫「网络抖动」，用户分不清该改配置还是等网络
+    t.eq("gaierror → dns",
+         classify_error(socket.gaierror(8, "nodename nor servname provided"))[0], "dns")
+    t.eq("URLError 包一层仍认得出 dns",
+         classify_error(urllib.error.URLError(socket.gaierror(8, "nomatch")))[0], "dns")
+    t.eq("MarketError 包两层仍认得出 tls",
+         classify_error(MarketError(
+             "请求失败(2次): x -> <urlopen error [SSL: CERTIFICATE_VERIFY_FAILED] "
+             "certificate verify failed: unable to get local issuer certificate>"))[0], "tls")
+    t.ok("SSLCertVerificationError 实例也归 tls",
+         classify_error(ssl.SSLCertVerificationError(1, "certificate verify failed"))[0] == "tls")
+    t.eq("保留网段 → dns_hijack",
+         classify_error(MarketError("x -> connect to 198.10.0.5:443 refused"))[0], "dns_hijack")
+    t.eq("超时 → timeout", classify_error(TimeoutError("timed out"))[0], "timeout")
+    t.eq("EOF/断连 → reset",
+         classify_error(OSError("EOF occurred in violation of protocol"))[0], "reset")
+
+    # ---- 报告口径：没这个接口的源不算故障，也不该摊薄「大写不可达」的分母
+    t.eq("全通 → ok", _verdict({"a": {"ok": True}, "b": {"ok": True}}), "ok")
+    t.eq("一家失败 → partial",
+         _verdict({"a": {"ok": True}, "b": {"ok": True},
+                   "c": {"ok": False, "kind": "dns"}}), "partial")
+    t.eq("无接口的源不摊薄分母",
+         _verdict({"a": {"ok": True}, "b": {"ok": False, "kind": "unsupported"}}), "ok")
+    t.eq("过半失败 → down",
+         _verdict({"a": {"ok": False, "kind": "dns"}, "b": {"ok": False, "kind": "dns"},
+                   "c": {"ok": True}}), "down")
+
+    # ---- 假抓取器：按目标域名注入故障，探活全程不联网
+    class _ProbeFetcher(Fetcher):
+        def __init__(self, failures: Dict[str, str]):
+            super().__init__(cfg)
+            self.failures = failures
+            self.show_progress = False
+            self.delay_base = self.delay_spread = self.delay_after_error = 0.0
+            self.probed: List[str] = []
+
+        def _do_get(self, full_url, encoding=None, extra_headers=None):
+            self.probed.append(full_url)
+            host = urllib.parse.urlsplit(full_url).netloc
+            kind = self.failures.get(host)
+            if kind == "dns":
+                raise urllib.error.URLError(socket.gaierror(8, "nodename nor servname provided"))
+            if kind == "hijack":
+                raise OSError("connect to 198.10.0.5:443 failed")
+            return _tencent_quote_text(str(full_url).split("q=")[-1])
+
+    # 源只留「腾讯(通) + 网易(挂)」两家：探活对每家只发一次报价请求，而东财报价走
+    # get_json 的节点池、新浪/网易文本各有自己的解析，混在一起验会把探活本身淹掉。
+    pf = _ProbeFetcher({"api.money.126.net": "dns"})
+    chain = build_provider(cfg, pf, ["tencent", "netease"])
+    report = probe_providers(cfg, pf, io=None, chain=chain)
+    t.eq("报告覆盖链上每家源", len(report["sources"]), 2)
+    t.ok("能通的源判 ok", report["sources"]["tencent"]["ok"] is True)
+    t.eq("解析不了的源判 dns", report["sources"]["netease"]["kind"], "dns")
+    t.ok("只有挂掉的那家进跳过清单", report["skipped"] == ["netease"], str(report["skipped"]))
+    t.eq("两家里挂一家已到半数 → down", report["verdict"], "down")
+    t.ok("CDN 节点池逐个探过", len(report["hosts"].get("cdn_hosts_quote") or {}) ==
+         len(cfg.get("market.cdn_hosts_quote")), str(report["hosts"].keys()))
+    t.ok("节点能通时不误判成坏节点",
+         all(v["ok"] for v in (report["hosts"].get("cdn_hosts_quote") or {}).values()),
+         str(report["hosts"].get("cdn_hosts_quote")))
+    t.eq("坏节点落地进死节点集合（坏 host 才加）", len(pf._dead_hosts), 0)
+
+    bad_host_report = {"sources": {"tencent": {"ok": True, "kind": "ok"}},
+                       "skipped": [],
+                       "hosts": {"cdn_hosts_quote": {
+                           "push2.eastmoney.com": {"host": "push2.eastmoney.com", "ok": False,
+                                                   "kind": "reset", "hint": "连接被中断", "ms": 5}}}}
+    apply_probe(pf, chain, bad_host_report)
+    t.ok("坏节点确实被写进死节点集合", "push2.eastmoney.com" in pf._dead_hosts, str(pf._dead_hosts))
+    order = pf._host_order("cdn_hosts_quote")
+    t.ok("坏节点在节点顺序里排到最后", order[-1] == "push2.eastmoney.com", str(order))
+
+    # ---- 落地：坏源熔断（跳过后 _try_all 不会再问它），探测请求不计进采集统计
+    apply_probe(pf, chain, report)
+    t.ok("坏源写进熔断", ("netease", "quote") in chain._circuit_open, str(chain._circuit_open))
+    t.ok("好源不被熔断", not any(k[0] == "tencent" for k in chain._circuit_open))
+
+    pf2 = _ProbeFetcher({"api.money.126.net": "dns"})
+    chain2 = build_provider(cfg, pf2, ["tencent", "netease"])
+    before = dict(pf2.stats)
+    mini = FakeMarket.__new__(FakeMarket)
+    mini.f, mini.provider = pf2, chain2
+    rep = probe_and_apply(cfg, mini, io=None)
+    t.ok("probe_and_apply 返回报告", bool(rep), str(rep))
+    t.eq("探测请求不混进采集统计", pf2.stats["requests"], before["requests"])
+    t.eq("探测失败也不污染采集的错误数", pf2.stats["errors"], before["errors"])
+    t.ok("探测结论可透传给天气屏", rep.get("verdict") in ("ok", "partial", "down"), str(rep))
+
+    # ---- 关闭开关：一步都不走（排障 / 离线）
+    off = Config(data={"market": {"probe_enabled": False}})
+    pf3 = _ProbeFetcher({})
+    mini3 = FakeMarket.__new__(FakeMarket)
+    mini3.f, mini3.provider = pf3, build_provider(off, pf3, ALL)
+    t.eq("probe_enabled=False 时返回空报告", probe_and_apply(off, mini3, io=None), {})
+    t.eq("关闭时一个请求都不发", pf3.probed, [])
+
+    # ---- 提示文案：跳过与「网络抖动」分得开
+    class _BufIO:
+        def __init__(self):
+            self.lines: List[str] = []
+
+        def say(self, text):
+            self.lines.append(text)
+
+    cap = _BufIO()
+    pf4 = _ProbeFetcher({"api.money.126.net": "dns"})
+    probe_providers(cfg, pf4, io=cap, chain=build_provider(cfg, pf4, ["tencent", "netease"]))
+    out = "\n".join(cap.lines)
+    t.ok("跳过时报出是哪家、为什么", "网易" in out and "解析" in out, out.strip() or "（无输出）")
+    t.ok("探活本身不刷「网络抖动」", "网络抖动" not in out, out)
+
+
 def check_identity(t: Suite, cfg: Config, mk: FakeMarket) -> dict:
     t.head("术 · 身份判定（§6.1 / §6.4）")
     q = mk.get_quote(TARGET)
@@ -1522,14 +1653,38 @@ def check_scoring(t: Suite, cfg: Config, mk: FakeMarket, sent: dict, lv: dict) -
     by_no = {d["no"]: d for d in sc["dims"]}
 
     t.eq("①板块强度（排名1≤3 且涨停2≥2，内前10% +1 封顶2）", by_no[1]["score"], 2)
-    t.eq("②大盘趋势（强趋势：上方 + 上行）", by_no[2]["score"], 1)
+    # 大盘趋势只扣不加：119 条样本里 +1 桶 T+3 胜率 45%、-1 桶反而 67%，
+    # 强趋势给 +1 分等于奖励最差的桶，所以强趋势归 0。
+    t.eq("②大盘趋势（强趋势只扣不加 → 0）", by_no[2]["score"], 0)
     t.eq("③消息面（有催化）", by_no[3]["score"], 1)
     t.eq("④市值区间（120亿 ∈ 50~300）", by_no[4]["score"], 2)
     t.eq("⑤量价结构（放量上涨 + 多头，无扣分）", by_no[5]["score"], 2)
     t.eq("⑥止损结构（≤8% 且 /ATR≤2.5 且 R:R≥3）", by_no[6]["score"], 1)
-    t.eq("共振总分", sc["total"], 9)
+    t.eq("共振总分", sc["total"], 8)
     t.eq("满分基准", sc["max"], 9)
+    t.eq("有效分只数会变的四维（满分 7）", (sc["core_total"], sc["core_max"]), (6, 7))
+    t.eq("门槛 6/9 换算到有效分 5/7", preflight.core_threshold(6, 9), 5)
+    t.eq("门槛 7/9 换算到有效分 5/7", preflight.core_threshold(7, 9), 5)
+    t.eq("消息面中性化后门槛 8/8 换算为 6/6",
+         preflight.core_threshold(8, 8), 6)
     t.ok("无量价扣分项", not sc["penalties"], f"penalties={sc['penalties']}")
+
+    # 大盘趋势缺一路数据（只有点位没有斜率）：不能当利空扣分
+    sent_no_slope = dict(sent)
+    idx_partial = {k: v for k, v in (sent.get("index") or {}).items()
+                   if k != "ma20_slope_pct"}
+    sent_no_slope["index"] = idx_partial
+    sc_partial = preflight.score_nine(q, ind, sec, sent_no_slope, lv, has_news=True, cfg=cfg)
+    by2_partial = {d["no"]: d for d in sc_partial["dims"]}[2]
+    t.ok("大盘只缺斜率时不扣分", by2_partial["score"] >= 0, by2_partial["detail"])
+
+    # 弱势市仍扣 -1（只扣不加不等于不扣）
+    sent_weak = dict(sent)
+    sent_weak["index"] = dict(sent.get("index") or {}, ma20_bias_pct=-2.0,
+                              ma20_slope_pct=-0.8)
+    sc_weak_sent = preflight.score_nine(q, ind, sec, sent_weak, lv, has_news=True, cfg=cfg)
+    by2_weak = {d["no"]: d for d in sc_weak_sent["dims"]}[2]
+    t.eq("大盘弱势仍扣 -1", by2_weak["score"], -1)
 
     # 消息面中性化：自动扫描无消息数据（has_news=None）→ 该维 0/0、不计分不占满分
     sc_neutral = preflight.score_nine(q, ind, sec, sent, lv, has_news=None, cfg=cfg)
@@ -1537,7 +1692,7 @@ def check_scoring(t: Suite, cfg: Config, mk: FakeMarket, sent: dict, lv: dict) -
     t.eq("无消息数据时③消息面中性化为 0/0",
          (by_no_n[3]["score"], by_no_n[3]["max"]), (0, 0))
     t.eq("中性化后满分 9→8", sc_neutral["max"], 8)
-    t.eq("中性化后总分=其余 5 维之和", sc_neutral["total"], 8)
+    t.eq("中性化后总分=其余 5 维之和", sc_neutral["total"], 7)
     t.ok("中性化明细带标识",
          "中性" in by_no_n[3]["detail"] and "不计分" in by_no_n[3]["detail"],
          by_no_n[3]["detail"])
@@ -1545,7 +1700,7 @@ def check_scoring(t: Suite, cfg: Config, mk: FakeMarket, sent: dict, lv: dict) -
     # 扣分项：换手 >20% 应扣 1 分
     q_hi = dict(q, turnover=22.0)
     sc2 = preflight.score_nine(q_hi, ind, sec, sent, lv, has_news=True, cfg=cfg)
-    t.eq("换手 22% 触发量价扣分", sc2["total"], 8)
+    t.eq("换手 22% 触发量价扣分（8 → 7）", sc2["total"], 7)
 
     # 缩量上涨且非多头 → 0分（后继乏力：今日硬拉但没后劲，不再给「量价基本配合」1分）
     q_weak = dict(q, vol_ratio=1.1)
@@ -1580,12 +1735,21 @@ def check_scoring(t: Suite, cfg: Config, mk: FakeMarket, sent: dict, lv: dict) -
          preflight.format_resonance_shortfall(dims=sc["dims"], total=9, threshold=6) == "",
          "")
 
+    # 两把尺子：总分过线但有效分没过也要判不过，且文案不能出现「3<6 差 3 分」
+    t.ok("总分过线+有效分不足 → 判不过", preflight.gate_failed(7, 7, 4, 5))
+    t.ok("总分与有效分都过 → 通过", not preflight.gate_failed(8, 7, 6, 5))
+    t.ok("总分过线+有效分不足 → 缺数据时只比总分", not preflight.gate_failed(7, 7))
+    sf_core = preflight.format_resonance_shortfall(
+        dims=sc["dims"], total=7, threshold=7,
+        ev={"scoring": {"core_total": 4}, "core_threshold": 5})
+    t.ok("有效分不足的短板文案", "有效分 4/5 差 1 分" in sf_core, sf_core)
+
     # 板块排名磁盘兜底（stale）：板块强度整维归零，不拿昨日排名给假分。
     sec_stale = dict(sec, stale=True)
     sc_stale = preflight.score_nine(q, ind, sec_stale, sent, lv, has_news=True, cfg=cfg)
     by_no_stale = {d["no"]: d for d in sc_stale["dims"]}
     t.eq("stale 时①板块强度归零", by_no_stale[1]["score"], 0)
-    t.eq("stale 时共振总分扣掉板块强度（9→7）", sc_stale["total"], 7)
+    t.eq("stale 时共振总分扣掉板块强度（8→6）", sc_stale["total"], 6)
     t.ok("stale 提示出现在板块强度明细里",
          "不参与共振分" in by_no_stale[1]["detail"], by_no_stale[1]["detail"])
 
@@ -1595,7 +1759,7 @@ def check_scoring(t: Suite, cfg: Config, mk: FakeMarket, sent: dict, lv: dict) -
     by_kline_stale = {d["no"]: d for d in sc_kline_stale["dims"]}
     t.eq("K线 stale 时⑤量价结构归零", by_kline_stale[5]["score"], 0)
     t.eq("K线 stale 时⑥止损结构归零", by_kline_stale[6]["score"], 0)
-    t.eq("K线 stale 时共振总分（9→6）", sc_kline_stale["total"], 6)
+    t.eq("K线 stale 时共振总分（8→5）", sc_kline_stale["total"], 5)
     t.ok("K线 stale 提示出现在⑤量价结构明细里",
          "不参与共振分" in by_kline_stale[5]["detail"], by_kline_stale[5]["detail"])
     t.ok("K线 stale 提示出现在⑥止损结构明细里",
@@ -1948,10 +2112,11 @@ def check_gates(t: Suite, cfg: Config, mk: FakeMarket, sent: dict) -> None:
 
 
 def check_market_trend_deduction(t: Suite, cfg: Config, mk: FakeMarket) -> None:
-    """大盘趋势不再硬闸短路，改为 9 分共振里的分级扣分（-1~+1，扣分封顶 -1）。
+    """大盘趋势不再硬闸短路，改为 9 分共振里的分级扣分（只扣不加，-1~0）。
 
     更稳的趋势定义：位置（点位 vs MA20，带缓冲）+ 方向（MA20 斜率）合成 -2~+2，
-    弱势市共振分被扣除、但扫描照常跑完，不再一票否决。
+    弱势市共振分被扣除、但扫描照常跑完，不再一票否决。强趋势不给 +1：
+    119 条回填样本里 +1 桶 T+3 胜率 45%、-1 桶反而是 67%，加成方向是反的。
     """
     t.head("扫描 · 大盘趋势分级扣分")
     q = mk.get_quote(TARGET)
@@ -1964,8 +2129,12 @@ def check_market_trend_deduction(t: Suite, cfg: Config, mk: FakeMarket) -> None:
                                   has_news=True, cfg=cfg)
         return {d["no"]: d for d in sc["dims"]}[2]["score"]
 
-    t.eq("强趋势 +1（上方且上行）", dim2({"point": 3200.0, "ma20": 3150.0,
-                                          "ma20_bias_pct": 1.59, "ma20_slope_pct": 0.5}), 1)
+    t.eq("强趋势 0（只扣不加）", dim2({"point": 3200.0, "ma20": 3150.0,
+                                      "ma20_bias_pct": 1.59, "ma20_slope_pct": 0.5}), 0)
+    t.eq("偏强 0（只涨不扣分）", dim2({"point": 3200.0, "ma20": 3150.0,
+                                    "ma20_bias_pct": 1.59, "ma20_slope_pct": 0.05}), 0)
+    t.eq("缺斜率不误判为弱", dim2({"point": 3200.0, "ma20": 3198.0,
+                                "ma20_bias_pct": 0.06}), 0)
     t.eq("弱势 -1（下方且下行，扣分封顶）", dim2({"point": 3150.0, "ma20": 3200.0,
                                         "ma20_bias_pct": -1.56, "ma20_slope_pct": -0.5}), -1)
     t.eq("贴线震荡 0（缓冲内且走平）", dim2({"point": 3200.0, "ma20": 3198.0,
@@ -2846,6 +3015,9 @@ def check_followthrough(t: Suite, cfg: Config) -> None:
     t.ok("T+1 < T+3 < T+5（构造上行K线）",
          rec["next_chg"] < rec["chg_t3"] < rec["chg_t5"],
          f"t1={rec.get('next_chg')} t3={rec.get('chg_t3')} t5={rec.get('chg_t5')}")
+    # result_t3 独立于 result：result 按 T+1 ≥ 3% 判，result_t3 按 T+3 > 0 判
+    t.ok("T+3 成败单独落盘", rec.get("result_t3") in ("win", "loss"), str(rec.get("result_t3")))
+    t.eq("T+3 上行 → result_t3 = win", rec.get("result_t3"), "win")
 
     # 阶段 B 样本盘点：按 板块排名桶×阶段×档位×身份分桶 聚合，找最大桶
     ft_mod.save_records([
@@ -2857,9 +3029,22 @@ def check_followthrough(t: Suite, cfg: Config) -> None:
          "identity_score": 88.0, "stage": "过热", "tier": "热点降级档", "result": "win"},
         {"date": "2026-08-18", "code": "600904", "name": "桶B1", "sector_rank": 9,
          "identity_score": 60.0, "stage": "突破", "tier": "严格档", "result": "loss"},
+    ] + [
     ], cfg)
     st = ft_mod.stage_b_bucket_stats(cfg, min_samples=3)
     t.eq("阶段B最大桶样本", st["max_n"], 3)
+    # 失效样本不进归因：同一只票标 legacy 后桶计数不应变化
+    recs_legacy = [dict(r) for r in ft_mod.load_records(cfg)]
+    for r in recs_legacy:
+        if r.get("code") == "600901":
+            r["data_status"] = ft_mod.STATUS_LEGACY
+    ft_mod.save_records(recs_legacy, cfg)
+    st_lg = ft_mod.stage_b_bucket_stats(cfg, min_samples=3)
+    t.eq("失效样本排除出桶统计", st_lg["max_n"], 2)
+    t.eq("失效样本身份可读", ft_mod.data_health(cfg)["legacy"], 1)
+    for r in recs_legacy:
+        r.pop("data_status", None)
+    ft_mod.save_records(recs_legacy, cfg)
     t.ok("阶段B最大桶达标（3≥3）", st["ready"])
     t.ok("阶段B最大桶键正确", st["max_bucket"].startswith("1-3 / 过热 / 热点降级档 / 85-93"),
          st["max_bucket"])
@@ -3526,12 +3711,35 @@ def check_t3_attribution_and_scheduled_review(t: Suite, c: Config) -> None:
          "chg_t3": -2.0},
         {"date": "2026-08-03", "code": "600003", "stage": "突破", "sector_rank": 1,
          "chg_pct": 8.0, "track": "观察", "result": None},
+        # T+1 涨 3.5% 但 T+3 转负：result=win 而 T+3 下跌，专门制造口径分歧
+        {"date": "2026-08-04", "code": "600004", "stage": "过热", "sector_rank": 2,
+         "chg_pct": 6.0, "track": "可买", "result": "win", "next_chg": 3.5,
+         "chg_t3": -1.5,
+         "scoring_dims": [{"name": "板块强度", "score": 2, "max": 2},
+                          {"name": "大盘趋势", "score": 0, "max": 1},
+                          {"name": "消息面", "score": 0, "max": 0},
+                          {"name": "市值区间", "score": 2, "max": 2},
+                          {"name": "量价结构", "score": 1, "max": 2},
+                          {"name": "止损结构", "score": 1, "max": 1}]},
     ], c)
 
     st = ft_mod.t3_attribution(c)
-    t.eq("T+3 回填 2 条", st["total_n"], 2)
+    t.eq("T+3 回填 3 条", st["total_n"], 3)
     t.eq("萌芽 T+3 样本", st["mengya_n"], 2)
+    t.eq("T+1/T+3 方向分歧计 1 条", st["t1_t3_disagree_n"], 1)
+    t.eq("方向分歧分母只数已回填 result", st["t1_t3_compare_n"], 3)
+    t.eq("共振有效分桶（2+0+2+1=5 → 有效4-5）", st["res"].get("有效4-5", {}).get("n"), 1)
     t.ok("format_t3 含萌芽", "萌芽专看" in ft_mod.format_t3_attribution(c))
+    t.ok("format_t3 含方向分歧", "方向不一致" in ft_mod.format_t3_attribution(c))
+    t.ok("format_t3 含共振有效分", "共振有效分" in ft_mod.format_t3_attribution(c))
+
+    # 只数会变的维度：消息面 0/0 与止损结构恒满都不进有效分
+    t.eq("有效分排除消息面/止损结构",
+         ft_mod.resonance_core_score([
+             {"name": "板块强度", "score": 2, "max": 2},
+             {"name": "止损结构", "score": 0, "max": 1},
+             {"name": "消息面", "score": 0, "max": 1},
+         ]), (2, 2))
 
     md = weekly_mod.render_md(cfg=c)
     t.ok("周报含三日持有段", "三日持有 T+3>0" in md)
@@ -3981,6 +4189,7 @@ def main(verbose: bool = True, cfg: Optional[Config] = None) -> int:
         check_ztpool_fallback(t, c)
         check_host_failover(t, c)
         check_providers(t, c)
+        check_probe(t, c)
         sent = check_sentiment(t, c, mk)
         idn = check_identity(t, c, mk)
         lv = check_levels(t, c, mk)

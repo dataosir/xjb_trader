@@ -26,6 +26,7 @@ from .indicators import (
     ma,
 )
 from .market import Market
+from .probe import probe_and_apply, probe_providers
 from .providers import ChainedProvider, IDataProvider, build_provider
 
 __all__ = [
@@ -36,6 +37,8 @@ __all__ = [
     "IDataProvider",
     "ChainedProvider",
     "build_provider",
+    "probe_providers",
+    "probe_and_apply",
     "ma",
     "atr",
     "bollinger",

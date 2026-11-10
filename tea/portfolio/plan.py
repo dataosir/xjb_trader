@@ -279,8 +279,16 @@ def check_item(item: dict, ev: dict, cfg: Optional[Config] = None) -> List[dict]
 
     th = ev.get("pass_threshold")
     total = ev.get("total_score")
-    if total is not None and th is not None and total < th:
-        detail = f"共振分 {total} < 当前门槛 {th}"
+    core = (ev.get("scoring") or {}).get("core_total")
+    core_th = ev.get("core_threshold")
+    # 与预审判定同一把尺子（preflight.gate_failed）：总分过线但有效分不过也算退化，
+    # 否则 5/9 过 6 分门槛、有效分只有 3/5 的票会被复核判「无变化」。
+    if preflight.gate_failed(total, th, core, core_th):
+        if total < th:
+            detail = f"共振分 {total} < 当前门槛 {th}"
+        else:
+            detail = (f"有效分 {core}/{core_th} < 当前门槛 {core_th}"
+                      f"（总分 {total} 过线）")
         # 展开变化来源：门槛本身涨了，或某几维得分掉了——否则只报 6<7 让人猜。
         old_th = snap.get("pass_threshold")
         if old_th is not None and old_th != th:

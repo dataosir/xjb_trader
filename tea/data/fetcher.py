@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import random
+import ssl
 import time
 import urllib.parse
 import urllib.request
@@ -24,6 +25,93 @@ try:  # requests 可用则优先（连接复用），否则回退 urllib
     import requests  # type: ignore
 except Exception:  # pragma: no cover
     requests = None
+
+try:
+    import certifi  # type: ignore
+except Exception:  # pragma: no cover
+    certifi = None
+
+# macOS 上 python.org 安装的 Python 自带的 openssl/cert.pem 往往是空的，
+# `ssl.create_default_context()` 一个 CA 都没有，所有 HTTPS 直接
+# CERTIFICATE_VERIFY_FAILED。这里按优先级找一份真能用的根证书：
+# certifi → 系统（Homebrew/Linux）常见位置 → 空串表示交回默认。
+_CA_CANDIDATES = (
+    "/etc/ssl/cert.pem",
+    "/private/etc/ssl/cert.pem",
+    "/opt/homebrew/etc/ca-certificates/cert.pem",
+    "/usr/local/etc/ca-certificates/cert.pem",
+    "/etc/ssl/certs/ca-certificates.crt",
+)
+
+
+def _ca_bundle() -> Optional[str]:
+    if certifi is not None:
+        try:
+            path = certifi.where()
+            with open(path, "rb"):
+                return path
+        except OSError:
+            pass
+    for path in _CA_CANDIDATES:
+        try:
+            with open(path, "rb"):
+                return path
+        except OSError:
+            continue
+    return None
+
+
+def _ssl_context() -> ssl.SSLContext:
+    cafile = _ca_bundle()
+    return ssl.create_default_context(cafile=cafile) if cafile else ssl.create_default_context()
+
+
+# 本地 DNS 黑洞常把域名解析到这几个保留网段（实测的 198.10.x 拦截器就在 198.18/15 附近），
+# 用户看到「198.10.0.5」比看到「网络抖动」更能判断该改 hosts 还是换网络。
+_HIJACK_NETS = ("198.18.", "198.19.", "198.10.")
+
+
+def _error_chain(exc: BaseException) -> list:
+    """把异常自身、__cause__ 与 __context__ 摊平，便于穿透 MarketError 的包装层。"""
+    out, seen, cur = [], set(), exc
+    while cur is not None and id(cur) not in seen:
+        seen.add(id(cur))
+        out.append(cur)
+        cur = cur.__cause__ or cur.__context__
+    return out
+
+
+def classify_error(exc: BaseException) -> tuple:
+    """把网络异常归成 (kind, hint)，供探测与兜底提示分辨故障类型。
+
+    kind 取 dns / dns_hijack / tls / timeout / reset / http；hint 是给屏上看的一句短语。
+    以前一律报「网络抖动」，DNS 劫持与证书缺失也混在里面，用户无从下手。
+    """
+    msgs, kinds = [], set()
+    for e in _error_chain(exc):
+        msgs.append(str(e))
+        kinds.add(type(e).__name__)
+        reason = getattr(e, "reason", None)
+        if reason is not None:
+            msgs.append(str(reason))
+            kinds.add(type(reason).__name__)
+    text = " ".join(msgs)
+    low = text.lower()
+    if any(net in text for net in _HIJACK_NETS):
+        return "dns_hijack", "DNS 被劫持到保留网段"
+    # gaierror 的文本是 "[Errno 8] nodename nor servname provided"，不含类名，得两头都看。
+    if ("gaierror" in kinds or "name or service not known" in low
+            or "nodename nor servname" in low or "could not resolve" in low):
+        return "dns", "域名解析失败"
+    if "sslcertverificationerror" in kinds or "certificate_verify_failed" in low \
+            or "certificate verify failed" in low:
+        return "tls", "证书校验失败"
+    if "timeout" in low or "timed out" in low:
+        return "timeout", "连接超时"
+    if any(k in low for k in ("remotedisconnected", "connection reset", "eof occurred", "broken pipe")):
+        return "reset", "连接被中断"
+    brief = " ".join(text.split())
+    return "http", (brief[:33] + "…" if len(brief) > 34 else brief) or type(exc).__name__
 
 
 class Fetcher:
@@ -62,6 +150,11 @@ class Fetcher:
         # 同一池连挂时只报第一次，后面静默（降级链会各自报「改用谁」，也做了节流）。
         self._retry_noticed_pools: set = set()
         self._sess = requests.Session() if requests else None
+        if self._sess is not None:
+            ca = _ca_bundle()
+            if ca:
+                self._sess.verify = ca
+        self._ssl_ctx = _ssl_context()
         # 东财是国内站。shell 里为翻墙配的 http_proxy/https_proxy 会被 requests 默认
         # 读走，把域名请求硬塞进代理——代理一连不上就 ProxyError 全崩。除非用户显式
         # 开 use_env_proxy 或自己配了 proxy_pool，否则一律直连，不理会环境里的代理。
@@ -126,6 +219,37 @@ class Fetcher:
         wait = utils.jitter(self.delay_base, self.delay_spread) - (time.time() - self._last_req)
         if wait > 0:
             time.sleep(wait)
+
+    def probe(self, url: str, params: Optional[dict] = None,
+              encoding: Optional[str] = None, extra_headers: Optional[dict] = None,
+              timeout: Optional[float] = None) -> dict:
+        """发一次不打重试、不轮节点池的轻量请求，只回答「这个地址现在通不通」。
+
+        走 `_do_get` 而不是另写 HTTP 客户端：CA、代理开关、UA/Referer 跟真实取数
+        完全同一条路，探测结果才有意义。失败时给出 `classify_error` 的类型，
+        上层据此决定「跳过这家」还是「提示证书/DNS 有问题」。
+        """
+        full = url if not params else (
+            url + ("&" if "?" in url else "?") + urllib.parse.urlencode(params))
+        t0 = time.time()
+        try:
+            with self.with_timeout(timeout or self.timeout):
+                self._throttle()
+                raw = (self._do_get(full) if encoding is None and not extra_headers
+                       else self._do_get(full, encoding=encoding, extra_headers=extra_headers))
+            self._last_req = time.time()
+            self.stats["requests"] += 1
+            self._record(url, None, self._last_req - t0, True)
+            return {"ok": True, "kind": "ok", "hint": "", "ms": int((time.time() - t0) * 1000),
+                    "chars": len(raw or "")}
+        except Exception as exc:
+            self.stats["requests"] += 1
+            self.stats["errors"] += 1
+            self._last_req = time.time()
+            self._record(url, None, self._last_req - t0, False)
+            kind, hint = classify_error(exc)
+            return {"ok": False, "kind": kind, "hint": hint,
+                    "ms": int((time.time() - t0) * 1000)}
 
     # -------------------------------------------------- 耗时统计
     def _record(self, url: str, host: Optional[str], elapsed: float, ok: bool) -> None:
@@ -279,5 +403,5 @@ class Fetcher:
         else:
             handler = urllib.request.ProxyHandler({})  # 空字典＝显式禁用代理，别读环境变量
         opener = urllib.request.build_opener(handler) if handler is not None else urllib.request.build_opener()
-        with opener.open(req, timeout=self.timeout) as r:
+        with opener.open(req, timeout=self.timeout, context=self._ssl_ctx) as r:
             return r.read().decode(encoding or "utf-8", "replace")

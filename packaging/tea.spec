@@ -91,6 +91,7 @@ HIDDEN = [
     "tea.data.fetcher",
     "tea.data.indicators",
     "tea.data.market",
+    "tea.data.probe",
     # 数据源实现：按配置里的名字动态挑，静态分析必漏
     "tea.data.providers",
     "tea.data.providers.base",
