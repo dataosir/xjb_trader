@@ -205,7 +205,17 @@ def focus_points(wk: dict, cfg: Optional[Config] = None, top_n: int = 4) -> List
     weak = [(k, v) for k, v in chg.items() if v.get("n", 0) >= min_n
             and (v.get("rate") or 0) < 0.4]
     for k, v in weak:
-        out.append(f"涨幅桶「{k}」T+3>0 仅 {v['up']}/{v['n']}={v.get('rate', 0):.0%}，"
+        # 单调桶会掩盖条件：5.5~7.5% 这一档整体 30%，拆开看板块强度 2 是 43%、
+        # 强度 0 是 0%。条件桶对全样本算，所以只在 5.5~7.5 档上附注。
+        detail = ""
+        if k.replace("%", "").strip() in ("5.5~7.5", "5.5-7.5"):
+            cond = followthrough.horizon_conditional(cfg=cfg)
+            parts = [f"{ck} {cv['up']}/{cv['n']}={cv['rate']:.0%}"
+                     for ck, cv in (cond.get("by_sector") or {}).items()
+                     if cv.get("n") and cv.get("rate") is not None]
+            if parts:
+                detail = "（拆开看：" + "、".join(parts) + "）"
+        out.append(f"涨幅桶「{k}」T+3>0 仅 {v['up']}/{v['n']}={v.get('rate', 0):.0%}{detail}，"
                    "追高区间是主要亏损来源，盯住它是否继续拖累。")
 
     mc = wk.get("mode_channels") or {}

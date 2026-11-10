@@ -4,6 +4,26 @@
 
 ## [Unreleased]
 
+### 数 · 选票价基准与挂单成交口径（2026-11-10：pick_close/close 分家 + 止损止盈撮合 + explain）
+
+样本重算发现两件事：涨幅基准拿错了（用选票日**收盘**当基准算 T+N，等于把「隔夜跳空」算成收益），
+以及「T+3 收盘涨了」与「按实操挂单能不能赚到」是两个问题。本次拆开：
+
+- **`pick_close` 与 `close` 分家**（`followthrough.update_results`）：
+  - `close` = 选票日真实收盘（回填时用 `get_klines(limit=120)` 按日期定位，不再拿 `limit=30` 够不到的旧价）；
+  - `pick_close` = 选票价（`record_seed` 落盘），但盘中记下的现价离收盘可能差几个点，回填统一按「对得上的收盘 /(1+chg_pct/100)」重推，标 `pick_price_basis=derived` 并记 `chg_day_date`（早盘扫描的涨幅常属于前一交易日）。涨幅与记录日收盘对得上只用记录日，否则只接受前一交易日，都对不上就不推（避免把两天的涨幅拆开用，推出「涨 7% 却比收盘低 7%」的价）。回填会对非 `actual` 的行重推一遍，已把 2026-08 起 120 条旧行对齐；`record_seed` 新落盘为 `recorded`，下次回填换成 `derived`；
+  - T+1/T+2/T+3/T+5 涨幅以 `close` 为基准（跨日收益），止损/止盈/最低价/最高价以 `pick_close` 为基准（实际买入成本）。
+  - 修正前「T+3 > 0」胜率被算成 56.7%，修正后 60 条有效样本 83%——之前的数是被基准错位压低的。
+- **`exit_t1/exit_t3/exit_t5` 挂单成交模拟**（`followthrough._simulate_exit`）：从选票次日 K 线起，
+  先判止损（同一根 K 线止损与止盈都触发时按止损算，保守），再看止盈，都没触发则取周期末收盘；
+  缺 `sl_pct` 的记录不模拟（`None`，不算入统计，也不再反复触发回填补齐）。`exit_stats(cfg)` 汇总
+  各周期的均值、胜率、止损/止盈命中数。
+- **`horizon_conditional(chg_lo, chg_hi)`**：按涨幅区间切片后看板块强度/量比分桶，避免「整体单调、分桶反转」的分桶陷阱；周报 5.5~7.5 追高区提示直接带上分桶拆解。
+- **单票命令补天气**（`cli._sent`）：`tea eval` / `tea explain` / `tea watch --add` 现在会把 `get_sentiment` 传给 `preflight.evaluate`，与种子扫描同一把尺子。之前这三条命令不带 `sent`，同一只票会出现「扫描里判大盘偏弱 -1、eval 里判大盘数据缺失 0」；天气取不到仍退回不加不减，不拦单票评估。
+- **`format_pick_verdict(ev, cfg)` / `tea explain <code>`**：一只票的判词 + 原因列表 + 同板块/同阶段胜率 + 涨幅区间分桶 + 量比提示；`tea followthrough` 末行附 `format_exit_status(cfg)` 一行挂单口径摘要。
+- **`chase_weak_volume()`**：涨幅≥5.5% 且量比<1.2 的交集样本（目前 0/2，-6% 止损、-3.8%），`explain` 命中时多打一行提示；样本太少，只提示不参与评分，门槛放到 5% 会混进「5.37%/量比 1.12 却 +15%」的反例，故留在 5.5%。
+- **`save_records(..., merge_disk=True)`**：磁盘上新于内存、但内存没有的 `(date, code)` 记录会被合并回来，防止「种子进程与回填进程同时写全文件」互相覆盖（001330 曾因此丢过一条）；重置型测试夹具传 `merge_disk=False`。
+
 ### 数 · 历史样本分层与周期留痕（2026-11-10：T+1/T+2/T+3/T+5 同口径 + 失效标记）
 
 - **`data_status` 字段**（`followthrough.record_status` / `load_valid_records`）：取值 `valid`（缺省）/ `legacy`。所有归因（`aggregate`、`stage_b_bucket_stats`、`mode_channel_stats`、`shadow_t3_stats`、`gate_blocked_recent`、`t3_attribution`、`sample_gap_stats`）只吃 `valid`。本次把 2026-08-08~08-21 的 62 条结构字段缺失样本原地标 `legacy`（附 `data_status_reason`），文件备份在 `/tmp/seed_records.backup.*.jsonl`；以后判失效只认显式字段，不再靠「缺 `pass_threshold`」猜。

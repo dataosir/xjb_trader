@@ -16,7 +16,7 @@ from __future__ import annotations
 import logging
 import time
 from concurrent.futures import ThreadPoolExecutor
-from typing import Any, List, Optional
+from typing import Any, List
 
 from tea.config.config_store import Config
 from tea.core import logger as logger_mod, utils

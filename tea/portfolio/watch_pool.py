@@ -208,7 +208,7 @@ def prune_ineligible(market: Optional[Market] = None, cfg: Optional[Config] = No
             continue
         try:
             ev = preflight.evaluate(item["code"], mk, cfg, sent=sent)
-        except Exception as exc:
+        except Exception:
             continue
         reason = ineligible_reason(item, ev, cfg)
         if not reason:

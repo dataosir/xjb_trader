@@ -27,3 +27,5 @@ aider.conf.yml
 /logs/
 tea_config.json
 ops/nas-deploy-private.md
+.venv/
+*.egg-info/

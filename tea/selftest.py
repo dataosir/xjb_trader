@@ -2155,6 +2155,16 @@ def check_market_trend_deduction(t: Suite, cfg: Config, mk: FakeMarket) -> None:
     t.ok("弱势市下扫描照常产出板块候选", bool(res.get("sectors")),
          f"sectors_n={len(res.get('sectors') or [])}")
 
+    # 单票评估（eval/explain/watch-add）也必须带上天气：不带 sent 时同一只票在
+    # 扫描里判「大盘偏弱 -1」、在 eval 里判「大盘数据缺失 0」，等于两把尺子。
+    def dim2_ev(sent: dict) -> int:
+        ev = preflight.evaluate(TARGET, mk, cfg, sent=sent)
+        return {d["no"]: d for d in ev["scoring"]["dims"]}[2]["score"]
+
+    t.eq("evaluate 带 sent 时按弱势扣分", dim2_ev({"index": {
+        "point": 3150.0, "ma20": 3200.0, "ma20_bias_pct": -1.56, "ma20_slope_pct": -0.5}}), -1)
+    t.eq("evaluate 不带 sent 时退回不加不减", dim2_ev(None), 0)
+
 
 def check_winrate_gate(t: Suite, cfg: Config, mk: FakeMarket) -> None:
     """胜率因子门槛：历史低胜率特征从「可买」降级观察。"""
@@ -2959,6 +2969,9 @@ def check_followthrough(t: Suite, cfg: Config) -> None:
         "turnover": 9.5, "intraday": 0.72,
         "amount_yi": 12.0, "cap_yi": 150.0, "rank_pct": 0.15,
         "odds": 2.4, "veto_labels": ["接近涨停", "分时偏高"],
+        # 回填结果显式落好：save_records 会把磁盘上其它未回填样本一并算进 pending，
+        # 这里不给 result 会让后面「pending 归零」的断言依赖执行顺序。
+        "result": "loss", "next_chg": -1.0, "chg_t5": -2.0,
     }], cfg, date="2026-08-12")
     t.eq("带市场/维度字段的样本落盘", r4, {"added": 1, "skipped": 0, "updated": 0})
     f = next(r for r in ft_mod.load_records(cfg) if r.get("code") == "600787")
@@ -3002,9 +3015,12 @@ def check_followthrough(t: Suite, cfg: Config) -> None:
     t.eq("pick_sector_rank 落盘", f5.get("pick_sector_rank"), 2)
 
     # 多周期回填：T+1/T+2/T+3/T+5 一次算好
-    d = _end_dates(30)[10]
+    # 日期取第 12 根，chg_pct 要与「第 12 根相对前一根实际涨幅」对上（0.06/10.66）：
+    # 回填只在涨幅能对上收盘时才对推选票价，写 5.0 会被判为「涨幅不是当天的」而不推。
+    d = _end_dates(30)[12]
     ft_mod.save_records([{"date": d, "code": "600778", "name": "多周期样本",
-                          "next_chg": None, "result": None}], cfg)
+                          "next_chg": None, "result": None, "chg_pct": 0.56}],
+                        cfg, merge_disk=False)
     mk = FakeMarket(cfg)
     upd = ft_mod.update_results(mk, cfg)
     t.ok("多周期回填了记录", upd.get("updated", 0) >= 1, str(upd))
@@ -3012,12 +3028,29 @@ def check_followthrough(t: Suite, cfg: Config) -> None:
     t.ok("T+1 已回填", rec.get("next_chg") is not None, str(rec))
     t.ok("T+3 已回填", rec.get("chg_t3") is not None, str(rec))
     t.ok("T+5 已回填", rec.get("chg_t5") is not None, str(rec))
+    # 选票价 P 与记录日收盘 C 是两个基准：P 用收盘 /(1+涨幅) 推回，T+N 按收盘算，
+    # 否则「从选票价算起」会把涨幅整体抬高。回推价不能抢在真实成交价前覆盖。
+    t.eq("回填补上记录日真实收盘", rec.get("close"), 10.72)
+    t.eq("无 pick_close 时按涨幅回推选票价", rec.get("pick_close"), 10.66)
+    t.eq("回推价标注来源与涨幅所属日",
+         (rec.get("pick_price_basis"), rec.get("chg_day_date")), ("derived", d))
+    t.eq("T+1 以当日收盘为基准", rec.get("next_chg"), 0.56)
     t.ok("T+1 < T+3 < T+5（构造上行K线）",
          rec["next_chg"] < rec["chg_t3"] < rec["chg_t5"],
          f"t1={rec.get('next_chg')} t3={rec.get('chg_t3')} t5={rec.get('chg_t5')}")
     # result_t3 独立于 result：result 按 T+1 ≥ 3% 判，result_t3 按 T+3 > 0 判
     t.ok("T+3 成败单独落盘", rec.get("result_t3") in ("win", "loss"), str(rec.get("result_t3")))
     t.eq("T+3 上行 → result_t3 = win", rec.get("result_t3"), "win")
+    # 没记止损价的样本不模拟成交，避免出一列看似精确的假收益
+    t.eq("无 sl_pct 不模拟成交", rec.get("exit_t3"), None)
+    t.eq("成交模拟函数：止损优先", ft_mod._simulate_exit(
+        [{"low": 9.3, "high": 12.0, "close": 11.8}], 10.0, 6.0, 15.0), -6.0)
+    t.eq("成交模拟函数：触止盈", ft_mod._simulate_exit(
+        [{"low": 9.9, "high": 11.6, "close": 11.5}], 10.0, 6.0, 15.0), 15.0)
+    t.eq("成交模拟函数：都没触发按期末收盘", ft_mod._simulate_exit(
+        [{"low": 9.9, "high": 10.4, "close": 10.3}], 10.0, 6.0, 15.0), 3.0)
+    t.eq("成交模拟函数：无止损价返回空", ft_mod._simulate_exit(
+        [{"low": 9.3, "high": 12.0, "close": 11.8}], 10.0, None, None), None)
 
     # 阶段 B 样本盘点：按 板块排名桶×阶段×档位×身份分桶 聚合，找最大桶
     ft_mod.save_records([
@@ -3029,8 +3062,7 @@ def check_followthrough(t: Suite, cfg: Config) -> None:
          "identity_score": 88.0, "stage": "过热", "tier": "热点降级档", "result": "win"},
         {"date": "2026-08-18", "code": "600904", "name": "桶B1", "sector_rank": 9,
          "identity_score": 60.0, "stage": "突破", "tier": "严格档", "result": "loss"},
-    ] + [
-    ], cfg)
+    ], cfg, merge_disk=False)
     st = ft_mod.stage_b_bucket_stats(cfg, min_samples=3)
     t.eq("阶段B最大桶样本", st["max_n"], 3)
     # 失效样本不进归因：同一只票标 legacy 后桶计数不应变化
@@ -3057,7 +3089,7 @@ def check_followthrough(t: Suite, cfg: Config) -> None:
         {"date": "2026-08-19", "code": "600905", "name": "低吸1", "lowbuy": True, "result": "win"},
         {"date": "2026-08-20", "code": "600906", "name": "低吸2", "lowbuy": True, "result": None},
         {"date": "2026-08-20", "code": "600907", "name": "追高1", "lowbuy": False, "result": "loss"},
-    ], cfg)
+    ], cfg, merge_disk=False)
     lb = ft_mod.lowbuy_sample_stats(cfg)
     t.eq("低吸样本总数", lb["total"], 2)
     t.eq("低吸样本已回填", lb["backfilled"], 1)
@@ -3092,7 +3124,7 @@ def check_followthrough(t: Suite, cfg: Config) -> None:
          "chg_t3": 5.0, "result": "win"},
         {"date": "2026-08-13", "code": "601004", "stage": "萌芽", "sector_rank": 5,
          "chg_t3": None, "result": "loss"},
-    ], cfg)
+    ], cfg, merge_disk=False)
     cfg.set("followthrough.shadow_min_samples", 2)
     cfg.set("followthrough.t3_up_target", 0.60)
     sh = ft_mod.shadow_t3_stats(cfg)
@@ -3113,7 +3145,7 @@ def check_followthrough(t: Suite, cfg: Config) -> None:
          "chg_t3": 1.2, "bias_ma20": 3.0},
         {"date": today, "code": "602004", "track": "观察轨", "result": None,
          "lowbuy": True},
-    ], cfg)
+    ], cfg, merge_disk=False)
     gap = ft_mod.sample_gap_stats(cfg)
     t.eq("缺口：待 T+1", gap["pending_t1"], 1)
     t.eq("缺口：待 T+3", gap["pending_t3"], 1)
@@ -3146,7 +3178,8 @@ def check_followthrough(t: Suite, cfg: Config) -> None:
 
     d_hist = _end_dates(30)[8]
     ft_mod.save_records([{"date": d_hist, "code": "600778", "name": "自动回填样本",
-                          "next_chg": None, "result": None, "chg_t5": None}], cfg)
+                          "next_chg": None, "result": None, "chg_t5": None}],
+                        cfg, merge_disk=False)
     t.eq("自动回填前有 pending", ft_mod.pending_backfill(cfg), 1)
     io_q = IO(interactive=False, quiet=True)
     cfg.set("followthrough.auto_backfill_on_seed", False)
@@ -3163,7 +3196,8 @@ def check_followthrough(t: Suite, cfg: Config) -> None:
     # 异步回填：立即返回，后台线程完成后 pending 清零
     d_async = _end_dates(30)[7]
     ft_mod.save_records([{"date": d_async, "code": "600781", "name": "异步回填样本",
-                          "next_chg": None, "result": None, "chg_t5": None}], cfg)
+                          "next_chg": None, "result": None, "chg_t5": None}],
+                        cfg, merge_disk=False)
     t.eq("异步回填前有 pending", ft_mod.pending_backfill(cfg), 1)
     upd_bg = runner.maybe_auto_backfill(cfg=cfg, market=FakeMarket(cfg), io=io_q,
                                         trigger="seed", background=True)
@@ -3190,7 +3224,8 @@ def check_followthrough(t: Suite, cfg: Config) -> None:
         utils.now = lambda when=None, _f=after: _f
         d_after = _end_dates(30)[8]
         ft_mod.save_records([{"date": d_after, "code": "600779", "name": "菜单回填样本",
-                              "next_chg": None, "result": None, "chg_t5": None}], cfg)
+                              "next_chg": None, "result": None, "chg_t5": None}],
+                            cfg, merge_disk=False)
         gates.reset_state(cfg)
         upd_m = runner.maybe_auto_backfill(cfg=cfg, market=FakeMarket(cfg), io=io_q,
                                           trigger="menu", background=False)
@@ -3200,7 +3235,8 @@ def check_followthrough(t: Suite, cfg: Config) -> None:
              gates.load_state(cfg).get("auto_backfill_menu") is True)
         # 同日第二次应跳过（即使再塞 pending）
         ft_mod.save_records([{"date": d_after, "code": "600780", "name": "二次样本",
-                              "next_chg": None, "result": None, "chg_t5": None}], cfg)
+                              "next_chg": None, "result": None, "chg_t5": None}],
+                            cfg, merge_disk=False)
         t.ok("同日 menu 第二次跳过",
              runner.maybe_auto_backfill(cfg=cfg, market=FakeMarket(cfg), io=io_q,
                                        trigger="menu", background=False) is None)
@@ -3721,7 +3757,7 @@ def check_t3_attribution_and_scheduled_review(t: Suite, c: Config) -> None:
                           {"name": "市值区间", "score": 2, "max": 2},
                           {"name": "量价结构", "score": 1, "max": 2},
                           {"name": "止损结构", "score": 1, "max": 1}]},
-    ], c)
+    ], c, merge_disk=False)
 
     st = ft_mod.t3_attribution(c)
     t.eq("T+3 回填 3 条", st["total_n"], 3)
@@ -3741,9 +3777,30 @@ def check_t3_attribution_and_scheduled_review(t: Suite, c: Config) -> None:
              {"name": "消息面", "score": 0, "max": 1},
          ]), (2, 2))
 
-    md = weekly_mod.render_md(cfg=c)
-    t.ok("周报含三日持有段", "三日持有 T+3>0" in md)
-    t.ok("周报含萌芽专看", "萌芽专看" in md)
+    # 条件桶：同一涨幅区间里板块强度 2 与 0 要分开统计，不能只看单调桶。
+    # 涨幅用 12%：避开磁盘上其它 5.5~7.5% 样本，断言才不受执行顺序影响。
+    ft_mod.save_records([
+        {"date": "2026-08-05", "code": "600005", "stage": "突破", "chg_pct": 12.2,
+         "vol_ratio": 1.1, "chg_t3": -3.0, "exit_t3": -3.0,
+         "scoring_dims": [{"name": "板块强度", "score": 0, "max": 2}]},
+        {"date": "2026-08-06", "code": "600006", "stage": "突破", "chg_pct": 12.4,
+         "vol_ratio": 2.0, "chg_t3": 2.0,
+         "scoring_dims": [{"name": "板块强度", "score": 2, "max": 2}]},
+    ], c)
+    cond = ft_mod.horizon_conditional(cfg=c)
+    t.eq("条件桶：默认档只收 5.5~7.5%（12% 的样本不计入）", cond["all"]["n"], 2)
+    cond2 = ft_mod.horizon_conditional(chg_lo=12.0, chg_hi=13.0, cfg=c)
+    t.eq("条件桶：按指定区间拆板块强度0", cond2["by_sector"].get("板块强度0", {}).get("n"), 1)
+    t.eq("条件桶：按指定区间拆板块强度2", cond2["by_sector"].get("板块强度2", {}).get("n"), 1)
+    t.eq("条件桶：量比<1.2 单独计数", cond2["by_vr"].get("量比<1.2", {}).get("n"), 1)
+    cw = ft_mod.chase_weak_volume(cfg=c)
+    t.eq("高位没量交集：只收 12.2% 那条（量比 1.1）", cw["codes"], ["600005"])
+    t.eq("高位没量交集：胜负与均值", (cw["win"], round(cw["avg"], 2)), (0, -3.0))
+    t.eq("成交模拟：同一根 K 线先止损", ft_mod._simulate_exit(
+        [{"low": 9.0, "high": 12.0, "close": 11.0}], 10.0, 6.0, 15.0), -6.0)
+    t.eq("成交模拟：止损价成交", ft_mod._simulate_exit(
+        [{"low": 9.3, "high": 10.2, "close": 9.4}], 10.0, 6.0, 15.0), -6.0)
+    t.ok("周报含三日持有段", "三日持有 T+3>0" in weekly_mod.render_md(cfg=c))
 
     c.set("review.scheduled_enabled", False)
     skip = runner_mod.scheduled_review(cfg=c, force=False)

@@ -28,7 +28,7 @@ from typing import List, Optional
 
 from tea import __version__
 from tea.analysis import followthrough as ft_mod, pricetrack
-from tea.analysis.sentiment import clear_cache, format_weather
+from tea.analysis.sentiment import clear_cache, format_weather, get_sentiment
 from tea.config import config_store, email_setup, notify_setup, onboarding, schedules
 from tea.config.config_store import Config, load_config
 from tea.core import logger as logger_mod, utils
@@ -51,6 +51,15 @@ def _io() -> IO:
 
 def _market(cfg: Config) -> Market:
     return Market(cfg)
+
+
+def _sent(mk: Market, cfg: Config) -> Optional[dict]:
+    """单票评估也带上天气：种子扫描一直带 sent，这几条命令不带会让同一只票在
+    `tea run` 里判「大盘偏弱 -1」、在 `tea eval` 里判「大盘数据缺失 0」——两把尺子。"""
+    try:
+        return get_sentiment(mk, cfg)
+    except Exception:  # 天气取不到就退回「不加不减」，不拦单票评估
+        return None
 
 
 def _parse_value(raw: str):
@@ -221,13 +230,27 @@ def cmd_weather(args, cfg: Config) -> int:
 def cmd_eval(args, cfg: Config) -> int:
     """只算不买：单标的评估（不计入门禁、不写报告）。"""
     io = _io()
-    io.say(f"  ⏳ 正在评估 {utils.norm_code(args.code)}（行情 / 指标 / 板块）...")
+    io.say(f"  ⏳ 正在评估 {utils.norm_code(args.code)}（行情 / 指标 / 板块 / 天气）...")
+    mk = _market(cfg)
     with utils.timed("评估完成", io, threshold=0.5):
-        ev = preflight.evaluate(args.code, _market(cfg), cfg,
-                                sl_pct=args.sl, tp_pct=args.tp,
-                                has_news=args.news)
+        ev = preflight.evaluate(args.code, mk, cfg, sl_pct=args.sl, tp_pct=args.tp,
+                                has_news=args.news, sent=_sent(mk, cfg))
     io.say(preflight.format_evaluation(ev))
+    for line in ft_mod.format_pick_verdict(ev, cfg):
+        io.say(line)
     return 0 if ev.get("verdict") == preflight.VERDICT_PASS else 1
+
+
+def cmd_explain(args, cfg: Config) -> int:
+    """单票「该不该买 + 历史长得像它的票后来怎样」，只读，不写计划。"""
+    io = _io()
+    io.say(f"  ⏳ 正在评估 {utils.norm_code(args.code)}（行情 / 指标 / 板块 / 天气 / 历史样本）...")
+    mk = _market(cfg)
+    ev = preflight.evaluate(args.code, mk, cfg, has_news=args.news, sent=_sent(mk, cfg))
+    io.say(preflight.format_evaluation(ev))
+    for line in ft_mod.format_pick_verdict(ev, cfg):
+        io.say(line)
+    return 0
 
 
 def cmd_watch_alert(args, cfg: Config) -> int:
@@ -245,7 +268,8 @@ def cmd_watch(args, cfg: Config) -> int:
     if args.add:
         io.say(f"  ⏳ 正在评估 {utils.norm_code(args.add)}...")
         with utils.timed("评估完成", io, threshold=0.5):
-            ev = preflight.evaluate(args.add, _market(cfg), cfg)
+            mk = _market(cfg)
+            ev = preflight.evaluate(args.add, mk, cfg, sent=_sent(mk, cfg))
         it = watch_pool.add(ev, track=args.track, source="manual",
                             triggers=ft_mod.trigger_conditions(ev, cfg), cfg=cfg)
         io.say(f"已纳入{it.get('track')}：{it.get('code')} {it.get('name')}"
@@ -417,6 +441,7 @@ def cmd_followthrough(args, cfg: Config) -> int:
     io.say(ft_mod.format_shadow_status(cfg))
     io.say(ft_mod.format_stage_b_status(cfg))
     io.say(ft_mod.format_lowbuy_status(cfg))
+    io.say(ft_mod.format_exit_status(cfg))
     return 0
 
 
@@ -1055,6 +1080,11 @@ def build_parser() -> argparse.ArgumentParser:
     ft = sub.add_parser("followthrough", help="跟涨经验（T+1 胜率）")
     ft.add_argument("--update", action="store_true", help="先回填 T+1 结果")
     ft.set_defaults(func=cmd_followthrough)
+
+    ex = sub.add_parser("explain", help="单票复盘口径：能不能买 + 同赛道/同阶段历史对照")
+    ex.add_argument("code")
+    ex.add_argument("--news", action="store_true", help="有明确消息催化")
+    ex.set_defaults(func=cmd_explain)
 
     ga = sub.add_parser("gate", help="单日门禁状态")
     ga.add_argument("--reset", action="store_true", help="重置单日计数（谨慎）")

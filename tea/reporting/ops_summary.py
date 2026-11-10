@@ -271,6 +271,11 @@ def sample_health_line(cfg: Optional[Config] = None) -> str:
         txt += f"，失效 {h['legacy']} 条（{lo}~{hi}，不计入归因）"
     if pend:
         txt += f"；待回填 {pend}"
+    # 收盘涨没涨 ≠ 挂单能不能兑现：同一批样本里有一半多在 T+1 就触了 6% 止损。
+    ex = (ft.exit_stats(cfg) or {}).get("exit_t3") or {}
+    if ex.get("n"):
+        txt += (f"；挂单口径 T+3 均 {ex['avg']:+.1f}%，止损 {ex['sl_hit']}、"
+                f"止盈 {ex['tp_hit']}（{ex['n']} 条）")
     return txt
 
 

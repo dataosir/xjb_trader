@@ -6,6 +6,9 @@
 归因统计只吃 ``data_status = valid`` 的样本（见 ``record_status``）：2026-08 之前
 落盘的结构没有 pass_threshold / scoring_dims / mode，参与归因只会让「过没过线」
 无法复核。这些旧样本标 ``legacy`` 后仍保留行情回填值，但不进分子分母。
+
+另把「按收盘卖出」的结果和「按止损/止盈挂单成交」的结果区分开（``exit_t*``）：
+持有期涨幅为正不等于能赚到钱，同一条记录按 6% 止损挂单可能已经是 -6%。
 """
 from __future__ import annotations
 
@@ -37,6 +40,13 @@ STATUS_LEGACY = "legacy"
 #: 各周期涨幅字段 → 对应的「收盘 > 阈值」成败标记。
 _HORIZON_RESULTS = (("next_chg", "result_t1"), ("chg_t2", "result_t2"),
                     ("chg_t3", "result_t3"), ("chg_t5", "result_t5"))
+
+#: 成交价模拟的两条挂单：跌破止损按止损价成交，盘中最高价触及止盈按止盈价成交。
+#: 记录里只有收盘价，所以模拟出来的 ``low_t*`` / ``high_t*`` 是下限/上限——用它们
+#: 判断「会不会被打出去」只会误判成更差，恰好是保守方向。
+_EXIT_FIELDS = ("exit_t1", "exit_t2", "exit_t3", "exit_t5",
+                "low_t1", "low_t2", "low_t3", "low_t5",
+                "high_t1", "high_t2", "high_t3", "high_t5")
 
 
 def record_status(r: dict) -> str:
@@ -251,6 +261,10 @@ def record_seed(entries: List[dict], cfg: Optional[Config] = None,
                            or compute_shadow_tag(
                                e.get("stage"), e.get("sector_rank"),
                                e.get("pick_sector_rank"))),
+            # 选票时的现价只是「盘中价」，收盘可能差几个点。回填会用记录日 K 线收盘
+            # 按涨幅重推出真实选票价并标 basis=derived；这里保留盘中价只作无 K 线时的兜底。
+            "pick_close": e.get("price"),
+            "pick_price_basis": "recorded" if e.get("price") is not None else None,
             "close": e.get("price"), "next_chg": None, "result": None,
             "result_t1": None, "result_t2": None, "result_t3": None, "result_t5": None,
             "data_status": STATUS_VALID,
@@ -265,6 +279,10 @@ def record_seed(entries: List[dict], cfg: Optional[Config] = None,
         idx = by_key[key]
         old = recs[idx]
         if _should_replace_record(old, rec, scan_anchor or ""):
+            # 选票价只认第一次：主扫描升级轨道时价格会变，回填基准若跟着漂，
+            # 「从选票当天收盘算起」就变成了「从最后一次扫描价算起」。
+            rec["pick_close"] = old.get("pick_close") or old.get("close")
+            rec["pick_price_basis"] = old.get("pick_price_basis")
             rec["next_chg"] = old.get("next_chg")
             rec["result"] = old.get("result")
             for _, flag in _HORIZON_RESULTS:
@@ -282,9 +300,33 @@ def record_seed(entries: List[dict], cfg: Optional[Config] = None,
     return {"added": added, "skipped": skipped, "updated": updated}
 
 
-def save_records(records: List[dict], cfg: Optional[Config] = None) -> str:
-    """整体重写（回填 T+1 结果后使用，原子写）。"""
+def _merge_newer_on_disk(records: List[dict], cfg: Optional[Config] = None) -> List[dict]:
+    """写回前合入「别的进程刚写进去、自己内存里没有」的记录。
+
+    形态：seed-plan 先读全量、落盘新样本；后台回填（另一进程）随后写回时用的是
+    更早的快照，整体重写会把刚落的样本抹掉——11-10 的 001330 就这样丢过一次。
+    以 (date, code) 为键，磁盘上有而内存里没有的整条补回；两边都有的以内存为准
+    （当前进程刚回填过行情字段，更可信）。
+    """
+    try:
+        on_disk = load_records(cfg)
+    except Exception:
+        return records
+    have = {(r.get("date"), r.get("code")) for r in records}
+    extra = [r for r in on_disk if (r.get("date"), r.get("code")) not in have]
+    return records + extra if extra else records
+
+
+def save_records(records: List[dict], cfg: Optional[Config] = None,
+                 merge_disk: bool = True) -> str:
+    """整体重写（回填 T+1 结果后使用，原子写）。
+
+    默认写前先合入磁盘上的新记录；只有明确要「整体替换」的场景才关掉
+    （例如自测里重置样本基线）。
+    """
     cfg = cfg or load_config()
+    if merge_disk:
+        records = _merge_newer_on_disk(records, cfg)
     lines = "\n".join(json.dumps(r, ensure_ascii=False) for r in records)
     return utils.atomic_write(records_path(cfg), lines + ("\n" if lines else ""))
 
@@ -313,6 +355,192 @@ def dedupe_records(cfg: Optional[Config] = None) -> dict:
 
 # ------------------------------------------------------------------ T+1 回填
 
+def _derive_pick_price(day_close: Optional[float],
+                       chg_pct: Optional[float]) -> Optional[float]:
+    """由当日收盘与涨幅回推选票价（= 昨收）。老样本只存了扫描价，没有这一列。"""
+    if not day_close:
+        return None
+    if chg_pct is None or float(chg_pct) <= -99.9:
+        return float(day_close)
+    return round(float(day_close) / (1 + float(chg_pct) / 100.0), 2)
+
+
+def _simulate_exit(bars: List[dict], base: float,
+                   sl_pct: Optional[float], tp_pct: Optional[float]) -> Optional[float]:
+    """按「跌破止损 → 止损价成交；盘中触到止盈 → 止盈价成交；都没触发 → 期末收盘」模拟。
+
+    同一根 K 线里止损与止盈都可能触到，无法从日线判断先后，按先止损处理（保守）。
+    没落盘的 sl_pct / tp_pct 返回 None，不参与统计。
+    """
+    if not bars or not base or sl_pct is None:
+        return None
+    sl = base * (1 - float(sl_pct) / 100.0)
+    tp = base * (1 + float(tp_pct) / 100.0) if tp_pct is not None else None
+    last = base
+    for k in bars:
+        low, high = k.get("low"), k.get("high")
+        if low is not None and float(low) <= sl:
+            return round((sl - base) / base * 100.0, 2)
+        if tp is not None and high is not None and float(high) >= tp:
+            return round((tp - base) / base * 100.0, 2)
+        if k.get("close"):
+            last = float(k["close"])
+    return round((last - base) / base * 100.0, 2)
+
+
+def horizon_conditional(chg_lo: float = 5.5, chg_hi: float = 7.5,
+                        cfg: Optional[Config] = None) -> dict:
+    """「涨幅 X~Y% 这一档，再按板块强度/量比拆开，T+3 是否还是坑」。
+
+    单调桶会把条件互相抵消：5.5~7.5% 追高桶整体只有 30% T+3>0，但其中板块强度 2
+    的反而是 43%、板块强度 0 的是 0%——所以要拆开看才指导得了选股。
+    """
+    cfg = cfg or load_config()
+    pool = [r for r in load_valid_records(cfg) if r.get("chg_t3") is not None]
+    base = [r for r in pool if r.get("chg_pct") is not None
+            and chg_lo <= float(r["chg_pct"]) < chg_hi]
+
+    def _stats(rows: List[dict]) -> dict:
+        if not rows:
+            return {"n": 0, "up": 0, "rate": None, "avg": None}
+        up = sum(1 for r in rows if float(r["chg_t3"]) > 0)
+        return {"n": len(rows), "up": up, "rate": up / len(rows),
+                "avg": sum(float(r["chg_t3"]) for r in rows) / len(rows)}
+
+    out = {"range": (chg_lo, chg_hi), "all": _stats(base), "by_sector": {}, "by_vr": {}}
+    for r in base:
+        dims = {d.get("name"): d.get("score") for d in (r.get("scoring_dims") or [])}
+        s1 = dims.get("板块强度")
+        if s1 is not None:
+            out["by_sector"].setdefault(f"板块强度{int(s1)}", []).append(r)
+        vr = r.get("vol_ratio")
+        if vr is not None:
+            lab = "量比<1.2" if float(vr) < 1.2 else "量比1.2~3" if float(vr) < 3 else "量比≥3"
+            out["by_vr"].setdefault(lab, []).append(r)
+    out["by_sector"] = {k: _stats(v) for k, v in sorted(out["by_sector"].items())}
+    out["by_vr"] = {k: _stats(v) for k, v in sorted(out["by_vr"].items())}
+    return out
+
+
+def chase_weak_volume(chg_min: float = 5.5, vr_max: float = 1.2,
+                      cfg: Optional[Config] = None) -> dict:
+    """「已经接近涨停区（涨幅≥5.5%）但量比还不到 1.2」的交集样本。
+
+    单个条件都不是坑：涨幅 5.5~7.5% 的 19 条挂单口径 17 条赚、量比<1.2 的 5 条 4 条赚；
+    交集目前 2 条 1 胜、均值 -2.0%（骏亚科技 -6% 止损、贤丰控股 +2.1%）。n=2 说明不了
+    什么，所以只在 explain 里提示、不参与评分，等样本够了再决定要不要变成闸。
+    """
+    cfg = cfg or load_config()
+    rows = [r for r in load_valid_records(cfg) if r.get("exit_t3") is not None
+            and r.get("chg_pct") is not None and r.get("vol_ratio") is not None
+            and float(r["chg_pct"]) >= chg_min and float(r["vol_ratio"]) < vr_max]
+    win = sum(1 for r in rows if float(r["exit_t3"]) > 0)
+    avg = sum(float(r["exit_t3"]) for r in rows) / len(rows) if rows else 0.0
+    return {"n": len(rows), "win": win, "avg": avg, "chg_min": chg_min, "vr_max": vr_max,
+            "codes": [r.get("code") for r in rows]}
+
+
+def format_exit_status(cfg: Optional[Config] = None) -> str:
+    """挂单成交口径一行：止损率/止盈率/平均收益，和「收盘涨没涨」并排看。"""
+    st = exit_stats(cfg)
+    parts = []
+    for key in ("exit_t1", "exit_t3", "exit_t5"):
+        s = st.get(key) or {}
+        if not s.get("n"):
+            continue
+        parts.append(f"{s['label']} 均 {s['avg']:+.1f}%｜止损 {s['sl_hit']}｜"
+                     f"止盈 {s['tp_hit']}｜赚 {s['win']}/{s['n']}")
+    if not parts:
+        return "挂单成交口径：暂无可模拟样本（缺 sl_pct 或未回填）"
+    return "挂单成交口径（止损价优先、同根 K 线按先止损）：" + "｜".join(parts)
+
+
+def format_pick_verdict(ev: dict, cfg: Optional[Config] = None) -> List[str]:
+    """「这只票今天能不能买」的复盘口径：当前判定 + 同赛道同阶段的历史。
+
+    只对照、不改判定：判定仍来自预审，这里补的是「历史上长得像它的票后来怎样」。
+    """
+    cfg = cfg or load_config()
+    lines: List[str] = []
+    verdict = ev.get("verdict")
+    total, th = ev.get("total_score"), ev.get("pass_threshold")
+    core, core_th = ev.get("core_score"), ev.get("core_threshold")
+    lines.append(f"判定：{verdict}｜共振 {total}/{th}" + (
+        f"（有效分 {core}/{core_th}）" if core is not None else ""))
+    for r in ev.get("reasons") or []:
+        lines.append(f"  · {r}")
+    sev = ev.get("sector") or {}
+    stage = (ev.get("stage") or {}).get("stage")
+    chg = (ev.get("quote") or {}).get("chg_pct")
+    vr = (ev.get("quote") or {}).get("vol_ratio")
+    pool = [r for r in load_valid_records(cfg) if r.get("chg_t3") is not None]
+    same_sec = [r for r in pool if sev.get("name") and r.get("sector_name") == sev.get("name")]
+    same_stage = [r for r in pool if stage and r.get("stage") == stage]
+    for rows, label in ((same_sec, f"同赛道「{sev.get('name')}」"),
+                        (same_stage, f"同阶段「{stage}」")):
+        if not rows:
+            lines.append(f"  · {label}：无历史样本")
+            continue
+        up = sum(1 for r in rows if float(r["chg_t3"]) > 0)
+        why = [f"{r['code']}{r.get('name') or ''} {r.get('date')} "
+               f"涨幅{(r.get('chg_pct') or 0):+.1f}%/量比{utils.num(r.get('vol_ratio'))}"
+               f"→T+3{r['chg_t3']:+.1f}%" for r in rows]
+        lines.append(f"  · {label}：{up}/{len(rows)} T+3>0 = {up / len(rows):.0%}"
+                     f"（{'；'.join(why[:4])}）")
+    cond = horizon_conditional(cfg=cfg)
+    lo, hi = cond["range"]
+    if chg is not None and lo <= float(chg) < hi and cond["all"]["n"]:
+        a = cond["all"]
+        lines.append(f"  · 涨幅 {lo:g}~{hi:g}% 档：{a['up']}/{a['n']} T+3>0 = {a['rate']:.0%}")
+        for name in ("by_sector", "by_vr"):
+            for k, v in cond[name].items():
+                if v["n"] and v["rate"] is not None:
+                    lines.append(f"      {k}：{v['up']}/{v['n']} = {v['rate']:.0%}"
+                                 f"（均 {v['avg']:+.1f}%）")
+    if vr is not None:
+        weak = cond["by_vr"].get("量比<1.2")
+        note = (f"（量比<1.2 档 {weak['up']}/{weak['n']} T+3>0）"
+                if weak and weak["n"] else "")
+        lines.append(f"  · 量比 {utils.num(vr)}{note}")
+        both = chase_weak_volume(cfg=cfg)
+        if (chg is not None and float(chg) >= both["chg_min"]
+                and float(vr) < both["vr_max"] and both["n"]):
+            caveat = "样本太少，只当提示" if both["n"] < 3 else "两条件单看都不差，叠起来是「高开续涨但资金没跟」"
+            lines.append(f"  · 高位没量（涨幅≥{both['chg_min']:g}% 且 量比<{both['vr_max']:g}）："
+                         f"{both['n']} 条历史样本 {both['win']}/{both['n']}，"
+                         f"均 {both['avg']:+.1f}%——{caveat}")
+    return lines
+
+
+def exit_stats(cfg: Optional[Config] = None) -> dict:
+    """「持有 3 天、止损止盈挂单」的实际成交口径：止损率、止盈率、平均收益。
+
+    和 ``horizon_winrates`` 的区别：那边只看收盘涨没涨，这边看挂单能不能兑现——
+    按收盘算「55% 涨了」并不等于赚钱。
+    """
+    cfg = cfg or load_config()
+    pool = [r for r in load_valid_records(cfg)
+            if r.get("exit_t3") is not None and r.get("sl_pct") is not None]
+    out: Dict[str, dict] = {}
+    for key, label in (("exit_t1", "T+1"), ("exit_t3", "T+3"), ("exit_t5", "T+5")):
+        vals = [float(r[key]) for r in pool if r.get(key) is not None]
+        if not vals:
+            out[key] = {"n": 0, "label": label}
+            continue
+        sl_hit = sum(1 for r in pool
+                     if r.get(key) is not None and r.get("sl_pct") is not None
+                     and float(r[key]) <= -float(r["sl_pct"]) + 0.01)
+        tp_hit = sum(1 for r in pool
+                     if r.get(key) is not None and r.get("tp_pct") is not None
+                     and float(r[key]) >= float(r["tp_pct"]) - 0.01)
+        out[key] = {"n": len(vals), "label": label,
+                    "avg": sum(vals) / len(vals),
+                    "win": sum(1 for v in vals if v > 0),
+                    "sl_hit": sl_hit, "tp_hit": tp_hit,
+                    "rate": sum(1 for v in vals if v > 0) / len(vals)}
+    return out
+
+
 def update_results(market: Optional[Market] = None, cfg: Optional[Config] = None,
                    io: Any = None) -> dict:
     """回填 T+1/T+2/T+3/T+5 多周期结果：用日 K 找记录日之后的第 N 个交易日涨幅。
@@ -337,15 +565,22 @@ def update_results(market: Optional[Market] = None, cfg: Optional[Config] = None
     horizons = ((1, "next_chg"), (2, "chg_t2"), (3, "chg_t3"), (5, "chg_t5"))
 
     pending = sum(1 for r in recs if r.get("code") and r.get("date") == today)
+    # 只追「还有行情没回填」的旧样本。没有止损价的样本模拟不出成交，回填时
+    # 也永远给不了 exit_t*，若把它算进待回填，每天 review 都会无谓地重抓一遍 K 线。
     needs = [r for r in recs if r.get("code") and r.get("date") != today
              and (r.get("result") is None or r.get("chg_t5") is None
-                  or r.get("result_t3") is None)]
+                  or r.get("result_t3") is None or r.get("pick_close") is None
+                  or (r.get("sl_pct") is not None and r.get("exit_t3") is None)
+                  # 非真实成交价（recorded/无标/derived）都要重推一遍
+                  or r.get("pick_price_basis") != "actual")]
     total = len(needs)
     step = max(1, total // 10) if total else 1
     updated = 0
     for done, r in enumerate(needs, 1):
         try:
-            kl = mk.get_klines(r["code"], limit=30)
+            # 30 根只够两个月，旧样本会查不到记录日、永远卡在待回填；多要一些让
+            # review 能把老样本和止损模拟一次性补齐。
+            kl = mk.get_klines(r["code"], limit=120)
         except Exception:
             pending += 1
             continue
@@ -353,13 +588,67 @@ def update_results(market: Optional[Market] = None, cfg: Optional[Config] = None
         if idx is None:
             pending += 1
             continue
-        base = kl[idx].get("close")
-        if not base:
+        # 当日收盘价（K 线）与真实选票价是两个量：老样本只存了扫描价，用它做基准
+        # 会把「从选票价算起」的 T+N 偏掉几个点。
+        day_close = kl[idx].get("close")
+        r["close"] = day_close or r.get("close")
+        # 记录日之前的一根：用来判断「现在记的 chg_pct 是不是当天的涨幅」。
+        # 不校验就把两天的涨幅拿去回推选票价，pick_close 会离谱到涨 7% 却比收盘低 7%。
+        prev_close = kl[idx - 1].get("close") if idx > 0 else None
+        prev_date = kl[idx - 1].get("date") if idx > 0 else None
+        chg_day = day_close
+        if r.get("chg_pct") is not None:
+            same_day = (day_close is not None and prev_close is not None
+                        and abs((day_close - prev_close) / prev_close * 100
+                                - float(r["chg_pct"])) <= 0.5)
+            # 涨幅对不上记录日：只在「记录日」和「前一交易日」两者间取对得上的那个。
+            # 早盘扫描的记录日常常在盘前，chg_pct 属于前一交易日；对不上就宁可不推，
+            # 因为它可能还混着当日现价，用它回推只会把基准做错。
+            if not same_day:
+                ok_prev = (prev_close is not None and prev_date
+                           and abs((prev_close - kl[idx - 2].get("close"))
+                                   / kl[idx - 2].get("close") * 100
+                                   - float(r["chg_pct"])) <= 0.5) if idx > 1 else False
+                chg_day = prev_close if ok_prev else None
+        # 盘中记录的现价（basis=recorded）与旧口径遗留（无 basis）都不能当成交基准：
+        # 前者离收盘可能差几个点，后者来源不明。按对得上的收盘 /(1+涨幅) 重推，
+        # 标 derived 并留下涨幅所属日期，复盘时也分得清哪些是真实成交价。
+        if (r.get("pick_close") is None or r.get("pick_price_basis") != "actual"
+                or day_close is None or r.get("chg_day_date") is None):
+            pick = _derive_pick_price(chg_day, r.get("chg_pct"))
+            if pick:
+                r["pick_close"] = pick
+                r["pick_price_basis"] = "derived"
+                r["chg_day_date"] = (r.get("date") if chg_day is day_close
+                                     else prev_date)
+        if not r.get("pick_close"):
             pending += 1
             continue
+        # 基准一律用选票价，但 T+N 仍按「记录日收盘」算：持仓涨跌从次日起计，
+        # 盘中到收盘那一段既不是我们能低成本锁定的，也不在「选出后表现」的定义里。
+        move_base = day_close or r["pick_close"]
+        base = r["pick_close"]
+        lows, highs = [], []
         for off, field in horizons:
-            if idx + off < len(kl) and kl[idx + off].get("close"):
-                r[field] = round((kl[idx + off]["close"] - base) / base * 100.0, 2)
+            if idx + off >= len(kl):
+                continue
+            k = kl[idx + off]
+            # 最低/最高只从次日起算：记录日当天的影线早于我们能按选票价成交，
+            # 把它算进止损会把「还没买就止损」的假亏损记在账上。
+            if off > 0 and k.get("low") is not None:
+                lows.append(float(k["low"]))
+            if off > 0 and k.get("high") is not None:
+                highs.append(float(k["high"]))
+            if not k.get("close"):
+                continue
+            r[field] = round((k["close"] - move_base) / move_base * 100.0, 2)
+            r[f"low_t{off}"] = (round((min(lows) - base) / base * 100.0, 2)
+                                if lows else None)
+            r[f"high_t{off}"] = (round((max(highs) - base) / base * 100.0, 2)
+                                 if highs else None)
+            r[f"exit_t{off}"] = _simulate_exit(
+                kl[idx + 1:idx + off + 1], base,
+                r.get("sl_pct"), r.get("tp_pct"))
         r.setdefault("data_status", STATUS_VALID)
         if r.get("next_chg") is not None:
             r["result"] = "win" if r["next_chg"] >= win_th else "loss"

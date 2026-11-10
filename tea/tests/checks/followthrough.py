@@ -43,7 +43,7 @@ def check_mode_channel_stats(t: Suite, cfg: Config) -> None:
         {"date": "2026-09-04", "code": "605007", "mode": "winrate", "track": "可买",
          "winrate_score": 4, "winrate_would_buy": True,
          "result": None, "chg_t3": 0.5},
-    ], cfg)
+    ], cfg, merge_disk=False)
     st = ft_mod.mode_channel_stats(cfg)
     t.eq("rule 样本 2", st["rule"]["n"], 2)
     t.eq("winrate 样本 2", st["winrate"]["n"], 2)
