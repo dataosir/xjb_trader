@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # 本机 docs/ 增量同步到 NAS（不碰 data/reports/logs/tea_config.json）。
-# 用法：./ops/sync-docs-to-nas.sh
+# 用法：./ops/sync-docs-to-nas.sh [--delete]
+#   --delete  以本机为准镜像 docs/：NAS 上多出来的 md 会被删掉（代码目录本身不删）。
 # 认证：优先 SSH 公钥；否则 export NAS_SSH_PASS=... 且安装 sshpass（brew install sshpass）。
 set -euo pipefail
 
@@ -13,6 +14,11 @@ DEST="${NAS_USER}@${NAS_HOST}:${NAS_TEA}"
 
 RSYNC_SSH="ssh -p ${NAS_PORT} -o StrictHostKeyChecking=accept-new"
 RSYNC_BASE=(rsync -avz --itemize-changes --exclude .DS_Store)
+
+if [[ "${1:-}" == "--delete" ]]; then
+  RSYNC_BASE+=(--delete --delete-delay)
+  echo "⚠️  --delete：以本机 docs/ 为准，NAS 上多余文件将被删除"
+fi
 
 run_rsync() {
   local src="$1"
