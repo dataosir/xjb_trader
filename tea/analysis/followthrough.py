@@ -12,9 +12,12 @@
 """
 from __future__ import annotations
 
+import datetime as _dt
 import json
+import math
 from typing import Any, Dict, List, Optional, Tuple
 
+from tea.analysis import shadow_lab as shadow_lab_mod
 from tea.config.config_store import Config, load_config
 from tea.core import utils
 from tea.data import Market
@@ -37,6 +40,14 @@ def load_records(cfg: Optional[Config] = None) -> List[dict]:
 STATUS_VALID = "valid"
 STATUS_LEGACY = "legacy"
 
+#: 回填算法版本。字段/口径改动时 +1：旧样本会在下一次 review 强制重算一次，
+#: 版本一致且字段齐全的样本不再每天重抓 120 根 K 线。
+BACKFILL_VER = 2
+
+#: 扫描数据质量。degraded 的样本不进入胜率归因，避免「网络缺数」被当成选股结果。
+QUALITY_OK = "ok"
+QUALITY_DEGRADED = "degraded"
+
 #: 各周期涨幅字段 → 对应的「收盘 > 阈值」成败标记。
 _HORIZON_RESULTS = (("next_chg", "result_t1"), ("chg_t2", "result_t2"),
                     ("chg_t3", "result_t3"), ("chg_t5", "result_t5"))
@@ -58,17 +69,26 @@ def record_status(r: dict) -> str:
     return str(r.get("data_status") or STATUS_VALID)
 
 
+def record_quality(r: dict) -> str:
+    """扫描数据质量：缺省 ok；degraded 表示当日关键行情/情绪数据有缺口。"""
+    return str(r.get("data_quality") or QUALITY_OK)
+
+
 def load_valid_records(cfg: Optional[Config] = None) -> List[dict]:
-    """只取有效性为 valid 的样本（归因/统计用）。"""
-    return [r for r in load_records(cfg) if record_status(r) == STATUS_VALID]
+    """只取可归因的样本：data_status=valid 且扫描数据未降级。"""
+    return [r for r in load_records(cfg)
+            if record_status(r) == STATUS_VALID
+            and record_quality(r) != QUALITY_DEGRADED]
 
 
 def data_health(cfg: Optional[Config] = None) -> dict:
-    """样本健康度：总条数、失效条数、各周期已回填数、与口径不一致的条数。"""
+    """样本健康度：总条数、失效/降级条数、各周期已回填数、与口径不一致的条数。"""
     recs = load_records(cfg)
     legacy = [r for r in recs if record_status(r) == STATUS_LEGACY]
     valid = [r for r in recs if record_status(r) == STATUS_VALID]
-    out = {"total": len(recs), "valid": len(valid), "legacy": len(legacy),
+    degraded = [r for r in valid if record_quality(r) == QUALITY_DEGRADED]
+    out = {"total": len(recs), "valid": len(valid), "usable": len(valid) - len(degraded),
+           "legacy": len(legacy), "degraded": len(degraded),
            "legacy_range": None, "pending": {}, "missing_result": {}}
     if legacy:
         dates = sorted(str(r.get("date")) for r in legacy)
@@ -80,6 +100,17 @@ def data_health(cfg: Optional[Config] = None) -> dict:
     out["pending_all"] = {f: sum(1 for r in recs if r.get(f) is None)
                           for f, _ in _HORIZON_RESULTS}
     return out
+
+
+def _wilson_ci(up: int, n: int, z: float = 1.96) -> Optional[Tuple[float, float]]:
+    """二项比例的 Wilson 95% 置信区间；n=0 返回 None。"""
+    if n <= 0:
+        return None
+    p = up / n
+    denom = 1 + z * z / n
+    center = (p + z * z / (2 * n)) / denom
+    half = z * math.sqrt(p * (1 - p) / n + z * z / (4 * n * n)) / denom
+    return max(0.0, center - half), min(1.0, center + half)
 
 
 def horizon_winrates(cfg: Optional[Config] = None) -> Dict[str, dict]:
@@ -99,15 +130,36 @@ def horizon_winrates(cfg: Optional[Config] = None) -> Dict[str, dict]:
                 continue
             n += 1
             up += 1 if st == "win" else 0
-        out[field] = {"n": n, "up": up, "rate": (up / n) if n else None}
+        out[field] = {"n": n, "up": up, "rate": (up / n) if n else None,
+                      "ci": _wilson_ci(up, n)}
     n = w = 0
     for r in pool:
         if r.get("result") not in ("win", "loss"):
             continue
         n += 1
         w += 1 if r["result"] == "win" else 0
-    out["result_t1_pct3"] = {"n": n, "up": w, "rate": (w / n) if n else None}
+    out["result_t1_pct3"] = {"n": n, "up": w, "rate": (w / n) if n else None,
+                             "ci": _wilson_ci(w, n)}
     return out
+
+
+def format_horizon_winrates(cfg: Optional[Config] = None) -> str:
+    """收盘口径 T+1/T+2/T+3/T+5 一行摘要，附 95% 置信区间。"""
+    h = horizon_winrates(cfg)
+    labels = (("next_chg", "T+1"), ("chg_t2", "T+2"),
+              ("chg_t3", "T+3"), ("chg_t5", "T+5"))
+    parts = []
+    for field, label in labels:
+        s = h.get(field) or {}
+        if not s.get("n"):
+            parts.append(f"{label} —")
+            continue
+        ci = s.get("ci")
+        ci_txt = f" [{ci[0]:.0%},{ci[1]:.0%}]" if ci else ""
+        tail = "·样本不足" if s["n"] < 30 else ""
+        parts.append(f"{label}>0 {s['rate']:.0%}{ci_txt}"
+                     f"（{s['up']}/{s['n']}{tail}）")
+    return "收盘口径（>0）：" + "｜".join(parts)
 
 
 # 轨道优先级：同一天同一只票按「更接近可成交」的轨道保留。早盘先以观察/启动待定
@@ -247,6 +299,8 @@ def record_seed(entries: List[dict], cfg: Optional[Config] = None,
             "lowbuy": bool(e.get("lowbuy")),
             "winrate_score": e.get("winrate_score"),
             "winrate_detail": e.get("winrate_detail"),
+            "winrate_score_v2": e.get("winrate_score_v2"),
+            "winrate_score_v2_detail": e.get("winrate_score_v2_detail"),
             "winrate_gate": e.get("winrate_gate"),
             "winrate_would_buy": e.get("winrate_would_buy"),
             "winrate_t3_prob": e.get("winrate_t3_prob"),
@@ -268,8 +322,10 @@ def record_seed(entries: List[dict], cfg: Optional[Config] = None,
             "close": e.get("price"), "next_chg": None, "result": None,
             "result_t1": None, "result_t2": None, "result_t3": None, "result_t5": None,
             "data_status": STATUS_VALID,
+            "data_quality": e.get("data_quality") or QUALITY_OK,
             "chg_t2": None, "chg_t3": None, "chg_t5": None,
         }
+        rec.update(shadow_lab_mod.compute_fields(rec, cfg))
         if key not in by_key:
             recs.append(rec)
             by_key[key] = len(recs) - 1
@@ -283,6 +339,9 @@ def record_seed(entries: List[dict], cfg: Optional[Config] = None,
             # 「从选票当天收盘算起」就变成了「从最后一次扫描价算起」。
             rec["pick_close"] = old.get("pick_close") or old.get("close")
             rec["pick_price_basis"] = old.get("pick_price_basis")
+            rec["backfill_ver"] = old.get("backfill_ver")
+            rec["backfill_date"] = old.get("backfill_date")
+            rec["backfill_note"] = old.get("backfill_note")
             rec["next_chg"] = old.get("next_chg")
             rec["result"] = old.get("result")
             for _, flag in _HORIZON_RESULTS:
@@ -290,6 +349,16 @@ def record_seed(entries: List[dict], cfg: Optional[Config] = None,
             rec["chg_t2"] = old.get("chg_t2")
             rec["chg_t3"] = old.get("chg_t3")
             rec["chg_t5"] = old.get("chg_t5")
+            # 同一天只要有一次扫描数据降级，样本就保留 degraded 标记；不因后续
+            # 补扫把已经污染的样本“洗白”。
+            if old.get("data_quality") == QUALITY_DEGRADED:
+                rec["data_quality"] = QUALITY_DEGRADED
+            for k in ("shadow_lab_sector", "shadow_lab_bad_combo",
+                      "shadow_lab_wr_consensus", "shadow_lab_bbw",
+                      "shadow_lab_quality", "shadow_lab_quality_detail",
+                      "winrate_score_v2", "winrate_score_v2_detail"):
+                if rec.get(k) is None:
+                    rec[k] = old.get(k)
             recs[idx] = rec
             updated += 1
             changed = True
@@ -541,6 +610,72 @@ def exit_stats(cfg: Optional[Config] = None) -> dict:
     return out
 
 
+def _resolve_backfill_date(r: dict, kl: List[dict]) -> Tuple[Optional[int], Optional[str], bool]:
+    """定位记录日对应的 K 线；记录日若是周末，顺延到其后第一根 K 线。
+
+    2026-08-08/09 是周六/周日，旧逻辑用记录日找 K 线永远找不到，样本会永久卡在
+    待回填。这里只对「周末」顺延；交易日缺 K 线（停牌、数据未到）仍按 pending
+    处理，避免把停牌日误当成顺延后的新记录日。
+
+    返回 ``(idx, effective_date, rolled)``；找不到返回 ``(None, None, False)``。
+    """
+    rec_date = r.get("date")
+    idx = next((i for i, k in enumerate(kl) if k.get("date") == rec_date), None)
+    if idx is not None:
+        return idx, rec_date, False
+    d = utils.parse_date(rec_date)
+    if not d or utils.is_trading_day(d):
+        return None, None, False
+    for i, k in enumerate(kl):
+        kd = utils.parse_date(k.get("date"))
+        if kd and kd > d:
+            return i, k.get("date"), True
+    return None, None, False
+
+
+def _trading_days_since(start: Optional[str], today: str) -> int:
+    """start 之后到 today（含）之间的交易日数；周末顺延自然计入下一交易日。"""
+    d = utils.parse_date(start)
+    t = utils.parse_date(today)
+    if not d or not t or t <= d:
+        return 0
+    n = 0
+    cur = d
+    while cur < t:
+        cur += _dt.timedelta(days=1)
+        if utils.is_trading_day(cur):
+            n += 1
+    return n
+
+
+def _needs_data(r: dict, today: str) -> bool:
+    """是否缺已到期行情数据；未到 T+n 的字段不算缺口，避免每天白发请求。"""
+    if not r.get("code") or r.get("date") == today:
+        return False
+    days = _trading_days_since(r.get("date"), today)
+    if days <= 0:
+        return False
+    if r.get("pick_close") is None:
+        return True
+    if r.get("next_chg") is None or r.get("result") is None:
+        return True
+    if days >= 2 and r.get("chg_t2") is None:
+        return True
+    if days >= 3 and (r.get("chg_t3") is None or r.get("result_t3") is None
+                      or (r.get("sl_pct") is not None and r.get("exit_t3") is None)):
+        return True
+    if days >= 5 and (r.get("chg_t5") is None or r.get("result_t5") is None):
+        return True
+    return False
+
+
+def _needs_backfill(r: dict, today: str) -> bool:
+    """是否需要回填/升级：缺数据或回填版本旧。"""
+    if not r.get("code") or r.get("date") == today:
+        return False
+    return _needs_data(r, today) or r.get("backfill_ver") != BACKFILL_VER
+
+
 def update_results(market: Optional[Market] = None, cfg: Optional[Config] = None,
                    io: Any = None) -> dict:
     """回填 T+1/T+2/T+3/T+5 多周期结果：用日 K 找记录日之后的第 N 个交易日涨幅。
@@ -564,15 +699,9 @@ def update_results(market: Optional[Market] = None, cfg: Optional[Config] = None
     today = utils.today_str()
     horizons = ((1, "next_chg"), (2, "chg_t2"), (3, "chg_t3"), (5, "chg_t5"))
 
-    pending = sum(1 for r in recs if r.get("code") and r.get("date") == today)
-    # 只追「还有行情没回填」的旧样本。没有止损价的样本模拟不出成交，回填时
-    # 也永远给不了 exit_t*，若把它算进待回填，每天 review 都会无谓地重抓一遍 K 线。
-    needs = [r for r in recs if r.get("code") and r.get("date") != today
-             and (r.get("result") is None or r.get("chg_t5") is None
-                  or r.get("result_t3") is None or r.get("pick_close") is None
-                  or (r.get("sl_pct") is not None and r.get("exit_t3") is None)
-                  # 非真实成交价（recorded/无标/derived）都要重推一遍
-                  or r.get("pick_price_basis") != "actual")]
+    # 版本号负责「一次性升级旧口径」；版本一致后只补已到期的缺字段，避免每天把
+    # 126 条历史样本的 120 根 K 线全部重抓一遍。
+    needs = [r for r in recs if _needs_backfill(r, today)]
     total = len(needs)
     step = max(1, total // 10) if total else 1
     updated = 0
@@ -582,47 +711,55 @@ def update_results(market: Optional[Market] = None, cfg: Optional[Config] = None
             # review 能把老样本和止损模拟一次性补齐。
             kl = mk.get_klines(r["code"], limit=120)
         except Exception:
-            pending += 1
             continue
-        idx = next((i for i, k in enumerate(kl) if k.get("date") == r.get("date")), None)
+        idx, eff_date, rolled = _resolve_backfill_date(r, kl)
         if idx is None:
-            pending += 1
             continue
         # 当日收盘价（K 线）与真实选票价是两个量：老样本只存了扫描价，用它做基准
         # 会把「从选票价算起」的 T+N 偏掉几个点。
         day_close = kl[idx].get("close")
-        r["close"] = day_close or r.get("close")
-        # 记录日之前的一根：用来判断「现在记的 chg_pct 是不是当天的涨幅」。
-        # 不校验就把两天的涨幅拿去回推选票价，pick_close 会离谱到涨 7% 却比收盘低 7%。
-        prev_close = kl[idx - 1].get("close") if idx > 0 else None
-        prev_date = kl[idx - 1].get("date") if idx > 0 else None
-        chg_day = day_close
-        if r.get("chg_pct") is not None:
-            same_day = (day_close is not None and prev_close is not None
-                        and abs((day_close - prev_close) / prev_close * 100
-                                - float(r["chg_pct"])) <= 0.5)
-            # 涨幅对不上记录日：只在「记录日」和「前一交易日」两者间取对得上的那个。
-            # 早盘扫描的记录日常常在盘前，chg_pct 属于前一交易日；对不上就宁可不推，
-            # 因为它可能还混着当日现价，用它回推只会把基准做错。
-            if not same_day:
-                ok_prev = (prev_close is not None and prev_date
-                           and abs((prev_close - kl[idx - 2].get("close"))
-                                   / kl[idx - 2].get("close") * 100
-                                   - float(r["chg_pct"])) <= 0.5) if idx > 1 else False
-                chg_day = prev_close if ok_prev else None
-        # 盘中记录的现价（basis=recorded）与旧口径遗留（无 basis）都不能当成交基准：
-        # 前者离收盘可能差几个点，后者来源不明。按对得上的收盘 /(1+涨幅) 重推，
-        # 标 derived 并留下涨幅所属日期，复盘时也分得清哪些是真实成交价。
-        if (r.get("pick_close") is None or r.get("pick_price_basis") != "actual"
-                or day_close is None or r.get("chg_day_date") is None):
-            pick = _derive_pick_price(chg_day, r.get("chg_pct"))
-            if pick:
-                r["pick_close"] = pick
-                r["pick_price_basis"] = "derived"
-                r["chg_day_date"] = (r.get("date") if chg_day is day_close
-                                     else prev_date)
+        if day_close is None:
+            continue
+        r["close"] = day_close
+        if rolled:
+            # 周末扫描价不是可成交价：以顺延日（周一/节假日后的第一个交易日）
+            # 收盘为选票基准，T+N 也从顺延日收盘起算；原始 date/chg_pct 保留作溯源。
+            r["backfill_date"] = eff_date
+            r["backfill_note"] = f"非交易日顺延至 {eff_date}"
+            r["pick_close"] = day_close
+            r["pick_price_basis"] = "rolled"
+            r["chg_day_date"] = eff_date
+        else:
+            # 记录日之前的一根：用来判断「现在记的 chg_pct 是不是当天的涨幅」。
+            # 不校验就把两天的涨幅拿去回推选票价，pick_close 会离谱到涨 7% 却比收盘低 7%。
+            prev_close = kl[idx - 1].get("close") if idx > 0 else None
+            prev_date = kl[idx - 1].get("date") if idx > 0 else None
+            chg_day = day_close
+            if r.get("chg_pct") is not None:
+                same_day = (day_close is not None and prev_close is not None
+                            and abs((day_close - prev_close) / prev_close * 100
+                                    - float(r["chg_pct"])) <= 0.5)
+                # 涨幅对不上记录日：只在「记录日」和「前一交易日」两者间取对得上的那个。
+                # 早盘扫描的记录日常常在盘前，chg_pct 属于前一交易日；对不上就宁可不推，
+                # 因为它可能还混着当日现价，用它回推只会把基准做错。
+                if not same_day:
+                    ok_prev = (prev_close is not None and prev_date
+                               and abs((prev_close - kl[idx - 2].get("close"))
+                                       / kl[idx - 2].get("close") * 100
+                                       - float(r["chg_pct"])) <= 0.5) if idx > 1 else False
+                    chg_day = prev_close if ok_prev else None
+            # 盘中记录的现价（basis=recorded）与旧口径遗留（无 basis）都不能当成交基准：
+            # 前者离收盘可能差几个点，后者来源不明。按对得上的收盘 /(1+涨幅) 重推，
+            # 标 derived 并留下涨幅所属日期，复盘时也分得清哪些是真实成交价。
+            if (r.get("pick_close") is None or r.get("pick_price_basis") != "actual"
+                    or day_close is None or r.get("chg_day_date") is None):
+                pick = _derive_pick_price(chg_day, r.get("chg_pct"))
+                if pick:
+                    r["pick_close"] = pick
+                    r["pick_price_basis"] = "derived"
+                    r["chg_day_date"] = (r.get("date") if chg_day is day_close
+                                         else prev_date)
         if not r.get("pick_close"):
-            pending += 1
             continue
         # 基准一律用选票价，但 T+N 仍按「记录日收盘」算：持仓涨跌从次日起计，
         # 盘中到收盘那一段既不是我们能低成本锁定的，也不在「选出后表现」的定义里。
@@ -649,6 +786,7 @@ def update_results(market: Optional[Market] = None, cfg: Optional[Config] = None
             r[f"exit_t{off}"] = _simulate_exit(
                 kl[idx + 1:idx + off + 1], base,
                 r.get("sl_pct"), r.get("tp_pct"))
+        r["backfill_ver"] = BACKFILL_VER
         r.setdefault("data_status", STATUS_VALID)
         if r.get("next_chg") is not None:
             r["result"] = "win" if r["next_chg"] >= win_th else "loss"
@@ -663,19 +801,39 @@ def update_results(market: Optional[Market] = None, cfg: Optional[Config] = None
             io.say(f"  ⏳ 回填 {done}/{total} 条...")
     if updated:
         save_records(recs, cfg)
+    pending = sum(1 for r in recs if _needs_data(r, today))
     return {"updated": updated, "pending": pending, "total": len(recs)}
 
 
 def pending_backfill(cfg: Optional[Config] = None) -> int:
-    """未回填 T+1 的历史记录数（不含今日：今日的样本本就要等下一个交易日）。
+    """缺行情数据的历史记录数（不含今日），保持「待 T+1 回填」的既有口径。
 
-    用于种子扫描收尾提示——若历史样本一直没人跑 review，跟涨胜率模块就是零样本，
-    白白积累了一周数据。返回 0 表示都已回填（或没有历史记录）。
+    回填版本升级由 ``pending_backfill_upgrades`` 单独计数，避免把「版本旧但数据
+    已齐」的样本混进待回填提示。
     """
     cfg = cfg or load_config()
     today = utils.today_str()
+    return sum(1 for r in load_records(cfg) if _needs_data(r, today))
+
+
+def pending_backfill_upgrades(cfg: Optional[Config] = None) -> int:
+    """数据已齐、只等回填版本升级的历史记录数（不含今日）。"""
+    cfg = cfg or load_config()
+    today = utils.today_str()
     return sum(1 for r in load_records(cfg)
-               if r.get("result") is None and r.get("code") and r.get("date") != today)
+               if r.get("code") and r.get("date") != today
+               and r.get("backfill_ver") != BACKFILL_VER
+               and not _needs_data(r, today))
+
+
+def pending_by_horizon(cfg: Optional[Config] = None) -> Dict[str, int]:
+    """按周期统计历史样本缺口（不含今日）：T+1/T+2/T+3/T+5。"""
+    cfg = cfg or load_config()
+    today = utils.today_str()
+    recs = [r for r in load_records(cfg)
+            if r.get("code") and r.get("date") != today]
+    return {field: sum(1 for r in recs if r.get(field) is None)
+            for field, _ in _HORIZON_RESULTS}
 
 
 # ------------------------------------------------------------------ 聚合
@@ -685,7 +843,7 @@ def key_of(stage: Optional[str], tier: Optional[str], track: Optional[str]) -> s
 
 
 def aggregate(cfg: Optional[Config] = None) -> Dict[str, dict]:
-    """按 阶段×档位×轨道 聚合 T+1 胜率 + T+1/T+3 平均涨幅。"""
+    """按 阶段×档位×轨道 聚合 T+1 胜率 + T+1/T+2/T+3 平均涨幅。"""
     cfg = cfg or load_config()
     min_n = int(cfg.get("followthrough.min_samples", 8))
     out: Dict[str, dict] = {}
@@ -695,17 +853,21 @@ def aggregate(cfg: Optional[Config] = None) -> Dict[str, dict]:
         k = key_of(r.get("stage"), r.get("tier"), r.get("track"))
         slot = out.setdefault(k, {"n": 0, "wins": 0, "stage": r.get("stage"),
                                   "tier": r.get("tier"), "track": r.get("track"),
-                                  "avg_next_chg": [], "avg_chg_t3": []})
+                                  "avg_next_chg": [], "avg_chg_t2": [],
+                                  "avg_chg_t3": []})
         slot["n"] += 1
         slot["wins"] += 1 if r["result"] == "win" else 0
         if r.get("next_chg") is not None:
             slot["avg_next_chg"].append(float(r["next_chg"]))
+        if r.get("chg_t2") is not None:
+            slot["avg_chg_t2"].append(float(r["chg_t2"]))
         if r.get("chg_t3") is not None:
             slot["avg_chg_t3"].append(float(r["chg_t3"]))
     for k, v in out.items():
         v["rate"] = v["wins"] / v["n"] if v["n"] else None
         v["valid"] = v["n"] >= min_n
         v["avg_next_chg"] = utils.mean(v["avg_next_chg"])
+        v["avg_chg_t2"] = utils.mean(v["avg_chg_t2"])
         v["avg_chg_t3"] = utils.mean(v["avg_chg_t3"])
     return out
 
@@ -796,6 +958,7 @@ def format_followthrough(cfg: Optional[Config] = None) -> str:
         lines.append(f"  {k.replace(KEY_SEP, ' / ')}: {v['wins']}/{v['n']} = {rate}"
                      f"{'（有效）' if v.get('valid') else '（样本不足）'}"
                      f" 次日均涨 {utils.pct(v.get('avg_next_chg'))}"
+                     f"　T+2均涨 {utils.pct(v.get('avg_chg_t2'))}"
                      f"　T+3均涨 {utils.pct(v.get('avg_chg_t3'))}")
     return "\n".join(lines)
 
@@ -886,7 +1049,7 @@ def sample_gap_stats(cfg: Optional[Config] = None) -> dict:
     today = utils.today_str()
     gate = str(cfg.get("followthrough.p0_gate_date", "2026-08-26") or "2026-08-26")
     recs = load_valid_records(cfg)
-    pending_t1 = pending_t3 = today_waiting = 0
+    pending_t1 = pending_t2 = pending_t3 = today_waiting = 0
     factor_ok = 0
     post_buyable = 0
     post_buyable_t3 = 0
@@ -896,10 +1059,14 @@ def sample_gap_stats(cfg: Optional[Config] = None) -> dict:
         d = r.get("date") or ""
         if d == today:
             today_waiting += 1
-        elif r.get("result") is None:
-            pending_t1 += 1
-        elif r.get("chg_t3") is None:
-            pending_t3 += 1
+        else:
+            # 三个周期各自计数：T+1 已回填不等于 T+3 已到期/已回填。
+            if r.get("result") is None:
+                pending_t1 += 1
+            if r.get("chg_t2") is None:
+                pending_t2 += 1
+            if r.get("chg_t3") is None:
+                pending_t3 += 1
         if r.get("bias_ma20") is not None:
             factor_ok += 1
         if r.get("track") == "可买" and d >= gate:
@@ -911,8 +1078,10 @@ def sample_gap_stats(cfg: Optional[Config] = None) -> dict:
     return {
         "total": len(recs),
         "legacy": health["legacy"],
+        "degraded": health["degraded"],
         "all_total": health["total"],
         "pending_t1": pending_t1,
+        "pending_t2": pending_t2,
         "pending_t3": pending_t3,
         "today_waiting": today_waiting,
         "lowbuy_total": lb["total"],
@@ -934,12 +1103,15 @@ def format_sample_gap(cfg: Optional[Config] = None) -> str:
     lines = [
         "===== 样本缺口看板 =====",
         (f"  累计 {st['total']} 条｜待 T+1 {st['pending_t1']}｜"
-         f"待 T+3 {st['pending_t3']}｜今日待下一交易日 {st['today_waiting']}"),
+         f"待 T+2 {st['pending_t2']}｜待 T+3 {st['pending_t3']}｜"
+         f"今日待下一交易日 {st['today_waiting']}"),
         (f"  低吸 {st['lowbuy_total']} 条（已回填 {st['lowbuy_backfilled']}）｜"
          f"因子字段齐全 {factor}"),
         (f"  新闸门后（≥{st['p0_gate_date']}）可买 {st['post_gate_buyable']} 条"
          f"（其中已有 T+3 {st['post_gate_buyable_t3']}）"),
     ]
+    if st.get("degraded"):
+        lines.append(f"  降级数据 {st['degraded']} 条（已排除胜率统计）")
     return "\n".join(lines)
 
 

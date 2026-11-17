@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Optional
 
-from tea.analysis import followthrough, stats
+from tea.analysis import followthrough, shadow_lab, stats
 from tea.config.config_store import Config, load_config
 from tea.core import notify, utils
 from tea.portfolio import accumulator, trades as trades_mod, watch_pool
@@ -349,6 +349,13 @@ def render_md(wk: Optional[dict] = None, cfg: Optional[Config] = None) -> str:
             lines += ["", f"### 影子桶（萌芽∪前三非突破） {flag}",
                       f"- T+3>0：{shadow.get('t3_up', 0)}/{shadow['n_t3']} = **{sr:.0%}**"
                       f"（门槛 ≥{shadow.get('target', 0.6):.0%}，n≥{shadow.get('min_samples', 15)}）"]
+        lines += ["", "### 影子指标实验（只记录，不进闸）", ""]
+        lines += shadow_lab.shadow_lab_markdown(cfg)
+    lines.append("")
+
+    # ---- 质量确认（只读）
+    lines += ["## 质量确认（档位×板块，只读）", ""]
+    lines += shadow_lab.quality_weekly_markdown(cfg, wk.get("since"), wk.get("until"))
     lines.append("")
 
     # ---- rule vs winrate 通道对照（B-P1-01）
@@ -502,6 +509,8 @@ def _fmt_pick_follow(rec: dict) -> str:
         parts.append("T+1待填")
     if rec.get("chg_t3") is not None:
         parts.append(f"T+3 {utils.num(rec.get('chg_t3'))}%")
+    if rec.get("chg_t5") is not None:
+        parts.append(f"T+5 {utils.num(rec.get('chg_t5'))}%")
     return " ".join(parts)
 
 
@@ -511,9 +520,11 @@ def _fmt_pick_line(rec: dict) -> str:
     rank_txt = f"#{rank}" if rank is not None else ""
     stage = rec.get("stage") or "—"
     gate = f" 闸:{rec['winrate_gate']}" if rec.get("winrate_gate") else ""
+    qtag = shadow_lab.quality_tag(rec)
+    qtxt = f"  {qtag}" if qtag else ""
     return (f"  {rec.get('date')}  {rec.get('track') or '—'}  "
             f"{rec.get('code')} {rec.get('name')}  {_fmt_pick_score(rec)}  "
-            f"{sector}{rank_txt}  {stage}  {_fmt_pick_follow(rec)}{gate}")
+            f"{sector}{rank_txt}  {stage}{qtxt}  {_fmt_pick_follow(rec)}{gate}")
 
 
 def format_email_digest(wk: dict, cfg: Optional[Config] = None,
@@ -614,6 +625,9 @@ def format_email_digest(wk: dict, cfg: Optional[Config] = None,
             f"{label} {slot['n']}条  可买{slot.get('buyable_n', 0)}  "
             f"T+1 {stats.fmt_wr(slot.get('t1_rate'))}  "
             f"T+3 {stats.fmt_wr(slot.get('t3_up_rate'))}{extra}")
+    lines.append(shadow_lab.shadow_lab_summary(cfg))
+    lines += ["", "━━ 质量确认（档位+板块，只读）━━"]
+    lines += shadow_lab.quality_email_lines(cfg, since, until)
     blk_txt = followthrough.format_gate_blocked_recent(cfg, since_ymd=since, limit=4)
     if blk_txt:
         lines += ["", "━━ 硬闸挡下高分（只记录）━━"]

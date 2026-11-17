@@ -107,3 +107,170 @@ def check_winrate_watch_full_persist(t: Suite, cfg: Config, _mk) -> None:
     entries = _ft_entries(result)
     t.eq("落盘观察轨全量 5 条", len(entries), 5)
     t.eq("展示截断上限 2", result["watch_display_limit"], 2)
+
+
+class _TradingDayMarket:
+    """只给一个代码返回真实交易日 K 线，用来验证周末样本顺延。"""
+
+    def __init__(self, rows):
+        self.rows = rows
+
+    def get_klines(self, code: str, limit: int = 120):
+        return list(self.rows)
+
+
+def check_backfill_roll_forward(t: Suite, cfg: Config) -> None:
+    """周末样本顺延到下一交易日回填；版本号让二次回填幂等。"""
+    t.head("跟涨样本 · 周末顺延回填")
+    from tea.analysis import followthrough as ft
+
+    rows = [
+        {"date": "2026-08-07", "open": 9.9, "close": 10.0, "high": 10.1, "low": 9.8},
+        {"date": "2026-08-10", "open": 10.5, "close": 11.0, "high": 11.2, "low": 10.3},
+        {"date": "2026-08-11", "open": 11.2, "close": 12.0, "high": 12.1, "low": 11.0},
+        {"date": "2026-08-12", "open": 12.1, "close": 13.0, "high": 13.2, "low": 12.0},
+        {"date": "2026-08-13", "open": 13.1, "close": 14.0, "high": 14.2, "low": 13.0},
+        {"date": "2026-08-14", "open": 14.1, "close": 15.0, "high": 15.2, "low": 14.0},
+        {"date": "2026-08-17", "open": 15.1, "close": 16.0, "high": 16.2, "low": 15.0},
+    ]
+    orig = ft.load_records(cfg)
+    try:
+        ft.save_records([{
+            "date": "2026-08-08", "code": "600451", "name": "周末样本",
+            "chg_pct": 7.41, "close": 10.0, "data_status": ft.STATUS_LEGACY,
+            "next_chg": None, "result": None,
+        }], cfg, merge_disk=False)
+        upd = ft.update_results(_TradingDayMarket(rows), cfg)
+        t.eq("周末样本已回填", upd.get("updated"), 1)
+        rec = next(r for r in ft.load_records(cfg) if r.get("code") == "600451")
+        t.eq("顺延到周一", rec.get("backfill_date"), "2026-08-10")
+        t.eq("选票基准取周一收盘", rec.get("pick_close"), 11.0)
+        t.eq("顺延来源标注", rec.get("pick_price_basis"), "rolled")
+        t.ok("顺延说明可读", "顺延" in (rec.get("backfill_note") or ""))
+        t.eq("T+1 从周一起算", rec.get("next_chg"), 9.09)
+        t.eq("T+2 从周一起算", rec.get("chg_t2"), 18.18)
+        t.eq("T+3 从周一起算", rec.get("chg_t3"), 27.27)
+        t.eq("失效标记保留", rec.get("data_status"), ft.STATUS_LEGACY)
+        t.eq("回填版本落盘", rec.get("backfill_ver"), ft.BACKFILL_VER)
+        t.eq("顺延后不再 pending", ft.pending_backfill(cfg), 0)
+        t.eq("各周期缺口归零", ft.pending_by_horizon(cfg),
+             {"next_chg": 0, "chg_t2": 0, "chg_t3": 0, "chg_t5": 0})
+        upd2 = ft.update_results(_TradingDayMarket(rows), cfg)
+        t.eq("同版本二次回填不重复抓 K 线", upd2.get("updated"), 0)
+    finally:
+        ft.save_records(orig, cfg, merge_disk=False)
+
+
+def check_shadow_lab(t: Suite, cfg: Config) -> None:
+    """影子指标：派生字段落盘、每桶 n/30 进度、前后半段稳定性。"""
+    t.head("跟涨样本 · 影子指标实验")
+    from tea.analysis import shadow_lab as sl
+
+    fields = sl.compute_fields({
+        "sector_rank": 4, "tier": "热点降级档", "mode": "rule",
+        "winrate_score": 4, "bb_bandwidth": 30,
+        "scoring_dims": [{"name": "板块强度", "score": 2}],
+    }, cfg)
+    t.eq("板块强度派生", fields["shadow_lab_sector"], 2)
+    t.eq("坏组合标记", fields["shadow_lab_bad_combo"], True)
+    t.eq("跨通道共识标记", fields["shadow_lab_wr_consensus"], True)
+    t.eq("布林带宽过热", fields["shadow_lab_bbw"], "hot")
+    fields2 = sl.compute_fields({
+        "sector_rank": 3, "tier": "严格档", "mode": "rule",
+        "winrate_score": 3.5, "bb_bandwidth": 15,
+        "scoring_dims": [{"name": "板块强度", "score": 1}],
+    }, cfg)
+    t.eq("非坏组合", fields2["shadow_lab_bad_combo"], False)
+    t.eq("非共识", fields2["shadow_lab_wr_consensus"], False)
+    t.eq("布林带宽压缩", fields2["shadow_lab_bbw"], "squeeze")
+
+    orig = ft_mod.load_records(cfg)
+    old_min = cfg.get("shadow_lab.min_samples", 30)
+    old_half = cfg.get("shadow_lab.half_min_samples", 5)
+    try:
+        r = ft_mod.record_seed([{
+            "code": "600471", "name": "影子字段", "price": 10.0,
+            "sector_rank": 4, "tier": "热点降级档", "mode": "rule",
+            "winrate_score": 4, "bb_bandwidth": 30,
+            "scoring_dims": [{"name": "板块强度", "score": 2}],
+        }], cfg, date="2026-09-01")
+        t.eq("影子字段样本落盘", r["added"], 1)
+        rec = next(x for x in ft_mod.load_records(cfg) if x.get("code") == "600471")
+        t.eq("影子字段随 record_seed 落盘", rec.get("shadow_lab_bad_combo"), True)
+        t.eq("影子字段板块强度落盘", rec.get("shadow_lab_sector"), 2)
+
+        # 8 条样本：4 条强板块全胜，4 条弱板块前半胜/后半败；用于验证前后半段。
+        rows = []
+        for i, (d, t3) in enumerate([("2026-09-01", 2.0), ("2026-09-03", 3.0),
+                                     ("2026-09-05", 4.0), ("2026-09-07", 5.0)]):
+            rows.append({
+                "date": d, "code": f"60047{i+1}", "data_status": ft_mod.STATUS_VALID,
+                "sector_rank": 2, "tier": "严格档", "mode": "rule",
+                "winrate_score": 5, "bb_bandwidth": 30, "chg_t3": t3,
+                "chg_t2": t3 / 2, "scoring_dims": [{"name": "板块强度", "score": 2}],
+            })
+        for i, (d, t3, tier) in enumerate([
+                ("2026-09-02", 1.0, "热点降级档"), ("2026-09-04", 2.0, "严格档"),
+                ("2026-09-06", -1.0, "热点降级档"), ("2026-09-08", -2.0, "严格档")]):
+            rows.append({
+                "date": d, "code": f"60048{i+1}", "data_status": ft_mod.STATUS_VALID,
+                "sector_rank": 5, "tier": tier, "mode": "rule",
+                "winrate_score": 3, "bb_bandwidth": 15, "chg_t3": t3,
+                "chg_t2": t3 / 2, "scoring_dims": [{"name": "板块强度", "score": 1}],
+            })
+        cfg.set("shadow_lab.min_samples", 4)
+        cfg.set("shadow_lab.half_min_samples", 2)
+        ft_mod.save_records(rows, cfg, merge_disk=False)
+        st = sl.shadow_lab_stats(cfg)
+        t.eq("影子实验样本数", st["pool_n"], 8)
+        sector = {b["label"]: b for d in st["dimensions"] if d["key"] == "sector"
+                  for b in d["buckets"]}
+        t.eq("板块强度2 样本", sector["2"]["t3"]["n"], 4)
+        t.eq("板块强度2 全胜", sector["2"]["t3"]["up"], 4)
+        t.eq("板块强度2 达标稳定", sector["2"]["status"], "达标·稳定")
+        t.eq("板块强度1 前后不一致", sector["1"]["status"], "达标·不稳")
+        bad = {b["label"]: b for d in st["dimensions"] if d["key"] == "bad_combo"
+               for b in d["buckets"]}
+        t.eq("坏组合进度不足", "观察中" in bad["是"]["status"], True)
+        txt = sl.format_shadow_lab(cfg)
+        t.ok("看板含前后半段", "前半" in txt and "后半" in txt)
+        t.ok("看板含样本进度", "/4" in txt and "才讨论进闸" in txt)
+        t.ok("周报表格含影子维度", any("板块强度" in ln for ln in sl.shadow_lab_markdown(cfg)))
+        t.ok("摘要含桶数", "影子指标" in sl.shadow_lab_summary(cfg))
+    finally:
+        cfg.set("shadow_lab.min_samples", old_min)
+        cfg.set("shadow_lab.half_min_samples", old_half)
+        ft_mod.save_records(orig, cfg, merge_disk=False)
+
+
+def check_data_quality_exclusion(t: Suite, cfg: Config) -> None:
+    """degraded 样本不进胜率归因，样本看板单独提示。"""
+    t.head("跟涨样本 · 降级数据排除")
+    from tea.analysis import followthrough as ft
+
+    orig = ft.load_records(cfg)
+    try:
+        ft.save_records([
+            {"date": "2026-09-01", "code": "600461", "name": "正常",
+             "data_status": ft.STATUS_VALID, "data_quality": ft.QUALITY_OK,
+             "result": "win", "next_chg": 4.0, "result_t2": "win",
+             "chg_t2": 2.0, "result_t3": "win", "chg_t3": 1.0},
+            {"date": "2026-09-02", "code": "600462", "name": "缺数",
+             "data_status": ft.STATUS_VALID, "data_quality": ft.QUALITY_DEGRADED,
+             "result": "win", "next_chg": 9.0, "result_t2": "win",
+             "chg_t2": 8.0, "result_t3": "win", "chg_t3": 7.0},
+        ], cfg, merge_disk=False)
+        h = ft.data_health(cfg)
+        t.eq("降级样本计数", h["degraded"], 1)
+        t.eq("可用样本排除降级", h["usable"], 1)
+        t.eq("归因只吃正常样本", len(ft.load_valid_records(cfg)), 1)
+        hr = ft.horizon_winrates(cfg)
+        t.eq("T+2 样本排除降级", hr["chg_t2"]["n"], 1)
+        t.ok("T+2 胜率带置信区间", isinstance(hr["chg_t2"].get("ci"), tuple))
+        txt = ft.format_sample_gap(cfg)
+        t.ok("缺口看板含 T+2", "待 T+2" in txt)
+        t.ok("缺口看板含降级", "降级数据 1 条" in txt)
+        t.ok("周期摘要含 T+2/T+3", "T+2>0" in ft.format_horizon_winrates(cfg)
+             and "T+3>0" in ft.format_horizon_winrates(cfg))
+    finally:
+        ft.save_records(orig, cfg, merge_disk=False)

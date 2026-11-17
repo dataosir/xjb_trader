@@ -744,9 +744,7 @@ class Screener:
             if vt.get("soft"):
                 ev["track"] = watch_pool.TRACK_WATCH
                 ev["triggers"] = followthrough.trigger_conditions(ev, cfg)
-                wr = preflight.winrate_score(ev, cfg)
-                ev["winrate_score"] = wr["score"]
-                ev["winrate_detail"] = wr.get("detail")
+                preflight.apply_winrate_scores(ev, cfg)
                 soft.append(ev)
                 details.append(candidate_row(cand, ev, CAND_SOFT,
                                              veto_detail(vt["soft"]) + " → 观察轨等回踩"))
@@ -819,10 +817,11 @@ class Screener:
         if cfg.s("winrate_score_gate_enabled", True):
             wr_score = ev.get("winrate_score")
             if wr_score is None:
-                wr = preflight.winrate_score(ev, cfg)
-                wr_score = wr["score"]
-                ev["winrate_score"] = wr_score
-                ev["winrate_detail"] = wr.get("detail")
+                wr_score = preflight.apply_winrate_scores(ev, cfg)["score"]
+            elif ev.get("winrate_score_v2") is None:
+                v2 = preflight.winrate_score_v2(ev, cfg)
+                ev["winrate_score_v2"] = v2["score"]
+                ev["winrate_score_v2_detail"] = v2.get("detail")
             th = int(cfg.get("winrate.buyable_threshold", 3))
             if wr_score < th:
                 return f"胜率分 {wr_score} < {th} → 降级观察"
@@ -853,9 +852,7 @@ class Screener:
                                         ev.get("tier_label"), ev.get("track"), cfg)
             ev["followthrough"] = ft
             # 影子/闸门共用：每只候选都算 winrate_score 并落盘，供 rule vs 实证对比。
-            wr = preflight.winrate_score(ev, cfg)
-            ev["winrate_score"] = wr["score"]
-            ev["winrate_detail"] = wr.get("detail")
+            preflight.apply_winrate_scores(ev, cfg)
             preflight.apply_winrate_t3(ev, cfg)
             # 胜率因子门槛（阶段 A）：历史低胜率特征从「可买」降级观察。PASS 的 gap≤0，
             # 降级为 WATCH 后自然落入下面的「差1分→观察轨」分支（gap≤1 恒成立）。
@@ -950,9 +947,7 @@ class Screener:
                 continue
             if (ev.get("stage") or {}).get("overheat"):
                 continue
-            wr = preflight.winrate_score(ev, cfg)
-            ev["winrate_score"] = wr["score"]
-            ev["winrate_detail"] = wr.get("detail")
+            preflight.apply_winrate_scores(ev, cfg)
             for k in ("pick_sector_bk", "pick_sector_name", "pick_sector_rank"):
                 if cand.get(k) is not None:
                     ev[k] = cand[k]
@@ -1151,9 +1146,7 @@ class Screener:
 
         buyable, watch = [], []
         for ev in vf["passed"]:
-            wr = preflight.winrate_score(ev, cfg)
-            ev["winrate_score"] = wr["score"]
-            ev["winrate_detail"] = wr["detail"]
+            wr = preflight.apply_winrate_scores(ev, cfg)
             preflight.apply_winrate_t3(ev, cfg)
             # 与规则通道共用可买硬闸（突破/板块上限/入选一致性）；胜率分门槛仍用本通道阈值。
             score_met = wr["score"] >= threshold

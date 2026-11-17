@@ -243,6 +243,7 @@ def collect_daily_status(day: Optional[str] = None, cfg: Optional[Config] = None
     else:
         err_st = _task_status("error.log", True, "今日无 ERROR")
 
+    from tea.analysis import shadow_lab
     tasks = [seed, winrate, review, watch, stderr_st, err_st]
     issues = [t for t in tasks if t.get("level") == "warn"]
     return {
@@ -254,6 +255,7 @@ def collect_daily_status(day: Optional[str] = None, cfg: Optional[Config] = None
         "stderr_sync": stderr_res,
         "alert_count": alert_n,
         "sample": sample_health_line(cfg),
+        "quality": shadow_lab.quality_daily_lines(cfg, day),
         "focus": daily_focus(cfg),
     }
 
@@ -344,6 +346,11 @@ def format_summary_text(status: dict, cfg: Optional[Config] = None) -> str:
 
     if status.get("sample"):
         lines.extend(["", "—— 样本健康 ——", f"  {status['sample']}"])
+
+    quality = status.get("quality") or []
+    if quality:
+        lines.extend(["", "—— 今日质量确认（档位+板块，只读）——"])
+        lines.extend(f"  {x}" for x in quality)
 
     focus = status.get("focus") or []
     if focus:

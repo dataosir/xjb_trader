@@ -42,6 +42,11 @@ class Timing:
             return True
         return utils.is_trading_day((when or utils.now()).date())
 
+    def is_friday_caution(self, when: Optional[_dt.datetime] = None) -> bool:
+        """周五谨慎：周末隔夜不确定，尽量不开新仓；好机会仍可执行。"""
+        return (bool(self.cfg.get("timing.friday_caution", True))
+                and (when or utils.now()).weekday() == 4)
+
     def in_session(self, when: Optional[_dt.datetime] = None) -> bool:
         if not self.is_trading_day(when):
             return False
@@ -50,7 +55,7 @@ class Timing:
 
     # -------------------------------------------------- 关键窗口
     def is_buy_window(self, when: Optional[_dt.datetime] = None) -> bool:
-        """唯一新开买入窗口 14:00–14:45。"""
+        """唯一新开买入窗口 14:00–14:45（周五仅提示谨慎，不硬关闭）。"""
         return self.is_trading_day(when) and in_window(
             self.cfg.get("timing.buy_window_start"), self.cfg.get("timing.buy_window_end"), when, self.tol)
 
@@ -83,6 +88,8 @@ class Timing:
         if self.is_overnight_review_window(t):
             return "隔夜复核(10:00)"
         if self.is_buy_window(t):
+            if self.is_friday_caution(t):
+                return "买入窗口(14:00-14:45·周五谨慎)"
             return "买入窗口(14:00-14:45)"
         if self.is_seed_window(t):
             return "种子扫描(14:30)"
@@ -97,5 +104,8 @@ class Timing:
         return (f"{t.strftime('%Y-%m-%d %H:%M')} | {self.phase(t)} | "
                 f"买入窗口={'开' if self.is_buy_window(t) else '关'}")
 
-    def buy_window_text(self) -> str:
-        return f"{self.cfg.get('timing.buy_window_start')}–{self.cfg.get('timing.buy_window_end')}"
+    def buy_window_text(self, when: Optional[_dt.datetime] = None) -> str:
+        text = f"{self.cfg.get('timing.buy_window_start')}–{self.cfg.get('timing.buy_window_end')}"
+        if self.is_friday_caution(when):
+            return f"{text}（周五谨慎，尽量不开新仓）"
+        return text

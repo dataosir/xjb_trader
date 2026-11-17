@@ -21,7 +21,7 @@ import threading
 import time
 from typing import Any, Dict, List, Optional
 
-from tea.analysis import followthrough as ft_mod, pricetrack, stats
+from tea.analysis import followthrough as ft_mod, pricetrack, shadow_lab, stats
 from tea.analysis.sentiment import data_gap_summary, format_data_gap_banner, format_weather, get_sentiment
 from tea.config.config_store import Config, load_config
 from tea.core import logger as logger_mod, notify, utils
@@ -222,13 +222,16 @@ def seed_plan(cfg: Optional[Config] = None, market: Optional[Market] = None,
         added: List[str] = []
         for ev in (result.get("watch") or []):
             track = ev.get("track") or watch_pool.TRACK_WATCH
-            watch_pool.add(ev, track=track, source=f"seed:{result.get('scan_id')}",
-                           triggers=ev.get("triggers"), cfg=cfg)
-            added.append(f"{ev.get('code')}→{track}")
+            it = watch_pool.add(ev, track=track, source=f"seed:{result.get('scan_id')}",
+                                triggers=ev.get("triggers"), cfg=cfg)
+            if not it.get("skipped"):
+                added.append(f"{ev.get('code')}→{track}")
         for ev in (result.get("eve") or []):
-            watch_pool.add(ev, track=watch_pool.TRACK_EVE, source=f"seed:{result.get('scan_id')}",
-                           triggers=ev.get("triggers"), cfg=cfg)
-            added.append(f"{ev.get('code')}→{watch_pool.TRACK_EVE}")
+            it = watch_pool.add(ev, track=watch_pool.TRACK_EVE,
+                                source=f"seed:{result.get('scan_id')}",
+                                triggers=ev.get("triggers"), cfg=cfg)
+            if not it.get("skipped"):
+                added.append(f"{ev.get('code')}→{watch_pool.TRACK_EVE}")
         if added:
             io.say(f"  观察池新增/续期 {len(added)} 项：" + "、".join(added))
 
@@ -263,10 +266,11 @@ def seed_plan(cfg: Optional[Config] = None, market: Optional[Market] = None,
         if auto_upd and not cfg.get("followthrough.auto_backfill_full_review", False):
             if auto_upd.get("async"):
                 result.setdefault("notes", []).append(
-                    f"待回填 {auto_upd.get('pending', 0)} 条（后台处理中）")
+                    f"待回填/升级 {auto_upd.get('pending', 0)} 条（后台处理中）")
             else:
                 result.setdefault("notes", []).append(
-                    f"回填 {auto_upd.get('updated', 0)} 条，仍待 {auto_upd.get('pending', 0)} 条")
+                    f"回填/升级 {auto_upd.get('updated', 0)} 条，"
+                    f"仍待 {auto_upd.get('pending', 0)} 条")
 
         codes = [e.get("code") for e in entries if e.get("code")]
         names = {e.get("code"): e.get("name") for e in entries if e.get("code")}
@@ -392,6 +396,8 @@ def _ft_entries(result: dict) -> List[dict]:
     entries: List[dict] = []
     sent = result.get("sentiment") or {}
     idx = sent.get("index") or {}
+    note_text = " ".join(str(n) for n in (result.get("notes") or []))
+    degraded = ("数据缺口" in note_text) or ("网络异常" in note_text)
     market = {
         "market_score": sent.get("score"),
         "market_cycle": sent.get("cycle"),
@@ -457,11 +463,14 @@ def _ft_entries(result: dict) -> List[dict]:
                 "lowbuy": bool(ev.get("lowbuy")),
                 "winrate_score": wr_score,
                 "winrate_detail": ev.get("winrate_detail"),
+                "winrate_score_v2": ev.get("winrate_score_v2"),
+                "winrate_score_v2_detail": ev.get("winrate_score_v2_detail"),
                 "winrate_gate": ev.get("winrate_gate"),
                 "winrate_would_buy": bool(score_met and gate_met),
                 "winrate_t3_prob": ev.get("winrate_t3_prob"),
                 "winrate_t3_detail": ev.get("winrate_t3_detail"),
                 "mode": result.get("mode", "rule"),
+                "data_quality": "degraded" if degraded else "ok",
                 "scan_at": result.get("at"),
                 "pick_sector_bk": ev.get("pick_sector_bk"),
                 "pick_sector_name": ev.get("pick_sector_name"),
@@ -601,8 +610,12 @@ def maybe_auto_backfill(cfg: Optional[Config] = None, market: Optional[Market] =
         raise ValueError(f"未知 auto_backfill trigger: {trigger!r}")
 
     pending = ft_mod.pending_backfill(cfg)
-    if pending <= 0:
+    upgrades = ft_mod.pending_backfill_upgrades(cfg)
+    if pending <= 0 and upgrades <= 0:
         return None
+    total_pending = pending + upgrades
+    logger_mod.get_logger("ft").info(
+        "回填需求 pending=%d upgrades=%d total=%d", pending, upgrades, total_pending)
 
     full_review = bool(cfg.get("followthrough.auto_backfill_full_review", False))
     if background is None:
@@ -615,19 +628,19 @@ def maybe_auto_backfill(cfg: Optional[Config] = None, market: Optional[Market] =
             _mark_menu_backfill_done(cfg)
         if started:
             if full_review:
-                io.say(f"  后台全量复核已启动（待回填 {pending} 条）")
+                io.say(f"  后台全量复核已启动（待回填/升级 {total_pending} 条）")
             else:
-                io.say(f"  后台回填已启动（待 {pending} 条）")
+                io.say(f"  后台回填已启动（待回填/升级 {total_pending} 条）")
             logger_mod.get_logger("ft").info(
-                "后台回填已调度 trigger=%s pending=%d full_review=%s",
-                trigger, pending, full_review)
+                "后台回填已调度 trigger=%s pending=%d upgrades=%d full_review=%s",
+                trigger, pending, upgrades, full_review)
         else:
-            io.say(f"  后台回填进行中（待 {pending} 条）")
-        return {"async": True, "started": started, "pending": pending,
+            io.say(f"  后台回填进行中（待回填/升级 {total_pending} 条）")
+        return {"async": True, "started": started, "pending": total_pending,
                 "updated": 0, "full_review": full_review}
 
     if full_review:
-        io.say(f"  ⏳ 自动全量盘后复核（待回填 {pending} 条）...")
+        io.say(f"  ⏳ 自动全量盘后复核（待回填/升级 {total_pending} 条）...")
         out = close_review(cfg=cfg, market=market, io=io)
         if trigger == "menu":
             _mark_menu_backfill_done(cfg)
@@ -656,6 +669,9 @@ def close_review(cfg: Optional[Config] = None, market: Optional[Market] = None,
     io.say("=" * 56)
     io.say(f"XJB_TRADE · 盘后复核　{utils.now().strftime('%Y-%m-%d %H:%M')}")
     io.say("=" * 56)
+    if utils.now().weekday() == 4 and cfg.get("timing.friday_caution", True):
+        io.say("  周五谨慎：尽量不开新仓（避免周末隔夜）；确有机会仍可按计划执行，"
+               "无把握则顺延周一。")
 
     # 1. 跟涨经验回填
     io.say("  ⏳ 回填跟涨样本 T+1 结果...")
@@ -665,8 +681,12 @@ def close_review(cfg: Optional[Config] = None, market: Optional[Market] = None,
     io.say(f"===== 跟涨样本回填 =====\n  回填 {upd.get('updated')} 条，"
            f"待回填 {upd.get('pending')} 条，样本累计 {upd.get('total') or 0} 条")
     io.say(ft_mod.format_followthrough(cfg))
+    io.say(ft_mod.format_horizon_winrates(cfg))
     io.say(ft_mod.format_sample_gap(cfg))
     io.say(ft_mod.format_shadow_status(cfg))
+    io.say(shadow_lab.format_shadow_lab(cfg))
+    io.say(shadow_lab.format_winrate_v2_compare(cfg))
+    io.say(shadow_lab.format_quality_compare(cfg))
     io.say(ft_mod.format_t3_attribution(cfg))
     io.say(ft_mod.format_stage_b_status(cfg))
     io.say(ft_mod.format_lowbuy_status(cfg))

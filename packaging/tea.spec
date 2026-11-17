@@ -61,6 +61,7 @@ HIDDEN = [
     "tea.tests.checks.followthrough",
     "tea.tests.checks.screening",
     "tea.tests.checks.reporting",
+    "tea.tests.checks.timing",
     "tea.tests.checks.watch_pool",
     # 分析层
     "tea.analysis",
@@ -69,6 +70,7 @@ HIDDEN = [
     "tea.analysis.identity",
     "tea.analysis.pricetrack",
     "tea.analysis.sentiment",
+    "tea.analysis.shadow_lab",
     "tea.analysis.stats",
     # 配置层
     "tea.config",

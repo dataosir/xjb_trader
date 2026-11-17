@@ -9,6 +9,7 @@ import sys
 from typing import Any, Dict, List, Optional
 
 from tea.config.config_store import Config, load_config
+from tea.analysis import shadow_lab
 from tea.analysis.sentiment import format_sentiment_summary, format_weather
 from tea.core import notify, utils
 from tea.data.indicators import format_bollinger
@@ -158,14 +159,15 @@ def _ev_row(ev: dict) -> str:
             f"| {reso} "
             f"| {idn.get('tier')} {utils.num(idn.get('score'), 1)} "
             f"| {(ev.get('stage') or {}).get('stage') or '—'} "
+            f"| {shadow_lab.quality_cell(ev)} "
             f"| {_md_em(utils.pct(lv.get('sl_pct')))} / {_md_em(utils.pct(lv.get('tp_pct')))} "
             f"| {_md_em(utils.num(lv.get('odds')))} "
             f"| {utils.num(ft.get('score'), 1) if ft.get('score') is not None else '—'} |")
 
 
 _EV_HEADER = [
-    "| 代码 | 名称 | 板块 | 现价 | 涨幅 | 共振 | 身份 | 阶段 | 止损/止盈 | R:R | 跟涨分 |",
-    "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |",
+    "| 代码 | 名称 | 板块 | 现价 | 涨幅 | 共振 | 身份 | 阶段 | 质量 | 止损/止盈 | R:R | 跟涨分 |",
+    "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |",
 ]
 
 _CAND_HEADER = [
@@ -551,6 +553,7 @@ def format_result(result: dict, cfg: Optional[Config] = None) -> str:
                          f"{wr_part}{t3_part}"
                          f"  {idn.get('tier')}{utils.num(idn.get('score'), 0)}"
                          f"  {(e.get('stage') or {}).get('stage') or '—'}"
+                         f"  质量 {shadow_lab.quality_cell(e)}"
                          f"  止损 {_hl_sl_pct(lv.get('sl_pct'))} 止盈 {_hl_tp_pct(lv.get('tp_pct'))}"
                          f"  R:R {_hl_odds(lv.get('odds'))}")
             if e.get("winrate_gate"):
@@ -669,6 +672,7 @@ def format_winrate_result(result: dict, cfg: Optional[Config] = None,
                 f"{reso_part}"
                 f"  {idn.get('tier') or '—'}{utils.num(idn.get('score'), 0)}"
                 f"  {(e.get('stage') or {}).get('stage') or '—'}"
+                f"  质量 {shadow_lab.quality_cell(e)}"
             )
             if e.get("winrate_gate"):
                 lines.append(f"        硬闸：{e['winrate_gate']}")
@@ -850,6 +854,9 @@ def compact_email_stock_line(ev: dict, op: str, cfg: Config,
     stage = (ev.get("stage") or {}).get("stage")
     if stage:
         line += f" （{stage}）"
+    qtag = shadow_lab.quality_tag(ev)
+    if qtag:
+        line += f" {qtag}"
     return line
 
 

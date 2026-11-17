@@ -27,7 +27,7 @@ import sys
 from typing import List, Optional
 
 from tea import __version__
-from tea.analysis import followthrough as ft_mod, pricetrack
+from tea.analysis import followthrough as ft_mod, pricetrack, shadow_lab
 from tea.analysis.sentiment import clear_cache, format_weather, get_sentiment
 from tea.config import config_store, email_setup, notify_setup, onboarding, schedules
 from tea.config.config_store import Config, load_config
@@ -272,6 +272,9 @@ def cmd_watch(args, cfg: Config) -> int:
             ev = preflight.evaluate(args.add, mk, cfg, sent=_sent(mk, cfg))
         it = watch_pool.add(ev, track=args.track, source="manual",
                             triggers=ft_mod.trigger_conditions(ev, cfg), cfg=cfg)
+        if it.get("skipped"):
+            io.say(f"未纳入：{it.get('code')} {it.get('skip_reason')}")
+            return 0
         io.say(f"已纳入{it.get('track')}：{it.get('code')} {it.get('name')}"
                f"（保留 {it.get('keep_days')} 天）")
         for t in it.get("triggers") or []:
@@ -439,6 +442,9 @@ def cmd_followthrough(args, cfg: Config) -> int:
     io.say(ft_mod.format_followthrough(cfg))
     io.say(ft_mod.format_sample_gap(cfg))
     io.say(ft_mod.format_shadow_status(cfg))
+    io.say(shadow_lab.format_shadow_lab(cfg))
+    io.say(shadow_lab.format_winrate_v2_compare(cfg))
+    io.say(shadow_lab.format_quality_compare(cfg))
     io.say(ft_mod.format_stage_b_status(cfg))
     io.say(ft_mod.format_lowbuy_status(cfg))
     io.say(ft_mod.format_exit_status(cfg))

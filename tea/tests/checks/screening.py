@@ -133,6 +133,86 @@ def check_winrate_t3_prob(t: Suite, cfg: Config) -> None:
     t.ok("低 T+3 概率硬闸", low is not None and "T+3获利概率" in low)
 
 
+def check_winrate_score_v2(t: Suite, cfg: Config) -> None:
+    """V2 影子分：只看排名+涨幅，与 V1 并行落盘，闸门仍只认 V1。"""
+    from tea.analysis import followthrough as ft
+    from tea.analysis import shadow_lab as sl
+    from tea.runtime.runner import _ft_entries
+    from tea.screening import preflight, screener as screener_mod
+
+    t.head("胜率选股 · V2 影子分")
+    base = {
+        "code": "609999", "name": "V2影子",
+        "stage": {"stage": "突破"}, "identity": {"score": 70},
+        "quote": {"chg_pct": 4.0, "vol_ratio": 3.0, "price": 10.0},
+        "ind": {"ma_bull": False},
+    }
+    ev = dict(base, sector={"rank": 2})
+    v2 = preflight.winrate_score_v2(ev, cfg)
+    t.eq("rank≤3+涨幅3-5 满分", v2["score"], 4)
+    t.eq("V2 满分 4", v2["max"], 4)
+    t.eq("阶段/身份/量价不参与", "突破" not in v2["detail"], True)
+    t.eq("rank4-5 扣分", preflight.winrate_score_v2(
+        dict(base, sector={"rank": 4}), cfg)["score"], 0)
+    t.eq("rank>8 扣分", preflight.winrate_score_v2(
+        dict(base, sector={"rank": 9}), cfg)["score"], -1)
+
+    wr = preflight.apply_winrate_scores(ev, cfg)
+    t.eq("V1 并行写入", ev.get("winrate_score"), wr["score"])
+    t.eq("V2 并行写入", ev.get("winrate_score_v2"), 4)
+    t.ok("V2 明细落盘", "板块排名2" in (ev.get("winrate_score_v2_detail") or ""))
+
+    sc = screener_mod.Screener(cfg)
+    common = {
+        "stage": {"stage": "萌芽"},
+        "sector": {"rank": 2, "bk": "BK001", "name": "测试"},
+        "pick_sector_bk": "BK001", "pick_sector_name": "测试",
+        "pick_sector_rank": 2, "quote": {"chg_pct": 4.2},
+        "winrate_t3_prob": 0.60, "winrate_t3_min": 0.35,
+        "verdict": preflight.VERDICT_PASS,
+    }
+    t.eq("V2 低不触发闸", sc._winrate_gate(
+        dict(common, winrate_score=5, winrate_score_v2=-2)), None)
+    low = sc._winrate_gate(dict(common, winrate_score=2, winrate_score_v2=4))
+    t.ok("V2 高不能救 V1", low is not None and "胜率分 2" in low)
+
+    entries = _ft_entries({
+        "mode": "winrate", "winrate_threshold": 3,
+        "sentiment": {"index": {}}, "watch": [ev], "buyable": [],
+    })
+    t.eq("runner 透传 V2", entries[0].get("winrate_score_v2"), 4)
+    orig = ft.load_records(cfg)
+    try:
+        ft.record_seed(entries, cfg, date="2026-01-05")
+        rec = next(x for x in ft.load_records(cfg) if x.get("code") == ev.get("code"))
+        t.eq("record_seed 落盘 V2", rec.get("winrate_score_v2"), 4)
+        t.ok("record_seed 落盘 V2 明细", "板块排名2" in (rec.get("winrate_score_v2_detail") or ""))
+    finally:
+        ft.save_records(orig, cfg, merge_disk=False)
+
+    t.eq("旧样本即时重算", sl.resolve_winrate_v2(
+        {"sector_rank": 2, "chg_pct": 4.0})["score"], 4)
+    t.eq("落盘值优先", sl.resolve_winrate_v2(
+        {"sector_rank": 2, "chg_pct": 4.0, "winrate_score_v2": -1})["score"], -1)
+    orig = ft.load_records(cfg)
+    try:
+        ft.save_records([
+            {"date": "2026-01-06", "code": "609998", "data_status": ft.STATUS_VALID,
+             "sector_rank": 2, "chg_pct": 4.0, "next_chg": 3.5, "chg_t3": 2.0},
+            {"date": "2026-01-07", "code": "609997", "data_status": ft.STATUS_VALID,
+             "sector_rank": 5, "chg_pct": 4.0, "next_chg": 0.5, "chg_t3": -1.0,
+             "winrate_score_v2": 0},
+        ], cfg, merge_disk=False)
+        after = sl.winrate_v2_stats(cfg)
+        t.eq("旧样本重算计数", after["recomputed"], 1)
+        t.eq("新样本落盘计数", after["stored"], 1)
+        t.eq("V2 达标 1 条", after["v2_ge"]["t3"]["n"], 1)
+        t.eq("V2 未达 1 条", after["v2_lt"]["t3"]["n"], 1)
+        t.ok("对照看板含 V2", "V2≥2" in sl.format_winrate_v2_compare(cfg))
+    finally:
+        ft.save_records(orig, cfg, merge_disk=False)
+
+
 def check_winrate_email(t: Suite, cfg: Config) -> None:
     """胜率选股有候选时发邮件；无候选/去重/开关守卫。"""
     from tea.screening import seed_report
@@ -153,6 +233,8 @@ def check_winrate_email(t: Suite, cfg: Config) -> None:
         "buyable": [],
         "watch": [{
             "code": "603092", "name": "德力佳", "sector_name": "风电设备",
+            "tier_label": "严格档",
+            "sector": {"name": "风电设备", "rank": 3, "chg": 4.6},
             "quote": {"price": 43.19, "chg_pct": 5.34},
             "identity": {"tier": "龙头", "score": 88},
             "stage": {"stage": "突破"},
@@ -195,6 +277,7 @@ def check_winrate_email(t: Suite, cfg: Config) -> None:
     t.ok("正文无 ANSI", "\033[" not in body)
     t.ok("正文含操作建议", "【观察】" in body and "603092" in body)
     t.ok("正文含关键分", "胜率" in body and "共振" in body)
+    t.ok("正文含质量确认", "质量2/2" in body)
     t.ok("正文精简无冗长说明", "分制说明" not in body and "读分" not in body
          and "winrate_detail" not in body and "盘面：" not in body)
     t.ok("正文不含归因明细", "板块排名3≤3" not in body)
@@ -256,6 +339,8 @@ def check_seed_email(t: Suite, cfg: Config) -> None:
         "buyable": [],
         "watch": [{
             "code": "603092", "name": "德力佳",
+            "tier_label": "严格档",
+            "sector": {"name": "风电设备", "rank": 3, "chg": 4.6},
             "quote": {"price": 43.19, "chg_pct": 5.34},
             "stage": {"stage": "突破"},
             "total_score": 4, "pass_threshold": 7,
@@ -302,6 +387,7 @@ def check_seed_email(t: Suite, cfg: Config) -> None:
     t.ok("正文含资金流向前三", "资金流向：" in body and "电力设备+34.32亿" in body)
     t.ok("正文含操作建议", "【观察】" in body and "603092" in body)
     t.ok("正文含关键分", "共振" in body and "胜率" in body and "T+3" in body)
+    t.ok("正文含质量确认", "质量2/2" in body)
     t.ok("正文精简", "分制说明" not in body and "触发：" not in body and "裁决：" not in body)
     t.ok("正文含总结", "总结：" in body)
     t.ok("正文 demo 格式", "涨幅5.34%" in body and "共振4/" in body)

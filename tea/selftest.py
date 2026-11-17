@@ -2888,7 +2888,9 @@ def check_followthrough(t: Suite, cfg: Config) -> None:
         {"date": "2026-08-08", "code": "600001", "name": "历史未回填",
          "next_chg": None, "result": None},
         {"date": "2026-08-09", "code": "600002", "name": "历史已回填",
-         "next_chg": 3.5, "result": "win"},
+         "next_chg": 3.5, "result": "win", "chg_t2": 3.8, "result_t2": "win",
+         "chg_t3": 4.0, "result_t3": "win", "chg_t5": 4.0, "result_t5": "win",
+         "pick_close": 10.0, "backfill_ver": ft_mod.BACKFILL_VER},
         {"date": utils.today_str(), "code": "600003", "name": "今日待回填",
          "next_chg": None, "result": None},
     ]
@@ -3148,13 +3150,16 @@ def check_followthrough(t: Suite, cfg: Config) -> None:
     ], cfg, merge_disk=False)
     gap = ft_mod.sample_gap_stats(cfg)
     t.eq("缺口：待 T+1", gap["pending_t1"], 1)
-    t.eq("缺口：待 T+3", gap["pending_t3"], 1)
+    t.eq("缺口：待 T+2", gap["pending_t2"], 3)
+    t.eq("缺口：待 T+3", gap["pending_t3"], 2)
     t.eq("缺口：今日待下一交易日", gap["today_waiting"], 1)
     t.eq("缺口：新闸门后可买", gap["post_gate_buyable"], 1)
     t.eq("缺口：新闸门后可买已有 T+3", gap["post_gate_buyable_t3"], 1)
     t.eq("缺口：因子齐全数", gap["factor_ok"], 2)
     t.eq("缺口：低吸总数", gap["lowbuy_total"], 1)
-    t.ok("缺口文案含待 T+1", "待 T+1" in ft_mod.format_sample_gap(cfg))
+    t.ok("缺口文案含待 T+1/T+2",
+         "待 T+1" in ft_mod.format_sample_gap(cfg)
+         and "待 T+2" in ft_mod.format_sample_gap(cfg))
 
     # 自动回填开关：seed 触发轻量回填；关开关则跳过；menu 每天最多一次
     from .runtime import runner
@@ -4280,7 +4285,10 @@ def main(verbose: bool = True, cfg: Optional[Config] = None) -> int:
         check_end_to_end(t, c, mk, sent)
         check_followthrough(t, c)
         from tea.tests.checks.followthrough import (
+            check_backfill_roll_forward,
+            check_data_quality_exclusion,
             check_gate_blocked_recent,
+            check_shadow_lab,
             check_mode_channel_stats,
             check_winrate_seed_fields,
             check_winrate_watch_full_persist,
@@ -4289,11 +4297,17 @@ def main(verbose: bool = True, cfg: Optional[Config] = None) -> int:
         check_mode_channel_stats(t, c)
         check_gate_blocked_recent(t, c)
         check_winrate_watch_full_persist(t, c, mk)
+        check_backfill_roll_forward(t, c)
+        check_data_quality_exclusion(t, c)
+        check_shadow_lab(t, c)
+        from tea.tests.checks.timing import check_friday_caution
+        check_friday_caution(t, c)
         from tea.tests.checks.screening import (
             check_scan_at_persist,
             check_seed_email,
             check_winrate_email,
             check_winrate_result_display,
+            check_winrate_score_v2,
             check_winrate_sidecar_scan_details,
             check_winrate_t3_prob,
             check_scheduled_winrate_scan,
@@ -4301,6 +4315,7 @@ def main(verbose: bool = True, cfg: Optional[Config] = None) -> int:
         check_winrate_sidecar_scan_details(t, c, mk)
         check_winrate_result_display(t, c)
         check_winrate_t3_prob(t, c)
+        check_winrate_score_v2(t, c)
         check_winrate_email(t, c)
         check_scheduled_winrate_scan(t, c, mk)
         check_seed_email(t, c)
@@ -4314,8 +4329,9 @@ def main(verbose: bool = True, cfg: Optional[Config] = None) -> int:
         check_notify_setup(t, tmp)
         check_t3_attribution_and_scheduled_review(t, c)
         check_weekly_email(t, c)
-        from tea.tests.checks.reporting import check_email_digest
+        from tea.tests.checks.reporting import check_email_digest, check_quality_reports
         check_email_digest(t, c)
+        check_quality_reports(t, c)
         return t.report()
     finally:
         sent_mod.clear_cache()

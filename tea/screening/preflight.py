@@ -8,6 +8,7 @@ from __future__ import annotations
 from typing import List, Optional
 
 from tea.analysis import identity as ident_mod
+from tea.analysis import shadow_lab as shadow_lab_mod
 from tea.analysis.followthrough import resonance_core_score
 from tea.config.config_store import Config, load_config
 from tea.core import logger as logger_mod, utils
@@ -31,6 +32,8 @@ VERDICT_NEAR_MISS = "NEAR_MISS"
 RESONANCE_SCORE_MAX = 9
 # 胜率选股满分（板块+3、阶段+1、身份+1、涨幅+1、量价+1）
 WINRATE_SCORE_MAX = 7
+# V2 影子分满分（板块+3、涨幅+1）；只落盘，不进闸
+WINRATE_SCORE_V2_MAX = shadow_lab_mod.WINRATE_V2_MAX
 
 
 # ------------------------------------------------------------------ 5.3 盈亏比
@@ -655,6 +658,29 @@ def winrate_score(ev: dict, cfg: Optional[Config] = None) -> dict:
         "detail": "；".join(parts) if parts else "无胜率信号",
         "max": WINRATE_SCORE_MAX,
     }
+
+
+def winrate_score_v2(ev: dict, cfg: Optional[Config] = None) -> dict:
+    """V2 影子分：只保留样本仍支持的板块排名与涨幅，不参与任何闸门。
+
+    63 条 T+3 样本中，rank 4-5 是最差桶（T+3 25%、T+1≥3% 10%），而阶段/身份/
+    量价在 rank≤3 池内没有区分度；V2 因此去掉这些权重，与 V1 并行落盘对照。
+    公式放在 shadow_lab，历史样本回算与实时打分共用同一实现。
+    """
+    return shadow_lab_mod.winrate_v2_parts(
+        (ev.get("sector") or {}).get("rank"),
+        (ev.get("quote") or {}).get("chg_pct"))
+
+
+def apply_winrate_scores(ev: dict, cfg: Optional[Config] = None) -> dict:
+    """同时写入 V1 闸门分与 V2 影子分，返回 V1 结果供调用方判门槛。"""
+    wr = winrate_score(ev, cfg)
+    ev["winrate_score"] = wr["score"]
+    ev["winrate_detail"] = wr.get("detail")
+    v2 = winrate_score_v2(ev, cfg)
+    ev["winrate_score_v2"] = v2["score"]
+    ev["winrate_score_v2_detail"] = v2.get("detail")
+    return wr
 
 
 def format_resonance_score(score: Optional[int], threshold: Optional[int],

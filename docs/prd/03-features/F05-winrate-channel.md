@@ -19,6 +19,7 @@
 - `runner.winrate_plan`：展示与落盘，`mode=winrate`  
 - 与规则通道共用 `_winrate_gate` 硬规则（突破/一致性等）  
 - 门槛 `winrate.buyable_threshold`（默认 3）  
+- **V2 影子分**（`winrate_score_v2`）：只保留样本仍支持的板块排名与涨幅，与 V1 并行落盘；**不参与任何可买判定/排序/闸门**
 
 **Out**
 
@@ -28,11 +29,12 @@
 ## 4. 主流程与边界
 
 1. 拉天气与板块 → 扫描候选。  
-2. 算 `winrate_score`（板块排名、阶段、身份、涨幅、放量多头等加权）。  
-3. 硬闸过滤 → 达标标为胜率可买（影子）。  
-4. `record_seed` 落盘，供 F11 回填。  
+2. 算 `winrate_score`（板块排名、阶段、身份、涨幅、放量多头等加权）；同一处并行算 `winrate_score_v2`（`rank≤3 +3 / 4-5 -1 / 6-8 0 / >8 -2`，涨幅 3–5% +1，其余 0；满分 4）。  
+3. 硬闸过滤 → 达标标为胜率可买（影子）。闸门只读 V1，不读 V2。  
+4. `record_seed` 落盘 `winrate_score_v2` / `winrate_score_v2_detail`，供后续 V1 vs V2 对照。  
+5. 历史样本无 V2 字段时，`review` / `followthrough` 按 `sector_rank` / `chg_pct` **即时重算**，不改历史行；看板输出 V1≥3 vs V2≥2 的 T+1≥3% / T+3>0 / T+5>0。
 
-**边界**：样本交叉桶不足时，禁止上线先验自动调门槛。
+**边界**：样本交叉桶不足时，禁止上线先验自动调门槛；V2 仅影子字段，不得接入可买/排序/计划。
 
 ## 5. 关键配置键
 
@@ -43,21 +45,25 @@
 
 ## 6. 代码锚点
 
-- `tea/screening/preflight.py` · `winrate_score`  
+- `tea/analysis/shadow_lab.py` · `resolve_winrate_v2` / `winrate_v2_stats` / `format_winrate_v2_compare`  
+- `tea/screening/preflight.py` · `winrate_score` / `winrate_score_v2` / `apply_winrate_scores`  
 - `tea/screening/screener.py` · `winrate_scan`  
-- `tea/runtime/runner.py` · `winrate_plan`  
+- `tea/runtime/runner.py` · `winrate_plan` / `_ft_entries`  
 - CLI：`tea winrate-scan`
 
 ## 7. 验收标准
 
 - [ ] `winrate-scan` 不修改有效交易计划（或不写计划）  
 - [ ] 落盘含 `mode=winrate` 与 `winrate_score`  
+- [ ] 新样本同时含 `winrate_score_v2` / `winrate_score_v2_detail`，且 V2 不改变可买与排序  
+- [ ] 历史样本可按 `sector_rank` / `chg_pct` 即时重算 V2，复盘看板可对照 V1/V2  
 - [ ] 突破/板块一致性闸门行为与规则通道一致  
-- [ ] selftest 覆盖打分与门槛  
+- [ ] selftest 覆盖打分、V2 并行落盘与「闸门只认 V1」  
 
 ## 8. 已知缺口 / 待迭代
 
 - 阶段 B 先验：交叉桶 ≥30 前 HOLD（`WINRATE_PRIOR_PLAN`）  
+- V2 影子分需累计每桶 T+3 ≥30 且前后半段稳定，才讨论是否替换 V1 进入闸门  
 - 与规则通道长期对照后，再决策「谁驱动计划」  
 - 路线图阶段 3：共振重构后可能合并通道  
 

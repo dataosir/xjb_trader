@@ -233,6 +233,8 @@ DEFAULTS: Dict[str, Any] = {
         "session_pm_end": "15:00",
         "window_tolerance_min": 0,
         "allow_weekend_ops": False,
+        # 周五谨慎：尽量不开新仓（避免周末隔夜），但好机会仍可在窗口内执行
+        "friday_caution": True,
     },
     # ---------------------------------------------------------- 道：情绪
     "sentiment": {
@@ -503,7 +505,8 @@ DEFAULTS: Dict[str, Any] = {
         "t3_prob": {
             "gate_enabled": True,
             "min_prob": 0.35,
-            "min_samples": 8,
+            # 单桶 n<20 时 95% CI 约 ±22pp，退回 fallback 先验，避免小样本过拟合。
+            "min_samples": 20,
             "combine": "geomean",
             # 默认率来自 FACTOR_ATTRIB 2026-09-04；live 回填 n≥min_samples 时优先
             "fallback": {
@@ -675,7 +678,8 @@ DEFAULTS: Dict[str, Any] = {
     },
     # ---------------------------------------------------------- 跟涨经验
     "followthrough": {
-        "min_samples": 8,
+        # n=8 的 95% 置信区间约 ±35pp，不足以驱动仓位；n≥20 才允许生效。
+        "min_samples": 20,
         "win_chg_pct": 3.0,
         # T+3 成败口径（result_t3）：只看收盘是否高于选票日，不用 +3% 门槛——
         # T+3 归因本身按「>0」算，两处口径必须一致，否则统计和落盘互相打架。
@@ -696,6 +700,15 @@ DEFAULTS: Dict[str, Any] = {
         "p0_gate_date": "2026-08-26",       # 突破+过热禁买后的可买样本起算日
         "t3_up_target": 0.60,               # 验收门槛：影子桶 T+3>0 目标胜率（不承诺收益）
         "shadow_min_samples": 15,           # 影子桶对照最少回填条数才谈「够不够」
+    },
+    # ---------------------------------------------------------- 影子指标实验（只记录不落闸）
+    "shadow_lab": {
+        "min_samples": 30,                  # 每个桶 T+3 回填满 30 条才讨论进闸
+        "half_min_samples": 5,              # 前后半段各自至少 5 条才判稳定性
+        "stability_max_gap": 0.20,          # 前后半段 T+3 胜率差 ≤20pp 视为稳定
+        "wr_consensus_score": 4.0,          # rule 通道 winrate_score≥4 记为跨通道共识
+        "bbw_squeeze": 20.0,                # 布林带宽 ≤20% 记为压缩
+        "bbw_hot": 25.0,                    # 布林带宽 >25% 记为过热
     },
     # ---------------------------------------------------------- 观察池盘中提醒（F16）
     "alert": {

@@ -4,6 +4,40 @@
 
 ## [Unreleased]
 
+### 数 · 回填顺延与 T+2 口径（2026-11-17：周末样本 + 版本幂等 + 降级排除 + 周五谨慎）
+
+- **周末样本顺延回填**（`followthrough._resolve_backfill_date` / `update_results`）：记录日为非交易日（周六/周日）时，顺延到其后第一根 K 线所在交易日；`pick_close` 取顺延日收盘，标 `pick_price_basis=rolled`，另存 `backfill_date` / `backfill_note`，原始 `date`/`chg_pct` 保留溯源。修复 688443 两条 2026-08-08/09 样本永久卡在待回填的问题。
+- **回填版本幂等**（`BACKFILL_VER`）：`backfill_ver` 版本一致且字段齐全的样本不再每天重抓 120 根 K 线；旧样本在下一次 review 一次性升级。`pending_backfill()` 仍只数缺数据样本，新增 `pending_backfill_upgrades()` 单独数版本升级，避免把「数据已齐」混进待回填提示。
+- **待回填按周期可见**：新增 `pending_by_horizon()`；`format_sample_gap` 同时显示待 T+1/T+2/T+3，修复原先 `elif` 只统计「T+1 已完成但 T+3 缺」的口径偏差。日报收盘口径新增 `format_horizon_winrates()`，T+1/T+2/T+3/T+5 均带 95% Wilson 置信区间与样本量。
+- **到期才回填**：`_needs_data()` 先算记录日到今天的交易日数，只把已到 T+n 的缺字段算缺口；未到 T+5 的近期样本不再每天重复抓 K 线，`pending_backfill` 与 `followthrough --update` 的「待回填」恢复一致，二次运行 `updated=0`。
+- **V2 胜率影子分**（`preflight.winrate_score_v2` / `apply_winrate_scores`）：只保留样本仍支持的板块排名（`≤3 +3` / `4-5 -1` / `6-8 0` / `>8 -2`）与涨幅 3–5% `+1`，去掉阶段/身份/量价权重；与 V1 在全部打分路径并行写入 `winrate_score_v2` / `winrate_score_v2_detail`，随 `record_seed` 落盘。**闸门、排序、可买判定仍只读 V1**，V2 仅用于后续样本对照。
+- **历史样本即时重算**（`shadow_lab.resolve_winrate_v2` / `winrate_v2_stats`）：旧样本无 V2 字段时按 `sector_rank` / `chg_pct` 现场重算，不改历史行；`review` / `followthrough` 新增 V1 vs V2 对照（T+1≥3%、T+3>0、T+5>0 与 V2 分桶）。
+- **影子指标实验**（`tea/analysis/shadow_lab.py`）：新增 `shadow_lab_sector` / `shadow_lab_bad_combo` / `shadow_lab_wr_consensus` / `shadow_lab_bbw`，只记录、只分桶，不进评分/计划/闸门；`review`、`followthrough`、周报打印每桶 n/30、T+2/T+3、前后半段胜率与稳定性判定。
+- **闸门讨论门槛**：影子指标每桶 T+3 满 30 条、且前后半段胜率差 ≤20pp 才进入下一轮进闸讨论；当前只读。配置在 `shadow_lab.*`（`min_samples` / `half_min_samples` / `stability_max_gap` / `wr_consensus_score` / `bbw_squeeze` / `bbw_hot`）。
+- **降级数据排除**（`data_quality=degraded`）：`_ft_entries` 从扫描 notes 识别「数据缺口/网络异常」，随样本落盘；`load_valid_records` 排除 degraded，`data_health`/样本看板单独计数。避免把网络缺数日的结果当成选股结果。
+- **周五谨慎**（`timing.friday_caution`，默认 `true`）：周五不硬性关闭买入窗口，只在 `phase()` / 窗口文案 / `review` 提示「尽量不开新仓（避免周末隔夜）」；确有机会仍可按计划执行，无把握则顺延周一。可 `tea config set timing.friday_caution false` 关闭提示。
+- **观察池同日重复进出**（`watch_pool.add`）：同日因「观察池超上限」被剔除的票不再反复 add→remove（000013/000713 曾一天 8 次）；调用方按 `skipped` 标记不计数。
+- **样本门槛**：`followthrough.min_samples` 与 `winrate.t3_prob.min_samples` 默认 8 → 20（n=8 的 95% CI 约 ±35pp，不足以驱动仓位/胜率闸）。
+- **质量确认影子分**（`shadow_lab.quality_parts` / `shadow_lab_quality`）：档位（严格档/强势跟涨档）+1、板块涨幅 ≥4% +1，0–2 分；随 `record_seed` 落盘，旧样本按 `tier`/`sector_chg` 即时重算。**只用于分层展示，不进闸**。
+- **日报/周报展示**：日终运维摘要新增「今日质量确认」与本周分档表现；种子/胜率邮件每只票追加 `质量x/2`；周报完整版新增分档表（T+1≥3%、T+3/T+5、均涨）和受影响股票明细，邮件摘要保留双确认/无确认代表股。当前 56 条可计算质量分的有效样本：双确认 15 条 T+3 80%（均 +3.2%），单确认 39%，无确认 36%。
+- **文档**：`docs/tech/03-db-schema.md` 补 `backfill_*` / `data_quality` / `result_t*` / `shadow_lab_quality`；F02、日流程、操作 SOP 补周五谨慎口径与质量确认只读边界。
+- **自测**：1066/1066 通过；新增 `check_backfill_roll_forward`、`check_data_quality_exclusion`、`check_friday_caution`、`check_shadow_lab`、`check_winrate_score_v2`、`check_quality_reports`。
+
+### 运维（2026-11-17：本机接管 NAS 停用后的定时与邮件）
+
+- **NAS 停用**：原 NAS cron 五项（种子 / winrate / review / 观察 / 周报）改由本机承接。
+- **本机发信开启**：`notify.email.enabled=true`、`weekly_email.enabled=true`；`tea setup-email --test` 测试邮件发送成功。种子/胜率/review 运维摘要/观察提醒/周五周报均走本机 163 SMTP。
+- **launchd 五项在岗**：`com.tea.seed-plan`（14:30）、`com.tea.winrate-scan`（14:35，新装）、`com.tea.review`（15:01）、`com.tea.watch-alert`（盘中）、`com.tea.weekly-email`（周五 17:00，新装）。
+- 文档：`project-state` 日循环与 B-P0-01 更新为「本机接管」。
+
+### 运维（2026-11-11：NAS handoff §2 验收闭环）
+
+- **飞牛 NAS** `192.168.1.72:/vol1/@team/code/tea/`：本机 rsync 代码（锚定排除根目录 `/data` `/reports` `/logs`，避免误伤 `tea/data`）；生产 `data/` / `reports/` / `tea_config.json` 未覆盖。
+- **验收**：`python3 -m tea --version` → 1.0.0（546 参数）；`hasattr(Market(), 'get_sector_fund_flow_top')` True；`weather --refresh` 资金流向就绪、无 AttributeError；cron 六项在岗。
+- **`error_log_append`**：NAS 探针写入 `ERROR [weather-retry-cron] …` 含正文（修复前 11-10 行仍为 `ERROR [_]`）。
+- **selftest**：969/975；失败 6 条为 Linux 无 `$HOME` + 非 macOS Push 通道预期，非闸门回归。
+- 文档：[`ops/12-handoff-2026-11-05-nas-sync.md`](ops/12-handoff-2026-11-05-nas-sync.md) §6 勾选；`project-state` 日期 → 2026-11-11。
+
 ### 数 · 选票价基准与挂单成交口径（2026-11-10：pick_close/close 分家 + 止损止盈撮合 + explain）
 
 样本重算发现两件事：涨幅基准拿错了（用选票日**收盘**当基准算 T+N，等于把「隔夜跳空」算成收益），

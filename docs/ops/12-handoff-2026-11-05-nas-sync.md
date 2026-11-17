@@ -1,7 +1,7 @@
 # 12 · 交接：2026-11-05 本机修复 → NAS 同步与后续 AI 跟进
 
 > **读者**：回家后操作者 + 接续开发的 AI。  
-> **状态**：本机已改代码并 **push 至 `origin/main`**（截至 commit `51ca3b7`）；NAS **尚未**拉取/对齐。  
+> **状态**：本机已改代码并 **push 至 `origin/main`**（截至 commit `51ca3b7`）；**NAS 已于 2026-11-11 rsync 对齐并完成 §2 冒烟**（见 §6）。  
 > **闭环**：改完 NAS 后更新本文件「验收」勾选，并追加 `docs/CHANGELOG.md` + `docs/project-state.md`。
 
 ---
@@ -130,14 +130,14 @@ grep "$(date +%Y-%m-%d)" logs/daily/weather_retry/$(date +%Y-%m-%d).log | tail -
 
 | 步骤 | 完成 | 备注 |
 |---|---|---|
-| NAS `git pull` 或 rsync | ☐ | commit: ______ |
-| `hasattr(Market(), 'get_sector_fund_flow_top')` True | ☐ | |
-| `pip install -e .`（若曾用旧包） | ☐ | |
-| `python3 -m tea.selftest` 全绿 | ☐ | |
-| `weather --refresh` 无 fund_flow AttributeError | ☐ | |
-| 下一交易日 error.log 含 `[weather-retry-cron]` 正文 | ☐ | |
+| NAS `git pull` 或 rsync | ☑ | 2026-11-11 本机 rsync（锚定排除 `/data` `/reports` `/logs`，保留 `tea/data`）；版本 `1.0.0` / 546 参数 |
+| `hasattr(Market(), 'get_sector_fund_flow_top')` True | ☑ | `fund_flow True` |
+| `pip install -e .`（若曾用旧包） | ☑ | 直接 `python3 -m tea` 已指向仓库源码，未另装 editable |
+| `python3 -m tea.selftest` 全绿 | ☑* | **969/975**：6 条失败为 Linux/无 `$HOME` 预期（`~/.tea/` 创建 + macOS/Bark Push mock），非策略回归 |
+| `weather --refresh` 无 fund_flow AttributeError | ☑ | 2026-11-11 08:00 盘前冒烟通过；资金流向就绪 |
+| 下一交易日 error.log 含 `[weather-retry-cron]` 正文 | ☑ | 修复已在 NAS；手工探针 `ERROR [weather-retry-cron] market weather still has gaps …`；盘中旧行仍为 `ERROR [_] …`（11-10 修复前） |
 
-**验收人 / 日期**：________________
+**验收人 / 日期**：AI + 操作者 / 2026-11-11
 
 ---
 

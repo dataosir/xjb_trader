@@ -12,7 +12,7 @@
 | 产品 | XJB_TRADE（TEA）— A 股交易准入引擎 |
 | 代码版本 | `1.0.0`（`tea.__version__`） |
 | 文档框架 | 一人公司全栈：`prd` / `tech` / `ops` + CHANGELOG + 本文件；**清单权威源** `docs/INDEX.md` |
-| 更新日期 | 2026-11-05 |
+| 更新日期 | 2026-11-17 |
 
 ---
 
@@ -36,7 +36,7 @@
 
 ## 当前焦点
 
-**以攒证据为主**：缺口看板盯 T+1/T+3；影子桶（萌芽∪前三非突破）对照 **T+3>0≥60%**（验收门槛，非收益承诺）；巩固可买硬闸；低吸空池只观察。
+**以攒证据为主**：缺口看板盯 T+1/T+3；影子桶（萌芽∪前三非突破）对照 **T+3>0≥60%**（验收门槛，非收益承诺）；**影子指标实验只记录不进闸**（板块强度/坏组合/跨通道共识/布林带宽，每桶 n≥30 且前后半段差 ≤20pp 才讨论）；巩固可买硬闸；低吸空池只观察。
 
 已落地（代码）：…**F10 观察轨资格复检**（预审不再符合入池口径自动剔除，`watch.auto_prune_ineligible`）…**F05 胜率选股 T+3 获利概率**（板块/阶段/涨幅桶几何均值 + 展示/硬闸/落盘）…**review launchd 直调 python（修复 Downloads 下 bash Operation not permitted）**、…**scan_anchor 主样本幂等**（primary/manual/winrate；`seed_records`/`scan_details`/accumulator 防早盘重复扫污染）、…**F16 观察池盘中邮件提醒**（…**邮件含建议挂单价/止损/止盈/计划止盈 T+1~T+3**；**种子可买/观察/前夕主列表 + 候选明细同步展示挂单价/计划止盈路径**；**挂单价改乖离自适应纪律回踩（非 MA20 锚定），回踩轨止损/止盈按挂单价重算**；**控制台/SEED 核心数据高亮**；**F01 市场天气屏语义色高亮（热点/情绪/涨跌比/连板涨停等）**）、**操作日录**（`logs/daily/{seed|winrate|review|watch_alert|weekly_email|ops_summary}/` 按天单文件，无操作无文件，**默认保留 7 天**）、**集中错误日志**（`logs/error.log`：Python ERROR + cron 失败 + **launchd stderr 增量同步** + 未捕获异常）、**日终运维摘要邮件**（`ops_summary`：`scheduled_review` 后自动发）、**F17 每周选股周报邮件**（精简摘要 + 本地完整 `WEEKLY_*.md`）…
 
@@ -44,10 +44,13 @@
 
 | ID | 事项 | 说明 |
 |---|---|---|
-| B-P0-01 | 每日 `seed-plan` + 全量 `review` | **NAS 生产**：cron 五项（`05` 种子 + **`10` winrate 14:35** + **`08` review** + `06` 观察 + `07` 周五周报）；**本机镜像**：launchd 仅种子 + review（不发邮件、不装 winrate）。菜单 3 只读 SEED、菜单 4 胜率盘面浏览、菜单 9 可手动补跑 review |
+| B-P0-01 | 每日 `seed-plan` + 全量 `review` | **本机接管（2026-11-17，NAS 已停）**：launchd 五项（seed-plan 14:30 / winrate-scan 14:35 / review 15:01 / watch-alert 盘中 / weekly-email 周五 17:00）+ `notify.email.enabled=true` 本机发信；NAS 原 cron 五项职责由本机承接。菜单 3 只读 SEED、菜单 4 胜率盘面浏览、菜单 9 可手动补跑 review |
 | B-P0-02 / 07 | 因子与 `lowbuy` 样本积累 | 低吸**先观察**空池 diag，不放宽、不买入 |
 | B-P1-01 | rule vs winrate 影子对照 | 1–2 周，不写计划；**winrate 14:35 自动跑** + 周报已分轨 + 硬闸/`scan_at` 落盘 + **winrate scan_details sidecar** |
 | B-P1-06 | `shadow_tag` T+3 对照 | T+3 69% 已达标；**方案 A rank 5→3 已启动**（2026-09-09）；方案 E 周报 T+3 已落地 — [`archive/SHADOW_BUCKET_PLAN_2026-09-04.md`](archive/SHADOW_BUCKET_PLAN_2026-09-04.md) |
+| B-P1-07 | 影子指标实验（`shadow_lab`） | 板块强度 / 排名4-5+热点降级 / 规则+胜率共识 / 布林带宽；**只记录、只出桶，不进闸**；每桶 T+3 n≥30 且前后半段差 ≤20pp 才讨论进闸 |
+| B-P1-08 | V2 胜率影子分（`winrate_score_v2`） | 仅保留板块排名 + 涨幅 3–5%；与 V1 并行落盘，**闸门/排序仍只读 V1**；旧样本按 `sector_rank`/`chg_pct` 即时重算，复盘看板对照 V1/V2；攒 T+3 样本后再决定是否替换 |
+| B-P1-09 | 质量确认影子分（`shadow_lab_quality`） | 档位（严格档/强势跟涨档）× 板块涨幅（≥4%），0–2 分；随样本落盘、日报/周报展示受影响股票与 T+3/T+5；**不进闸**。当前 56 条可计算质量分的有效样本：双确认 15 条 T+3 80%（均 +3.2%），单确认 39%，无确认 36% |
 | B-P1-04 | 逐因子归因 | **草稿已写** [`archive/FACTOR_ATTRIB_2026-09-04.md`](archive/FACTOR_ATTRIB_2026-09-04.md)；技术因子 n&lt;30 未定稿 |
 
 ## 明确不做（现在）
@@ -64,12 +67,12 @@
 
 ## 下一步计划
 
-1. 日循环：**NAS** `seed-plan`（14:30）+ **`winrate-scan`（14:35 cron）** + **review**（15:01）+ 观察/周报；**本机** 仅 14:30/15:01 镜像；菜单 `8` 可随时补跑；周五 NAS `weekly-email` 发信前再 force review。  
+1. 日循环：**本机** `seed-plan`（14:30）+ `winrate-scan`（14:35）+ `review`（15:01）+ 观察/周报（周五 17:00），本机负责发信；菜单 `8` 可随时补跑；周五 `weekly-email` 发信前再 force review。  
 2. **方案 A 已启动**（rank 5→3）：攒 post-change 样本；盯 rank≤3 T+3、新闸后可买 n≥10；~09-18 复盘对照。归因见 `archive/FACTOR_ATTRIB_2026-09-04.md`。  
 3. 低吸：空池只读 diag；`lowbuy` 回填 ≥30 前不上买入。  
 4. **Ops-2（已建）**：每周日填 [`ops/04-evidence-scorecard.md`](ops/04-evidence-scorecard.md)；首份占位 [`archive/EVIDENCE_SCORECARD_2026-10-29.md`](archive/EVIDENCE_SCORECARD_2026-10-29.md)（NAS 断采 + 方案 A 待验收）。  
 5. **NAS 运维（2026-10-28 排查）**：交易日 **09:00 前在线**（覆盖 14:30–15:10）；`/vol1` 满盘会截断 docs rsync；`ops_summary.only_on_issues=true` 时全绿日不发运维信 — 与 DEFAULTS 不一致时本机改 config，非改闸。  
-6. **NAS 同步交接（2026-11-05）**：本机已 push `error_log_append` / `fund_flow` 守卫等；回家后在 NAS 执行 [`ops/12-handoff-2026-11-05-nas-sync.md`](ops/12-handoff-2026-11-05-nas-sync.md) §2，填 §6 验收表。
+6. **NAS 同步交接（2026-11-05 → 2026-11-11 已验收）**：rsync 已对齐；`fund_flow` True；`weather --refresh` 无 AttributeError；`error_log_append` 正文探针通过；selftest 969/975（6 条 Linux/无 HOME 预期失败）。详见 [`ops/12-handoff-2026-11-05-nas-sync.md`](ops/12-handoff-2026-11-05-nas-sync.md) §6。P2 限频/摘要增强仍待独立 Plan。
 
 ---
 

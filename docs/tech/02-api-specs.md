@@ -22,19 +22,19 @@
 | 命令 | Runner / 模块锚点 | 副作用 |
 |---|---|---|
 | `weather` | sentiment + timing | 只读 |
-| `seed-plan` | `Screener` 四步流 → `plan` 写次日计划 → `send_seed_email` → `maybe_auto_backfill(seed)` | 写计划 / 观察池 / 种子记录 + **邮件（plain 市场天气含涨幅热点 + 主力净流入 Top3 + 候选摘要）**；**仅** `TEA_LAUNCHD=1` 或 `--force`；**后台**轻量回填 |
+| `seed-plan` | `Screener` 四步流 → `plan` 写次日计划 → `send_seed_email` → `maybe_auto_backfill(seed)` | 写计划 / 观察池 / 种子记录 + **邮件（plain 市场天气含涨幅热点 + 主力净流入 Top3 + 候选摘要 + `质量x/2`）**；**仅** `TEA_LAUNCHD=1` 或 `--force`；**后台**轻量回填 |
 | `seed-show` | `seed_report.show_latest` 读 `reports/SEED_*.md` | **只读**；不扫描、不写样本 |
 | `winrate-scan` | `Screener.winrate_scan`（菜单 `4`） | **只落盘 `mode=winrate` 影子样本，不写计划、不入观察池**；**launchd** 工作日 **14:35** `winrate-scan --scheduled`（日去重，见 ops/10） |
 | `plan-check` | `plan` 复核 | 变动则整单作废 |
 | `run` / `eval` | gates → phases Phase1–4；`eval` 不落仓 | `run` 可登记灰度仓 |
 | `review` | followthrough 回填 + watch 复核 + 缺口/影子看板 | 写 seed_records / 报告 |
 | `watch-alert` | `watch_pool.scan_alerts` → `notify.send_alert`（email/macos/bark）；launchd 每分钟 | 写 `watch_alert_state.json`；**不发计划、不下单** |
-| `weekly-email` | `weekly.send_email_report` → `notify.send_email`；launchd 周五 17:00 | 写 `WEEKLY_*.md` + `weekly_email_state.json`；**不发计划、不下单** |
-| `ops-summary` | `ops_summary.sync_launchd_stderr` + `send_daily_summary`；`scheduled_review` 后自动 | 写 `ops_summary_state.json` + `launchd_stderr_state.json`；stderr→`error.log`；**不发计划、不下单** |
+| `weekly-email` | `weekly.send_email_report` → `notify.send_email`；launchd 周五 17:00；精简摘要含质量确认分档 | 写 `WEEKLY_*.md` + `weekly_email_state.json`；**不发计划、不下单** |
+| `ops-summary` | `ops_summary.sync_launchd_stderr` + `send_daily_summary`；`scheduled_review` 后自动；含「今日质量确认」与本周分档表现 | 写 `ops_summary_state.json` + `launchd_stderr_state.json`；stderr→`error.log`；**不发计划、不下单** |
 | `launchd list` / `render-plist` / `doctor` | `tea/config/schedules.py` + `launchd_doctor.py` | 按 `scheduler.*` 生成 plist；`doctor` 对比已安装 plist 与当前 `TEA_HOME`/Python（含 stderr 同步） |
-| `followthrough` | 跟涨胜率 + 样本缺口 + 影子桶 T+3 对照 | 只读（`--update` 可写回填） |
+| `followthrough` | 跟涨胜率 + 样本缺口 + 影子桶 + 影子指标实验（n/30 + 前后半段）+ V1/V2 影子分对照 + 质量确认摘要 | 只读（`--update` 可写回填） |
+| `weekly` | `weekly.write_report` / `render_md`；含质量确认分档（T+1≥3%、T+3/T+5、均涨 + 受影响股票） | 写 `WEEKLY_*.md`；**只读展示，不改闸** |
 | `retrospective [start] [end] [--write]` | `reporting.retrospective.generate/save`；菜单复盘工具 `8` | 默认上周；`--write` → `reports/retrospective_*.md`；**只读 scan_details，不改闸** |
-| `weekly` | `weekly.write_report` / `render_md`（含硬闸挡下高分个案段） | 写 `WEEKLY_*.md` |
 | （进菜单） | `maybe_auto_backfill(menu)` | 盘后/隔夜窗每天最多 1 次轻量回填（**默认后台**） |
 | `selftest` | `tea/selftest.py` | 临时 `$TEA_HOME` 沙箱，不碰真实数据 |
 
@@ -53,7 +53,7 @@
 
 - `preflight`：身份 + 9 分共振 + ATR 止损止盈；产出分数与否决标签。  
 - `veto`：硬否决列表，命中即不可买。  
-- `winrate_score`：实证加权分；可买闸门见配置 `strategy.winrate_*`。
+- `winrate_score`：实证加权分；可买闸门见配置 `strategy.winrate_*`。`winrate_score_v2` 为并行影子分（排名+涨幅），只落盘不进闸。
 
 ### 3.3 种子与闸门
 

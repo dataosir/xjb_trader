@@ -92,6 +92,15 @@ def add(ev: dict, track: str = TRACK_WATCH, source: str = "", triggers: Optional
         "snapshot": snap, "status": STATUS_ACTIVE,
     }
     items = [i for i in pool["items"] if i.get("code") != item["code"]]
+    today = utils.today_str()
+    for old in reversed(pool.get("removed", [])):
+        if (old.get("code") == item["code"] and old.get("removed_date") == today
+                and str(old.get("removed_reason") or "").startswith("观察池超上限")):
+            # 同一天因超限被剔除的票不再反复 add→remove（000713 曾一天 8 次）。
+            skipped = dict(old)
+            skipped["skipped"] = True
+            skipped["skip_reason"] = "同日超限已剔除，跳过重复加入"
+            return skipped
     items.append(item)
 
     max_size = int(cfg.get("watch.max_size", 12))

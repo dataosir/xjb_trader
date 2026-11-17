@@ -9,7 +9,7 @@
 - 收盘后 `review`：回填跟涨、观察池、当日累积。  
 - `seed-plan` 收尾 / 进菜单（盘后·隔夜窗）：**自动轻量回填**待填历史样本（可关）。  
 - `followthrough --update`：专注跟涨回填与胜率。  
-- 开发者检查 `seed_records.jsonl` 是否含 `lowbuy`/`winrate_score`/`pick_sector_*`/`shadow_tag`。  
+- 开发者检查 `seed_records.jsonl` 是否含 `lowbuy`/`winrate_score`/`winrate_score_v2`/`pick_sector_*`/`shadow_tag`。  
 - 看**样本缺口看板**与影子桶 T+3 对照，决定是否够本谈策略（不够就继续攒）。
 
 ## 3. 功能范围
@@ -23,6 +23,8 @@
 - 低吸样本进度统计  
 - **样本缺口看板**：待 T+1 / 待 T+3 / 今日待下一交易日 / 低吸 / 因子覆盖 / 新闸门后可买  
 - **影子桶对照**：萌芽 ∪（非突破∧rank≤3）→ `shadow_tag`；统计 T+3>0 vs `t3_up_target`（默认 60%）  
+- **影子指标实验**：`shadow_lab` 只记录、只出桶，不进闸；每桶 T+3 满 30 条且前后半段胜率差 ≤20pp 才讨论进闸  
+- **质量确认**：`shadow_lab_quality`（0–2）= 档位（严格档/强势跟涨档 +1）× 板块涨幅（≥4% +1）；随样本落盘，日报/周报展示受影响股票与 T+3/T+5，只用于分层观察  
 - 与 `close_review` 编排（跟涨 + 观察池 + accumulator）  
 - **自动轻量回填**（默认开）：只跑 `update_results`，不替代全量 `review`
 
@@ -37,10 +39,10 @@
 ## 4. 主流程与边界
 
 1. 种子结束：`_ft_entries` 收集可买/观察/低吸/胜率影子。  
-2. `record_seed` 追加 jsonl；自动算 `shadow_tag`（萌芽 / 前三非突破）。  
+2. `record_seed` 追加 jsonl；自动算 `shadow_tag`（萌芽 / 前三非突破）与 `shadow_lab_*`（板块强度 / 坏组合 / 跨通道共识 / 布林带宽状态 / 质量确认）。  
 3. **自动回填（可选）**：`runner.maybe_auto_backfill(trigger=seed|menu)`；默认**后台异步**（`auto_backfill_async`），不阻塞种子或菜单。  
-4. `review`/`followthrough`：回填 T+n；打印经验胜率 + **缺口看板** + **影子桶** + 阶段 B / 低吸进度。  
-5. 聚合输出胜率、分桶（供路线图与未来先验）。  
+4. `review`/`followthrough`：回填 T+n；打印经验胜率 + **缺口看板** + **影子桶** + **影子指标实验** + **V1/V2 胜率影子分对照** + **质量确认摘要** + 阶段 B / 低吸进度。  
+5. 聚合输出胜率、分桶（供路线图与未来先验）；影子指标只对照，不改计划。  
 
 **边界**：
 
@@ -50,7 +52,9 @@
 - **已完整回填**（有 `result` 且有 `chg_t5`）的行会被跳过，**不改写历史结论**。  
 - 种子收尾自动回填：**默认后台线程**，控制台一行「后台回填已启动（待 N 条）」；结果见 `logs/tea.log`（`tea.ft`）；无 pending 则不输出。  
 - 同步路径：`maybe_auto_backfill(..., background=False)` 或 `auto_backfill_async: false`。  
-- 旧样本无 `shadow_tag` 时，统计侧按阶段/排名**重算**兼容。
+- 旧样本无 `shadow_tag` / `shadow_lab_*` 时，统计侧按阶段/排名/因子**重算**兼容。  
+- 影子指标当前**不参与评分、排序、可买判定或计划**；样本不足时只显示 `观察中 n/30`。  
+- 质量确认同样**不进闸**；`tier` 或 `sector_chg` 缺失时显示「未知」，不按 0 分计入分档。
 
 ## 5. 关键配置键
 
@@ -65,21 +69,28 @@
 | `followthrough.p0_gate_date` | 新闸门后可买起算日（默认 `2026-08-26`） |
 | `followthrough.t3_up_target` | 影子桶验收：T+3>0 目标比例（默认 0.60） |
 | `followthrough.shadow_min_samples` | 影子桶最少 T+3 回填条数（默认 15） |
+| `shadow_lab.min_samples` | 影子指标每桶 T+3 目标条数（默认 30） |
+| `shadow_lab.half_min_samples` | 前后半段各自最少条数（默认 5） |
+| `shadow_lab.stability_max_gap` | 前后半段 T+3 胜率最大差（默认 0.20） |
+| `shadow_lab.wr_consensus_score` | 规则通道跨通道共识阈值（默认 4） |
+| `shadow_lab.bbw_squeeze` / `bbw_hot` | 布林带宽压缩/过热阈值（默认 20 / 25） |
 
 ## 6. 代码锚点
 
 - `tea/analysis/followthrough.py`（含 `sample_gap_stats` / `shadow_t3_stats` / `compute_shadow_tag`）  
+- `tea/analysis/shadow_lab.py`（影子指标派生字段、分桶、前后半段稳定性）  
 - `tea/portfolio/accumulator.py`  
 - `tea/runtime/runner.py` · `close_review` / `maybe_auto_backfill` / `_ft_entries`  
 - CLI：`review` / `followthrough` / **`retrospective [--write]`**；菜单 `8` 盘后复核；复盘工具 `8` 后验遗漏
 
 ## 7. 验收标准
 
-- [ ] 新种子记录含：`winrate_score`、`lowbuy`、`mode`、`pick_sector_*`、`shadow_tag`、因子字段  
+- [ ] 新种子记录含：`winrate_score`、**`winrate_score_v2`**、`lowbuy`、`mode`、`pick_sector_*`、`shadow_tag`、`shadow_lab_*`、`shadow_lab_quality`、因子字段  
 - [ ] `review` 后 T+1 可回填（交易日与停牌边界正确）  
 - [ ] seed/menu 自动回填可开关；失败不阻断种子或菜单；**默认异步不阻塞主流程**  
 - [ ] 自动回填路径不刷 `n/N` 进度，种子收尾最多一行数量摘要  
-- [ ] `review`/`followthrough` 打印缺口看板与影子桶文案  
+- [ ] `review`/`followthrough` 打印缺口看板、影子桶、影子指标实验（含 n/30 与前后半段）与 V1/V2 影子分对照  
+- [ ] 日报/周报展示质量分档的受影响股票与 T+1≥3%、T+3/T+5 表现；不改闸门  
 - [ ] 低吸进度可打印  
 - [ ] selftest 覆盖 record/回填/自动回填/缺口/影子关键路径  
 
@@ -88,4 +99,5 @@
 - T+3/T+5 回填完整度常落后于 T+1，需每周全量 `review`  
 - 低吸样本仍近 0：本轮**只观察** diag，不放宽落盘  
 - 影子桶达标后再开策略 Plan（收紧萌芽可买或另议过热）；未达标前禁止凭感觉改闸门  
+- 影子指标每桶 n<30：只观察，不做硬闸；前后半段差 >20pp 视为不稳，先查 regime 是否变了  
 - 计胜口径对低吸可能过严（F06 阶段 3 再议）  
