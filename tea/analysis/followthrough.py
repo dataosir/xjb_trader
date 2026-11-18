@@ -13,8 +13,11 @@
 from __future__ import annotations
 
 import datetime as _dt
+import glob
 import json
 import math
+import os
+import shutil
 from typing import Any, Dict, List, Optional, Tuple
 
 from tea.analysis import shadow_lab as shadow_lab_mod
@@ -398,6 +401,78 @@ def save_records(records: List[dict], cfg: Optional[Config] = None,
         records = _merge_newer_on_disk(records, cfg)
     lines = "\n".join(json.dumps(r, ensure_ascii=False) for r in records)
     return utils.atomic_write(records_path(cfg), lines + ("\n" if lines else ""))
+
+
+def _scan_sector_chg_lookup(cfg: Config) -> Dict[Tuple[str, str], float]:
+    """从同日主 scan_details 提取 (date, sector_name) -> 板块涨幅。"""
+    out: Dict[Tuple[str, str], float] = {}
+    pattern = os.path.join(cfg.data_dir(),
+                           "scan_details_[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9].json")
+    for path in sorted(glob.glob(pattern)):
+        data = utils.read_json(path, {}) or {}
+        date = str(data.get("scan_date")
+                   or os.path.basename(path)[len("scan_details_"):-len(".json")])
+        for sec in data.get("sectors") or []:
+            name, chg = sec.get("name"), sec.get("chg")
+            if not name or chg is None:
+                continue
+            try:
+                out[(date, str(name).strip())] = round(float(chg), 2)
+            except (TypeError, ValueError):
+                continue
+    return out
+
+
+def _backup_records(cfg: Config) -> Optional[str]:
+    src = records_path(cfg)
+    if not os.path.isfile(src):
+        return None
+    stamp = _dt.datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+    dst = f"{src}.backup.{stamp}"
+    shutil.copy2(src, dst)
+    return dst
+
+
+def backfill_sector_chg(cfg: Optional[Config] = None, *,
+                        dry_run: bool = False) -> dict:
+    """用同日 ``scan_details`` 的板块涨幅补历史样本缺失的 ``sector_chg``。
+
+    只补缺失值，已有值不覆盖；按（记录日, 板块名）精确匹配。主 scan_details
+    通常只保留当日板块池，匹配不到的行保持 ``None``，不猜。写盘前自动备份。
+    """
+    cfg = cfg or load_config()
+    recs = load_records(cfg)
+    missing_before = sum(1 for r in recs if r.get("sector_chg") is None)
+    lookup = _scan_sector_chg_lookup(cfg)
+    updated = 0
+    unmatched = 0
+    sample: List[str] = []
+    for r in recs:
+        if r.get("sector_chg") is not None:
+            continue
+        name = str(r.get("sector_name") or r.get("pick_sector_name") or "").strip()
+        chg = lookup.get((str(r.get("date") or ""), name)) if name else None
+        if chg is None:
+            unmatched += 1
+            continue
+        r["sector_chg"] = chg
+        updated += 1
+        if len(sample) < 5:
+            sample.append(f"{r.get('date')} {r.get('code')} {name} {chg:+.2f}%")
+    out = {
+        "total": len(recs),
+        "missing_before": missing_before,
+        "existing": len(recs) - missing_before,
+        "updated": updated,
+        "unmatched": unmatched,
+        "dry_run": dry_run,
+        "backup": None,
+        "sample": sample,
+    }
+    if updated and not dry_run:
+        out["backup"] = _backup_records(cfg)
+        save_records(recs, cfg)
+    return out
 
 
 def dedupe_records(cfg: Optional[Config] = None) -> dict:

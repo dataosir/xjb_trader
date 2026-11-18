@@ -274,3 +274,47 @@ def check_data_quality_exclusion(t: Suite, cfg: Config) -> None:
              and "T+3>0" in ft.format_horizon_winrates(cfg))
     finally:
         ft.save_records(orig, cfg, merge_disk=False)
+
+
+def check_sector_chg_backfill(t: Suite, cfg: Config) -> None:
+    """历史 sector_chg 缺失可从同日 scan_details 回填，且不覆盖已有值。"""
+    t.head("跟涨样本 · 板块涨幅回填")
+    import os
+
+    from tea.core import utils
+
+    scan_path = os.path.join(cfg.data_dir(), "scan_details_2099-01-02.json")
+    orig = ft_mod.load_records(cfg)
+    backup = None
+    try:
+        ft_mod.save_records([
+            {"date": "2099-01-02", "code": "600900", "name": "待补",
+             "sector_name": "测试板块", "sector_chg": None},
+            {"date": "2099-01-02", "code": "600901", "name": "已有值",
+             "sector_name": "测试板块", "sector_chg": 1.23},
+            {"date": "2099-01-02", "code": "600902", "name": "未匹配",
+             "sector_name": "不在明细", "sector_chg": None},
+        ], cfg, merge_disk=False)
+        utils.write_json(scan_path, {
+            "scan_date": "2099-01-02",
+            "sectors": [{"name": "测试板块", "chg": 4.56}],
+        })
+        dry = ft_mod.backfill_sector_chg(cfg, dry_run=True)
+        t.eq("预览命中 1 条", dry.get("updated"), 1)
+        t.eq("预览不写盘", next(r for r in ft_mod.load_records(cfg)
+                               if r.get("code") == "600900").get("sector_chg"), None)
+        res = ft_mod.backfill_sector_chg(cfg)
+        backup = res.get("backup")
+        t.eq("正式回填 1 条", res.get("updated"), 1)
+        recs = {r.get("code"): r for r in ft_mod.load_records(cfg)}
+        t.eq("命中板块涨幅", recs["600900"].get("sector_chg"), 4.56)
+        t.eq("已有值不覆盖", recs["600901"].get("sector_chg"), 1.23)
+        t.eq("未匹配保持缺失", recs["600902"].get("sector_chg"), None)
+        t.ok("写前已备份", bool(backup and os.path.isfile(backup)))
+        again = ft_mod.backfill_sector_chg(cfg)
+        t.eq("二次回填幂等", again.get("updated"), 0)
+    finally:
+        ft_mod.save_records(orig, cfg, merge_disk=False)
+        for path in (scan_path, backup):
+            if path and os.path.isfile(path):
+                os.unlink(path)

@@ -19,9 +19,10 @@
 - **观察池同日重复进出**（`watch_pool.add`）：同日因「观察池超上限」被剔除的票不再反复 add→remove（000013/000713 曾一天 8 次）；调用方按 `skipped` 标记不计数。
 - **样本门槛**：`followthrough.min_samples` 与 `winrate.t3_prob.min_samples` 默认 8 → 20（n=8 的 95% CI 约 ±35pp，不足以驱动仓位/胜率闸）。
 - **质量确认影子分**（`shadow_lab.quality_parts` / `shadow_lab_quality`）：档位（严格档/强势跟涨档）+1、板块涨幅 ≥4% +1，0–2 分；随 `record_seed` 落盘，旧样本按 `tier`/`sector_chg` 即时重算。**只用于分层展示，不进闸**。
-- **日报/周报展示**：日终运维摘要新增「今日质量确认」与本周分档表现；种子/胜率邮件每只票追加 `质量x/2`；周报完整版新增分档表（T+1≥3%、T+3/T+5、均涨）和受影响股票明细，邮件摘要保留双确认/无确认代表股。当前 56 条可计算质量分的有效样本：双确认 15 条 T+3 80%（均 +3.2%），单确认 39%，无确认 36%。
+- **日报/周报展示**：日终运维摘要新增「今日质量确认」与本周分档表现；种子/胜率邮件每只票追加 `质量x/2`；周报完整版新增分档表（T+1≥3%、T+3/T+5、均涨）和受影响股票明细，邮件摘要保留双确认/无确认代表股。当前 61 条可计算质量分的有效样本：双确认 16 条 T+3 81%（均 +3.3%），单确认 33%，无确认 36%。
+- **历史板块涨幅回填**（`followthrough.backfill_sector_chg` / `tea followthrough --backfill-sector-chg [--dry-run]`）：按（记录日, 板块名）从同日主 `scan_details` 的 `sectors[].chg` 补缺失的 `sector_chg`，已有值不覆盖、匹配不到保持 `None`，写盘前自动备份；本次补 50 条 2026-08 历史样本，其中 45 条为 `legacy` 不进正式归因，有效质量样本 56→61。
 - **文档**：`docs/tech/03-db-schema.md` 补 `backfill_*` / `data_quality` / `result_t*` / `shadow_lab_quality`；F02、日流程、操作 SOP 补周五谨慎口径与质量确认只读边界。
-- **自测**：1066/1066 通过；新增 `check_backfill_roll_forward`、`check_data_quality_exclusion`、`check_friday_caution`、`check_shadow_lab`、`check_winrate_score_v2`、`check_quality_reports`。
+- **自测**：1074/1074 通过；新增 `check_backfill_roll_forward`、`check_data_quality_exclusion`、`check_sector_chg_backfill`、`check_friday_caution`、`check_shadow_lab`、`check_winrate_score_v2`、`check_quality_reports`。
 
 ### 运维（2026-11-17：本机接管 NAS 停用后的定时与邮件）
 

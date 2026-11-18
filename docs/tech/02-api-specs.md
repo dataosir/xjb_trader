@@ -32,7 +32,7 @@
 | `weekly-email` | `weekly.send_email_report` → `notify.send_email`；launchd 周五 17:00；精简摘要含质量确认分档 | 写 `WEEKLY_*.md` + `weekly_email_state.json`；**不发计划、不下单** |
 | `ops-summary` | `ops_summary.sync_launchd_stderr` + `send_daily_summary`；`scheduled_review` 后自动；含「今日质量确认」与本周分档表现 | 写 `ops_summary_state.json` + `launchd_stderr_state.json`；stderr→`error.log`；**不发计划、不下单** |
 | `launchd list` / `render-plist` / `doctor` | `tea/config/schedules.py` + `launchd_doctor.py` | 按 `scheduler.*` 生成 plist；`doctor` 对比已安装 plist 与当前 `TEA_HOME`/Python（含 stderr 同步） |
-| `followthrough` | 跟涨胜率 + 样本缺口 + 影子桶 + 影子指标实验（n/30 + 前后半段）+ V1/V2 影子分对照 + 质量确认摘要 | 只读（`--update` 可写回填） |
+| `followthrough` | 跟涨胜率 + 样本缺口 + 影子桶 + 影子指标实验（n/30 + 前后半段）+ V1/V2 影子分对照 + 质量确认摘要；`--backfill-sector-chg [--dry-run]` 按同日 `scan_details` 补历史 `sector_chg` | 只读（`--update` 可写回填；`--backfill-sector-chg` 写前自动备份，已有值不覆盖） |
 | `weekly` | `weekly.write_report` / `render_md`；含质量确认分档（T+1≥3%、T+3/T+5、均涨 + 受影响股票） | 写 `WEEKLY_*.md`；**只读展示，不改闸** |
 | `retrospective [start] [end] [--write]` | `reporting.retrospective.generate/save`；菜单复盘工具 `8` | 默认上周；`--write` → `reports/retrospective_*.md`；**只读 scan_details，不改闸** |
 | （进菜单） | `maybe_auto_backfill(menu)` | 盘后/隔夜窗每天最多 1 次轻量回填（**默认后台**） |

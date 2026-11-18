@@ -4288,6 +4288,7 @@ def main(verbose: bool = True, cfg: Optional[Config] = None) -> int:
             check_backfill_roll_forward,
             check_data_quality_exclusion,
             check_gate_blocked_recent,
+            check_sector_chg_backfill,
             check_shadow_lab,
             check_mode_channel_stats,
             check_winrate_seed_fields,
@@ -4299,6 +4300,7 @@ def main(verbose: bool = True, cfg: Optional[Config] = None) -> int:
         check_winrate_watch_full_persist(t, c, mk)
         check_backfill_roll_forward(t, c)
         check_data_quality_exclusion(t, c)
+        check_sector_chg_backfill(t, c)
         check_shadow_lab(t, c)
         from tea.tests.checks.timing import check_friday_caution
         check_friday_caution(t, c)

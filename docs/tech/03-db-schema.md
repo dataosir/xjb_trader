@@ -46,7 +46,7 @@
 | 评分 | `score` `winrate_score` `winrate_detail` `winrate_score_v2` `winrate_score_v2_detail` `winrate_gate` `winrate_would_buy` `tier` | 共振 vs 胜率；V2 影子分并行落盘、不进闸；旧样本无 V2 时按 `sector_rank`/`chg_pct` 即时重算；硬闸归因 |
 | 标签 | `lowbuy` `buyable` / 观察原因 / `shadow_tag` | 低吸、可买分流、影子对照桶 |
 | 影子指标 | `shadow_lab_sector` `shadow_lab_bad_combo` `shadow_lab_wr_consensus` `shadow_lab_bbw` | 只记录不进闸；旧样本统计侧按 `scoring_dims`/`sector_rank`/`tier`/`winrate_score`/`bb_bandwidth` 即时重算 |
-| 质量确认 | `shadow_lab_quality`（0–2）`shadow_lab_quality_detail` | `tier`（严格档/强势跟涨档 +1）× `sector_chg`（≥4% +1）；只用于日报/周报展示与样本分层，不进闸；旧样本按 `tier`/`sector_chg` 即时重算 |
+| 质量确认 | `shadow_lab_quality`（0–2）`shadow_lab_quality_detail` | `tier`（严格档/强势跟涨档 +1）× `sector_chg`（≥4% +1）；只用于日报/周报展示与样本分层，不进闸；旧样本按 `tier`/`sector_chg` 即时重算，缺失 `sector_chg` 可用 `followthrough --backfill-sector-chg` 从同日 `scan_details` 补 |
 | 因子 | `bias_ma20` `bb_mid/upper/lower` `bb_pct_b` `bb_bandwidth` `vol_ratio` `atr_pct` `turnover` `intraday` … | 阶段 2 归因（布林只观测不落闸） |
 | 回填 | `next_chg`/`result`、`chg_t2`/`chg_t3`/`chg_t5`、`result_t1/t2/t3/t5` | 胜率与三日对照；T+n 统一按收盘 > `t3_win_chg_pct` 判成败 |
 | 基准 | `pick_close` `pick_price_basis`（`recorded`/`derived`/`rolled`/`actual`）`chg_day_date` `backfill_date` `backfill_note` | 选票价与真实收盘分家；周末样本顺延到下一交易日并标 `rolled` |

@@ -434,6 +434,18 @@ def cmd_trace(args, cfg: Config) -> int:
 
 def cmd_followthrough(args, cfg: Config) -> int:
     io = _io()
+    if args.backfill_sector_chg:
+        res = ft_mod.backfill_sector_chg(cfg, dry_run=args.dry_run)
+        tag = "预览" if res["dry_run"] else "完成"
+        io.say(f"板块涨幅回填{tag}：更新 {res['updated']} 条，"
+               f"已有 {res['existing']} 条，未匹配 {res['unmatched']} 条")
+        for line in res.get("sample") or []:
+            io.say(f"  {line}")
+        if res.get("backup"):
+            io.say(f"  已备份：{res['backup']}")
+        if res["dry_run"]:
+            io.say("  （预览模式，未写盘；去掉 --dry-run 执行）")
+        return 0
     if args.update:
         io.say("  ⏳ 回填跟涨样本 T+1 结果...")
         with utils.timed("跟涨样本回填", io, threshold=0.5):
@@ -1085,6 +1097,10 @@ def build_parser() -> argparse.ArgumentParser:
 
     ft = sub.add_parser("followthrough", help="跟涨经验（T+1 胜率）")
     ft.add_argument("--update", action="store_true", help="先回填 T+1 结果")
+    ft.add_argument("--backfill-sector-chg", action="store_true",
+                    help="用同日 scan_details 补历史样本缺失的 sector_chg")
+    ft.add_argument("--dry-run", action="store_true",
+                    help="配合 --backfill-sector-chg，只预览不写盘")
     ft.set_defaults(func=cmd_followthrough)
 
     ex = sub.add_parser("explain", help="单票复盘口径：能不能买 + 同赛道/同阶段历史对照")
