@@ -7,7 +7,7 @@
 | 时刻 | 动作 | 命令 / 菜单 | 相关功能 |
 |---|---|---|---|
 | ~13:30 | 观察盘面强弱 | `weather` / 菜单 `1` | F01 |
-| 盘中（可选） | 观察池购买条件扫描 → 邮件提醒 | launchd `watch-alert` / `tea watch-alert` | F16 / F10 |
+| 盘中（可选） | 观察池买点 + 持仓止损/止盈扫描 → 邮件提醒 | launchd `watch-alert` / `tea watch-alert` | F16 / F10 |
 | **~14:30** | 种子四步流 → 写次日计划（launchd 自动；收尾可自动轻量回填） | launchd `seed-plan` | F03 / F04 / F06 / F07 / F11 |
 | 任意 | 只读查看 SEED 报告（不扫描） | `seed-show` / 菜单 `3` | F03 |
 | 盘中（可选） | 胜率盘面浏览（影子对照，不写计划） | `winrate-scan` / 菜单 `4` | F05 |

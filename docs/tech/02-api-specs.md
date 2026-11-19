@@ -28,7 +28,7 @@
 | `plan-check` | `plan` 复核 | 变动则整单作废 |
 | `run` / `eval` | gates → phases Phase1–4；`eval` 不落仓 | `run` 可登记灰度仓 |
 | `review` | followthrough 回填 + watch 复核 + 缺口/影子看板 | 写 seed_records / 报告 |
-| `watch-alert` | `watch_pool.scan_alerts` → `notify.send_alert`（email/macos/bark）；launchd 每分钟 | 写 `watch_alert_state.json`；**不发计划、不下单** |
+| `watch-alert` | `watch_pool.scan_alerts`（买点）+ `position_alert.scan_alerts`（持仓卖点）→ `notify.send_alert`（email/macos/bark）；launchd 每分钟 | 写 `watch_alert_state.json` / `position_alert_state.json`；**不发计划、不下单、不平仓** |
 | `weekly-email` | `weekly.send_email_report` → `notify.send_email`；launchd 周五 17:00；精简摘要含质量确认分档 | 写 `WEEKLY_*.md` + `weekly_email_state.json`；**不发计划、不下单** |
 | `ops-summary` | `ops_summary.sync_launchd_stderr` + `send_daily_summary`；`scheduled_review` 后自动；含「今日质量确认」与本周分档表现 | 写 `ops_summary_state.json` + `launchd_stderr_state.json`；stderr→`error.log`；**不发计划、不下单** |
 | `launchd list` / `render-plist` / `doctor` | `tea/config/schedules.py` + `launchd_doctor.py` | 按 `scheduler.*` 生成 plist；`doctor` 对比已安装 plist 与当前 `TEA_HOME`/Python（含 stderr 同步） |
@@ -82,7 +82,9 @@
 | 新报告 | `tea/reporting/` | 只呈现，不判断交易 |
 | 通知 | `tea/core/notify.py` | SMTP / macOS osascript / Bark HTTP；`send_alert` 多通道；任一成功即 advance state |
 
-### 3.6 观察提醒（F16 + F18）
+### 3.6 盘中提醒（F16 + F18）
+
+**买点（观察池）**
 
 - `watch_pool.ineligible_reason(item, ev, cfg)` → 剔除原因或 `None`（观察轨须软否决或 PASS；启动待定轨须差分 ≤ `seed.near_miss_gap`）  
 - `watch_pool.prune_ineligible(cfg, market)` — 批量剔除资格失效项  
@@ -98,8 +100,24 @@
 - `preflight.plan_targets_by_day(entry, target, tp_pct)` — T+1/T+2/T+3 计划止盈路径（线性拆分）  
 - `preflight.format_tn_plan_hint(row, style)` / `format_tn_plan_email_lines(row)` — 控制台/SEED/邮件展示  
 - `seed_report.format_t3_expect_hint(cand, style)` — 兼容别名，等同 `format_tn_plan_hint`  
+
+**卖点（当前持仓）**
+
+- `position_alert.exit_levels(pos, cfg)` → `{stop, stop_basis, target, target_basis}`  
+  - 优先读持仓 `stop` / `target`；缺失按 `sl_pct` / `tp_pct` 由成本反推（tick 取整）  
+  - 止损仍缺失且 `alert.position_fallback_stop=true` → `position.fallback_sl_pct`（默认 3%）兜底，正文标注「默认止损」  
+- `position_alert.scan_alerts(market, cfg)` → `{scanned, candidates, errors, missing_levels, at}`；候选项含 `condition`（`stop_loss` / `take_profit`）与 `body`  
+  - 同一根行情同时越线按**止损优先**（与 `followthrough._simulate_exit` 保守口径一致）  
+  - 只读 `capital_state.json`；不写仓、不下单  
+- `position_alert.state_path/load_state/is_alert_sent/mark_alert_sent` — `position_alert_state.json` 按 `date|code|condition` 去重（止损/止盈独立）  
+- `position_alert.format_alert_body(cand)` — 成本/现价/浮盈亏/R/止损止盈及来源/建仓日/持有天数；提示「请手动 `tea close`，不自动卖出」  
+
+**编排与通道**
+
 - `notify.send_alert(cfg, subject, body)` → `{ok, channels}`；密码/Key 不进日志  
-- `runner.watch_alert()`：Timing 守卫 → scan → dedupe(`watch_alert_state.json`) → send_alert  
+- `runner.watch_alert()`：Timing 守卫 → 观察池买点 scan + 持仓卖点 scan → 分别 dedupe（两个 state 文件）→ send_alert  
+  - 观察池与持仓都为空才 `empty_watch_and_positions` 跳过；观察池空但持仓非空继续扫卖点  
+  - 返回含 `sent/skipped/failed`（买点）与 `sent_positions/skipped_positions/failed_positions/position_scan`（卖点）  
 - CLI：`tea watch-alert`；`tea setup-email`（SMTP）；`tea setup-notify`（macOS/Bark）；各 `--test`  
 - 调度见 `ops/06-watch-alert-scheduler.md`
 

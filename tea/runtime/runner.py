@@ -28,7 +28,7 @@ from tea.core import logger as logger_mod, notify, utils
 from tea.core.timing import Timing
 from tea.data import Market
 from tea.phases import IO, Session, phase1, phase2, phase3, phase4, results
-from tea.portfolio import accumulator, plan as plan_mod, portfolio, trades as trades_mod, watch_pool
+from tea.portfolio import accumulator, plan as plan_mod, portfolio, position_alert, trades as trades_mod, watch_pool
 from tea.reporting import report as report_mod, seed_trace, weekly
 from tea.screening import gates, screener as screener_mod, seed_report
 
@@ -851,9 +851,9 @@ def scheduled_review(cfg: Optional[Config] = None, market: Optional[Market] = No
 def watch_alert(cfg: Optional[Config] = None, market: Optional[Market] = None,
                 io: Optional[IO] = None, sent: Optional[dict] = None,
                 force: bool = False) -> dict:
-    """盘中观察池扫描：满足购买条件则发邮件提醒（不自动下单）。
+    """盘中扫描观察池买点 + 持仓卖点，满足条件则发提醒（不自动下单/平仓）。
 
-    守卫：交易日 + 盘中 + alert.enabled + notify.email.enabled；观察池空则不打行情。
+    守卫：交易日 + 盘中 + alert.enabled + 通知通道就绪；观察池与持仓都空则不打行情。
     """
     cfg = cfg or load_config()
     io = io or IO()
@@ -861,7 +861,11 @@ def watch_alert(cfg: Optional[Config] = None, market: Optional[Market] = None,
     log = logger_mod.get_logger("alert")
     tm = Timing(cfg)
     today = utils.today_str()
-    out: Dict[str, Any] = {"date": today, "sent": [], "skipped": [], "failed": []}
+    out: Dict[str, Any] = {
+        "date": today,
+        "sent": [], "skipped": [], "failed": [],
+        "sent_positions": [], "skipped_positions": [], "failed_positions": [],
+    }
 
     try:
         from tea.reporting.ops_summary import sync_launchd_stderr
@@ -886,27 +890,31 @@ def watch_alert(cfg: Optional[Config] = None, market: Optional[Market] = None,
         return out
 
     active = watch_pool.active_items(cfg)
-    if not active:
-        log.info("tea.alert skip: empty_pool")
-        out["skip"] = "empty_pool"
+    positions_enabled = bool(cfg.get("alert.position_exit_enabled", True))
+    held = portfolio.positions(cfg) if positions_enabled else []
+    if not active and not held:
+        log.info("tea.alert skip: empty_watch_and_positions")
+        out["skip"] = "empty_watch_and_positions"
         return out
 
     condition = str(cfg.get("alert.condition") or watch_pool.CONDITION_PULLBACK)
-    log.info("tea.alert scan start n=%d condition=%s", len(active), condition)
-
-    pruned = watch_pool.prune_ineligible(mk, cfg, sent=sent, apply=True)
-    if pruned.get("removed"):
-        log.info("tea.alert pruned ineligible n=%d", len(pruned["removed"]))
-        for p in pruned["removed"]:
-            io.say(f"  − 观察池剔除 {p.get('code')}：{p.get('reason')}")
-        active = watch_pool.active_items(cfg)
-        if not active:
-            log.info("tea.alert skip: empty_pool after prune")
-            out["skip"] = "empty_pool"
+    scan: Dict[str, Any] = {"condition": condition, "scanned": 0, "candidates": [], "errors": []}
+    if active:
+        log.info("tea.alert scan start watch=%d positions=%d condition=%s",
+                 len(active), len(held), condition)
+        pruned = watch_pool.prune_ineligible(mk, cfg, sent=sent, apply=True)
+        if pruned.get("removed"):
+            log.info("tea.alert pruned ineligible n=%d", len(pruned["removed"]))
+            for p in pruned["removed"]:
+                io.say(f"  − 观察池剔除 {p.get('code')}：{p.get('reason')}")
+            active = watch_pool.active_items(cfg)
             out["pruned"] = pruned
-            return out
-
-    scan = watch_pool.scan_alerts(mk, cfg, sent=sent)
+        if active:
+            scan = watch_pool.scan_alerts(mk, cfg, sent=sent)
+        else:
+            log.info("tea.alert watch pool empty after prune; scan positions only")
+    else:
+        log.info("tea.alert scan start watch=0 positions=%d (positions only)", len(held))
     out["scan"] = scan
     dedupe = bool(cfg.get("alert.dedupe_per_day", True))
 
@@ -934,20 +942,79 @@ def watch_alert(cfg: Optional[Config] = None, market: Optional[Market] = None,
         log.info("tea.alert sent %s condition=%s channels=%s", code, condition, ok_ch)
         io.say(f"  ✓ 已提醒：{code} {cand.get('name')}（{condition}）→ {','.join(ok_ch)}")
 
-    summary = (f"扫描 {scan.get('scanned', 0)} 只，待发 {len(scan.get('candidates') or [])}，"
-               f"已发 {len(out['sent'])}，去重跳过 {len(out['skipped'])}，失败 {len(out['failed'])}")
+    pos_scan: Dict[str, Any] = {"scanned": 0, "candidates": [], "errors": [], "missing_levels": []}
+    if held:
+        pos_scan = position_alert.scan_alerts(mk, cfg)
+        if pos_scan.get("missing_levels"):
+            log.debug("tea.alert positions missing stop/target n=%d",
+                      len(pos_scan["missing_levels"]))
+        for cand in pos_scan.get("candidates") or []:
+            code = cand.get("code")
+            pos_condition = cand.get("condition")
+            label = cand.get("condition_label") or pos_condition
+            if dedupe and position_alert.is_alert_sent(today, code, pos_condition, cfg):
+                out["skipped_positions"].append({"code": code, "condition": pos_condition})
+                log.info("tea.alert position dedupe %s condition=%s", code, pos_condition)
+                continue
+
+            subject = f"{cand.get('name') or code} {label} 提醒"
+            res = notify.send_alert(cfg, subject=subject, body=cand.get("body") or "")
+            if not res.get("ok"):
+                ch_err = {k: v.get("error") for k, v in (res.get("channels") or {}).items()
+                          if not v.get("ok")}
+                out["failed_positions"].append(
+                    {"code": code, "condition": pos_condition,
+                     "error": ch_err or res.get("error")})
+                log.error("tea.alert position send failed %s condition=%s: %s",
+                          code, pos_condition, ch_err or res.get("error"))
+                continue
+
+            ok_ch = [k for k, v in (res.get("channels") or {}).items() if v.get("ok")]
+            position_alert.mark_alert_sent(
+                today, code, pos_condition, cfg,
+                meta={"entry": cand.get("entry"), "price": cand.get("price"),
+                      "stop": cand.get("stop"), "target": cand.get("target"),
+                      "channels": ok_ch})
+            out["sent_positions"].append(
+                {"code": code, "condition": pos_condition, "channels": ok_ch})
+            log.info("tea.alert position sent %s condition=%s channels=%s",
+                     code, pos_condition, ok_ch)
+            io.say(f"  ✓ 持仓提醒：{code} {cand.get('name')}（{label}）→ {','.join(ok_ch)}")
+    out["position_scan"] = pos_scan
+
+    total_sent = len(out["sent"]) + len(out["sent_positions"])
+    total_skipped = len(out["skipped"]) + len(out["skipped_positions"])
+    total_failed = len(out["failed"]) + len(out["failed_positions"])
+    summary = (
+        f"观察池 {scan.get('scanned', 0)} 只/待发 {len(scan.get('candidates') or [])}，"
+        f"持仓 {pos_scan.get('scanned', 0)} 只/待发 {len(pos_scan.get('candidates') or [])}；"
+        f"已发 {total_sent}（观察 {len(out['sent'])} / 持仓 {len(out['sent_positions'])}），"
+        f"去重跳过 {total_skipped}，失败 {total_failed}")
     log.info("tea.alert done %s", summary)
-    if out["sent"] or out["failed"]:
-        io.say(f"观察池提醒：{summary}")
-    if out.get("sent") or out.get("failed") or (scan.get("candidates") or []):
+    if total_sent or total_failed:
+        io.say(f"盘中提醒：{summary}")
+    if (total_sent or total_failed or (scan.get("candidates") or [])
+            or (pos_scan.get("candidates") or [])):
         with logger_mod.daily_log_session("watch_alert", cfg):
             logger_mod.append_daily_log("watch_alert", summary, cfg)
             if out.get("sent"):
                 logger_mod.append_daily_log(
                     "watch_alert", f"sent {','.join(out['sent'])}", cfg, with_ts=False)
+            if out.get("sent_positions"):
+                logger_mod.append_daily_log(
+                    "watch_alert",
+                    "sent positions " + ",".join(
+                        f"{x.get('code')}:{x.get('condition')}"
+                        for x in out["sent_positions"]),
+                    cfg, with_ts=False)
             for fail in out.get("failed") or []:
                 logger_mod.append_daily_log(
                     "watch_alert", f"failed {fail.get('code')}: {fail.get('error')}", cfg)
+            for fail in out.get("failed_positions") or []:
+                logger_mod.append_daily_log(
+                    "watch_alert",
+                    f"failed position {fail.get('code')}:{fail.get('condition')}: "
+                    f"{fail.get('error')}", cfg)
     return out
 
 

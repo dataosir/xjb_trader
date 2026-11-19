@@ -1,8 +1,10 @@
-# F16 · 观察池盘中提醒（邮件）
+# F16 · 盘中提醒（观察池买点 + 持仓卖点，邮件）
 
 ## 1. 背景与目标
 
 观察池（F10）标的入池后，用户需盯盘等待「回踩就绪」或「预审 PASS」再手动 `eval` / `run`。**本功能在盘中每分钟扫描一次观察池**，满足购买条件时向配置邮箱发送提醒，**不自动下单、不写计划**。
+
+**2026-11 扩展（P0）**：只提醒买点、不提醒卖点，等于把「没有只涨不跌的票」当成不会发生。现在同一轮盘中扫描同时检查**当前持仓**：现价跌破止损或触及止盈时发卖点提醒，观察池为空也继续扫持仓；**只提醒，不自动平仓**。
 
 与 F11 Out「不做进程内 cron」一致：调度走 **macOS launchd 外层**（同 F03 种子扫描方案 A），进程内只提供一次性扫描命令。
 
@@ -11,30 +13,39 @@
 - 14:30 `seed-plan` 后观察池新增 2 只，用户不想全天盯菜单 `7`。  
 - 安装 launchd 任务后，盘中每分钟自动 `tea watch-alert`；某只回踩就绪 → 邮件提醒「600xxx 回踩就绪，请 eval/run」。  
 - 用户运行 `tea setup-email` 引导配置 163 发件/收件邮箱与授权码；或手动 `config set`。未配置则扫描静默跳过发信。  
-- 同一标的同一交易日只提醒一次（防刷屏）；次日可再次提醒。
+- 同一标的同一交易日只提醒一次（防刷屏）；次日可再次提醒。  
+- 按观察提醒买入后，持仓现价跌破止损 → 邮件「止损触发」，正文含成本/现价/浮亏/止损价，提示手动 `tea close`。  
+- 持仓触及止盈 → 邮件「止盈触发」；止损与止盈按不同条件分别去重（同日各最多一封）。  
+- 手动录入的持仓没写止损/止盈时，止损按 `position.fallback_sl_pct`（默认 3%）兜底，并在正文标注「默认止损」；关闭兜底则跳过并记入 `missing_levels`。  
 
 ## 3. 功能范围
 
 **In**
 
 - 新 CLI：`tea watch-alert`（单次扫描，适合 launchd 每分钟触发）  
-- 扫描对象：`watch_pool.json` 中 `status=active` 的项（**观察池非空才打行情**）  
+- 扫描对象：  
+  - **买点**：`watch_pool.json` 中 `status=active` 的项（观察池空时不打这部分行情）  
+  - **卖点**：`capital_state.json` 中当前持仓（`alert.position_exit_enabled=true` 时；观察池空也继续扫）  
 - **购买条件**（可配置 `alert.condition`，默认 `pullback_ready`）：  
   - **`pullback_ready`**（默认）：`watch_pool.pullback_ready()` 三项全满足（回撤 ≥ 配置%、分时 ≤ 配置%、入池天数 ≤ 保留天数），且当日预审**无硬否决**、身份未降级杂毛  
   - **`preflight_pass`**：实时 `preflight.evaluate` 裁决 `PASS`（9 分共振 + 无硬否决 + R:R 达标 + 非杂毛 reject）  
+- **卖出条件**（持仓卖点，条件名固定）：  
+  - **`stop_loss`**：现价 ≤ 止损价（优先读持仓 `stop`，缺失时按 `sl_pct` 反推，再缺失按 `position.fallback_sl_pct` 兜底）  
+  - **`take_profit`**：现价 ≥ 止盈价（优先读持仓 `target`，缺失时按 `tp_pct` 反推）  
+  - 同一根行情同时越线按**止损优先**，与 `followthrough._simulate_exit` 保守口径一致  
 - 邮件通知：SMTP（标准库 `smtplib`），收件人/发件人/SMTP 均在配置  
 - 邮箱引导：`tea setup-email`（163 授权码步骤说明 + 测试邮件）；`tea setup-email --test` 仅测连通  
-- 去重状态：`data/watch_alert_state.json`（按 `(date, code, condition)` 记录已发）  
+- 去重状态：`data/watch_alert_state.json`（买点）与 `data/position_alert_state.json`（卖点），均按 `(date, code, condition)` 记录已发  
 - 时段守卫：非交易日 / 非盘中（`timing.session_*`）→ 退出 0，不发信、不打行情（或仅打日志一行 skip）  
 - 结构化日志：`logs/tea.log` 记 `tea.alert` 扫描摘要  
 
 **Out**
 
-- 自动下单 / 自动写计划 / 自动 `run`  
+- 自动下单 / 自动平仓 / 自动写计划 / 自动 `run`  
 - 观察池直接升格可买（仍须 F07 计划 + F08 `run`）  
 - 进程内常驻 daemon / 内置 cron 线程  
 - 微信 / 短信 / 其他第三方推送（Bark/macOS 见 [F18](F18-push-notify.md)）  
-- 对「近失轨」「仅 seed_records 影子」发提醒（只扫观察池 active 项）
+- 对「近失轨」「仅 seed_records 影子」发买点提醒（买点只扫观察池 active 项）
 
 ## 4. 主流程与边界
 
@@ -43,25 +54,29 @@ launchd 每 60s → watch-alert-cron.sh → tea watch-alert
     ↓
 Timing：交易日 + 盘中？ ─否→ exit 0（skip）
     ↓
-watch_pool.items(status=active) 为空？ ─是→ exit 0
+通知通道就绪？ ─否→ exit 0（skip）
     ↓
-notify.email.enabled？ ─否→ exit 0
+观察池 active 为空 且 持仓为空？ ─是→ exit 0（skip，不打行情）
     ↓
-逐只 preflight.evaluate → 按 alert.condition 判定
+观察池非空 → 资格剔除 → 逐只 preflight.evaluate → 按 alert.condition 判定
     ↓
-过滤 watch_alert_state 当日已发
+持仓非空 → 读成本/止损/止盈 → 现价触线判定 stop_loss / take_profit
     ↓
-notify.send_email → 更新 state → 写 tea.log
+分别过滤 watch_alert_state / position_alert_state 当日已发
+    ↓
+notify.send_alert → 更新对应 state → 写 tea.log
 ```
 
 **边界**
 
-1. **纪律不变**：邮件文案明确「请人工 eval/run，引擎不自动买入」。  
-2. **行情频率**：每分钟 × 池内 N 只；`market.quote_cache_sec` 缓存减轻压力；池空则不请求。  
+1. **纪律不变**：买点邮件明确「请人工 eval/run，引擎不自动买入」；卖点邮件明确「请手动 `tea close`，引擎不自动卖出」。  
+2. **行情频率**：每分钟 × （池内 N 只 + 持仓 M 只）；`market.quote_cache_sec` 缓存减轻压力；两类都空则不请求。  
 3. **密码安全**：SMTP 密码仅存 `tea_config.json`（gitignore），不进仓库、不进日志。  
-4. **发信失败**：记录 ERROR，不更新 state（下一分钟可重试）；连续失败不崩溃。  
+4. **发信失败**：记录 ERROR，不更新对应 state（下一分钟可重试）；连续失败不崩溃。  
 5. **低吸前夕轨**：默认参与扫描（与 F10 一致）；若 `alert.include_eve=false` 可排除 `前夕观察轨`。  
-6. **与 F10 盘后 review 关系**：`review` 仍做收盘复核；本功能只管**盘中**提醒，不替代 `review`。
+6. **与 F10 盘后 review 关系**：`review` 仍做收盘复核；本功能只管**盘中**提醒，不替代 `review`。  
+7. **持仓数据质量**：卖点只看 `capital_state.json` 里登记过的持仓；券商实盘已买卖但未 `pos-add` / `close` 的，系统看不到。没录止损时可用默认 3% 兜底，但正文会标注「默认止损」，不假装是原计划止损。  
+8. **同条件同日一封**：止损、止盈是两个独立条件；同日先触止损再触止盈会各发一封，不互相抑制。
 
 ## 5. 关键配置键
 
@@ -71,7 +86,10 @@ notify.send_email → 更新 state → 写 tea.log
 | `alert.condition` | `pullback_ready` | `pullback_ready` / `preflight_pass` |
 | `alert.include_eve` | `true` | 是否扫描前夕观察轨 |
 | `alert.require_no_hard_veto` | `true` | pullback 模式下仍要求无硬否决 |
-| `alert.dedupe_per_day` | `true` | 同 code 同日只发一封 |
+| `alert.dedupe_per_day` | `true` | 同 code 同日同条件只发一封（买点/止损/止盈各自去重） |
+| `alert.position_exit_enabled` | `true` | 是否扫描持仓卖点（观察池空也扫） |
+| `alert.position_fallback_stop` | `true` | 持仓没录止损时是否按默认止损兜底 |
+| `position.fallback_sl_pct` | `3.0` | 默认止损百分比（兜底用） |
 | `notify.email.enabled` | `false` | 邮件通道开关 |
 | `notify.email.smtp_host` | `""` | SMTP 主机 |
 | `notify.email.smtp_port` | `465` | 端口 |
@@ -88,9 +106,10 @@ notify.send_email → 更新 state → 写 tea.log
 
 | 模块 | 职责 |
 |---|---|
-| `tea/portfolio/watch_pool.py` | `scan_alerts()`：逐只评估 + 返回待提醒列表 |
-| `tea/core/notify.py` | `send_email(cfg, subject, body)`：SMTP 发送 |
-| `tea/runtime/runner.py` | `watch_alert()`：编排扫描 / 去重 / 发信 |
+| `tea/portfolio/watch_pool.py` | `scan_alerts()`：观察池买点逐只评估 + 返回待提醒列表 |
+| `tea/portfolio/position_alert.py` | `scan_alerts()` / `exit_levels()`：持仓卖点触线判定 + 卖点 state 去重 |
+| `tea/core/notify.py` | `send_alert(cfg, subject, body)`：多通道发送（email/macos/bark） |
+| `tea/runtime/runner.py` | `watch_alert()`：编排观察池 + 持仓双扫描 / 去重 / 发信 |
 | `tea/runtime/cli.py` | `watch-alert` / `setup-email` 子命令 |
 | `tea/config/email_setup.py` | 邮箱配置向导 |
 | `tea/config/config_store.py` | `alert.*` / `notify.email.*` DEFAULTS |
@@ -103,10 +122,16 @@ notify.send_email → 更新 state → 写 tea.log
 - [x] selftest：mock SMTP + 假观察池 → 满足 `pullback_ready` 触发一次「待发」；state 去重后第二次不重复  
 - [x] selftest：`preflight_pass` 模式 PASS 触发、REJECT 不触发  
 - [x] 非盘中 / 非交易日：命令 exit 0，日志含 skip 原因  
-- [x] 观察池为空：不打行情、不发信  
+- [x] 观察池与持仓都为空：不打行情、不发信  
+- [x] 观察池为空但持仓非空：继续扫持仓卖点，不因池空早退  
+- [x] selftest：持仓跌破止损 → `stop_loss` 提醒；触及止盈 → `take_profit` 提醒  
+- [x] selftest：同日同条件去重；止损与止盈互不抑制  
+- [x] selftest：持仓缺止损/止盈时默认止损兜底；关闭兜底后跳过并记 `missing_levels`  
+- [x] selftest：卖点发信失败不写 state；提醒后持仓仍在（不自动卖出）  
 - [x] 发信失败写 ERROR，state 不 advance  
 - [x] launchd 安装脚本可加载 `com.tea.watch-alert`  
-- [x] 邮件正文含：代码、名称、轨道、条件类型、当前价、**建议挂单价**（乖离自适应纪律回踩；高乖离 MA20 仅参考；止损/止盈按挂单价重算）、**计划止盈路径 T+1/T+2/T+3**（挂单价→止盈价线性拆分；复盘对照，非概率；核心数字用【】强调）、分时、回撤、提示「请手动 eval/run，不自动下单」
+- [x] 买点邮件正文含：代码、名称、轨道、条件类型、当前价、**建议挂单价**（乖离自适应纪律回踩；高乖离 MA20 仅参考；止损/止盈按挂单价重算）、**计划止盈路径 T+1/T+2/T+3**（挂单价→止盈价线性拆分；复盘对照，非概率；核心数字用【】强调）、分时、回撤、提示「请手动 eval/run，不自动下单」  
+- [x] 卖点邮件正文含：代码、名称、条件（止损/止盈）、成本、现价、浮动盈亏、R 倍数、止损/止盈价与来源、建仓日/持有天数，提示「请手动 `tea close`，不自动卖出」
 
 ## 8. 已知缺口 / 待迭代
 

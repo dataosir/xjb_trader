@@ -39,7 +39,7 @@
 | F13 | [配置向导](03-features/F13-config-onboarding.md) | 410 参数 + setup | `setup` / `config` |
 | F14 | [行情数据源](03-features/F14-data-providers.md) | 五源降级链与缓存 | `market.*` 配置 |
 | F15 | [质量自测](03-features/F15-quality-selftest.md) | selftest / CI / 零依赖 | `selftest` |
-| F16 | [观察池盘中提醒](03-features/F16-watch-alert-notify.md) | 观察池每分钟扫描 + SMTP 邮件 | `watch-alert` |
+| F16 | [盘中提醒](03-features/F16-watch-alert-notify.md) | 观察池买点 + 持仓止损/止盈每分钟扫描 + SMTP 邮件 | `watch-alert` |
 | F17 | [每周选股周报邮件](03-features/F17-weekly-email-summary.md) | 周五收盘后周报 SMTP | `weekly-email` |
 | F18 | [观察池即时 Push](03-features/F18-push-notify.md) | macOS 弹窗 + Bark iPhone Push | `setup-notify` / `watch-alert` |
 

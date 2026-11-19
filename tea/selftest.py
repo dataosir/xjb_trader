@@ -23,7 +23,8 @@ from .core import logger as logger_mod, paths, utils
 from .data import Market, MarketError, indicators
 from .data.fetcher import Fetcher
 from .core import notify as notify_mod
-from .portfolio import plan as plan_mod, portfolio, watch_pool as wp_mod
+from .portfolio import (plan as plan_mod, portfolio, position_alert as pos_alert_mod,
+                        watch_pool as wp_mod)
 from .runtime import runner as runner_mod
 from .screening import gates, preflight, screener as screener_mod, seed_report, veto as veto_mod
 
@@ -3583,6 +3584,124 @@ def check_watch_alert(t: Suite, c: Config) -> None:
         notify_mod.set_test_sender(None)
 
 
+def check_position_alert(t: Suite, c: Config, mk: FakeMarket) -> None:
+    """持仓卖点：止损/止盈扫描、池空仍扫、同日去重、缺级回退。"""
+    t.head("持仓 · 盘中卖点提醒")
+
+    sent_box: List[dict] = []
+
+    def _fake_sender(**_kw) -> None:
+        sent_box.append({"subject": _kw.get("subject"), "body": _kw.get("body")})
+
+    notify_mod.set_test_sender(_fake_sender)
+
+    pool_path = c.data_file("watch_pool_file")
+    state_path = c.data_file("position_alert_state_file")
+    watch_state_path = c.data_file("watch_alert_state_file")
+    for path in (state_path, watch_state_path):
+        if os.path.exists(path):
+            os.remove(path)
+    utils.write_json(pool_path, {"items": [], "removed": []})
+    portfolio.remove_position(TARGET, c)
+    portfolio.remove_position("600999", c)
+
+    c.set("alert.enabled", True)
+    c.set("alert.condition", wp_mod.CONDITION_PULLBACK)
+    c.set("alert.position_exit_enabled", True)
+    c.set("alert.position_fallback_stop", True)
+    c.set("notify.macos.enabled", False)
+    c.set("notify.bark.enabled", False)
+    c.set("notify.email.enabled", True)
+    c.set("notify.email.smtp_host", "smtp.163.com")
+    c.set("notify.email.smtp_user", "test@163.com")
+    c.set("notify.email.smtp_password", "secret")
+    c.set("notify.email.from_addr", "test@163.com")
+    c.set("notify.email.to_addrs", ["recv@163.com"])
+    c.save()
+
+    orig_target_quote = dict(mk.quotes.get(TARGET) or {})
+    orig_bank_quote = dict(mk.quotes.get("600999") or {})
+    try:
+        # ---- 止损：成本 10、-6% 止损 = 9.40；现价 9.30 触发
+        portfolio.add_manual_position(TARGET, TARGET_NAME, 1000, 10.0, c,
+                                      sl_pct=6.0, tp_pct=15.0)
+        mk.quotes[TARGET] = _quote(TARGET, TARGET_NAME, 9.30, -6.0, HOT_NAME,
+                                   high=9.50, low=9.20)
+        scan = pos_alert_mod.scan_alerts(mk, c)
+        t.eq("持仓扫描 1 只", scan.get("scanned"), 1)
+        t.eq("跌破止损触发 1 只", len(scan.get("candidates") or []), 1)
+        cand = scan["candidates"][0]
+        t.eq("触发条件为止损", cand.get("condition"), pos_alert_mod.CONDITION_STOP)
+        t.eq("止损按成本 -6% 反推", cand.get("stop"), 9.40, tol=0.001)
+        t.ok("正文含止损触发", "止损触发" in (cand.get("body") or ""))
+        t.ok("正文含不自动卖出", "不自动卖出" in (cand.get("body") or ""))
+        t.ok("正文含手动平仓命令", f"tea close {TARGET}" in (cand.get("body") or ""))
+
+        # ---- 观察池空也必须继续扫持仓
+        res = runner_mod.watch_alert(cfg=c, market=mk, io=None, force=True)
+        t.eq("观察池空仍发持仓提醒", len(res.get("sent_positions") or []), 1)
+        t.ok("state 已记录持仓提醒", pos_alert_mod.is_alert_sent(
+            utils.today_str(), TARGET, pos_alert_mod.CONDITION_STOP, c))
+        t.ok("提醒不等于卖出", portfolio.find_position(TARGET, c) is not None)
+
+        # ---- 同日同条件去重
+        sent_box.clear()
+        res2 = runner_mod.watch_alert(cfg=c, market=mk, io=None, force=True)
+        t.eq("同日止损去重不再发", len(res2.get("sent_positions") or []), 0)
+        t.eq("去重跳过 1 只", len(res2.get("skipped_positions") or []), 1)
+        t.ok("去重后无新邮件", not sent_box)
+
+        # ---- 发信失败不写 state（清掉 state 后重试同一条件）
+        os.remove(state_path)
+        notify_mod.set_test_sender(
+            lambda **kw: (_ for _ in ()).throw(RuntimeError("smtp fail")))
+        fail = runner_mod.watch_alert(cfg=c, market=mk, io=None, force=True)
+        t.eq("持仓发信失败计入 failed_positions",
+             len(fail.get("failed_positions") or []), 1)
+        t.ok("失败后不写 state", not pos_alert_mod.is_alert_sent(
+            utils.today_str(), TARGET, pos_alert_mod.CONDITION_STOP, c))
+        notify_mod.set_test_sender(_fake_sender)
+
+        # ---- 同日止盈是另一个条件，独立发送
+        mk.quotes[TARGET] = _quote(TARGET, TARGET_NAME, 11.60, 3.0, HOT_NAME,
+                                   high=11.70, low=11.40)
+        scan_target = pos_alert_mod.scan_alerts(mk, c)
+        t.eq("突破止盈触发", scan_target["candidates"][0].get("condition"),
+             pos_alert_mod.CONDITION_TARGET)
+        res3 = runner_mod.watch_alert(cfg=c, market=mk, io=None, force=True)
+        t.eq("同日止盈单独提醒", len(res3.get("sent_positions") or []), 1)
+        t.eq("止盈提醒条件", (res3["sent_positions"][0] or {}).get("condition"),
+             pos_alert_mod.CONDITION_TARGET)
+
+        # ---- 没录止损/止盈：默认止损兜底；关闭兜底后跳过并记 missing
+        portfolio.add_manual_position("600999", "测试银行", 1000, 20.0, c)
+        mk.quotes["600999"] = _quote("600999", "测试银行", 19.30, -3.0, "银行",
+                                     high=19.50, low=19.20)
+        scan_fb = pos_alert_mod.scan_alerts(mk, c)
+        fb = [x for x in scan_fb.get("candidates") or [] if x.get("code") == "600999"]
+        t.eq("缺止损按默认值兜底", len(fb), 1)
+        t.ok("正文标注默认止损", "默认止损" in (fb[0].get("body") or ""))
+
+        c.set("alert.position_fallback_stop", False)
+        c.save()
+        scan_miss = pos_alert_mod.scan_alerts(mk, c)
+        t.eq("关闭兜底后不触发", len(
+            [x for x in scan_miss.get("candidates") or [] if x.get("code") == "600999"]), 0)
+        t.ok("缺失止损/止盈被记录", any(
+            x.get("code") == "600999" for x in scan_miss.get("missing_levels") or []))
+    finally:
+        c.set("alert.position_fallback_stop", True)
+        c.save()
+        mk.quotes[TARGET] = orig_target_quote
+        mk.quotes["600999"] = orig_bank_quote
+        portfolio.remove_position(TARGET, c)
+        portfolio.remove_position("600999", c)
+        utils.write_json(pool_path, {"items": [], "removed": []})
+        if os.path.exists(state_path):
+            os.remove(state_path)
+        notify_mod.set_test_sender(None)
+
+
 # ==================================================================== F16 邮箱配置向导
 
 def check_email_setup(t: Suite, home: str) -> None:
@@ -4326,6 +4445,7 @@ def main(verbose: bool = True, cfg: Optional[Config] = None) -> int:
         check_watch_track_prune(t, c)
         check_pricetrack(t, c, mk)
         check_watch_alert(t, c)
+        check_position_alert(t, c, mk)
         check_email_setup(t, tmp)
         check_notify_push(t, c)
         check_notify_setup(t, tmp)

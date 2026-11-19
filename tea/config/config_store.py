@@ -67,6 +67,7 @@ DEFAULTS: Dict[str, Any] = {
         "index_cache_file": ".tea_index_cache.json",
         "shadow_pool_file": "shadow_pool.json",
         "watch_alert_state_file": "watch_alert_state.json",
+        "position_alert_state_file": "position_alert_state.json",
         "weekly_email_state_file": "weekly_email_state.json",
         "winrate_email_state_file": "winrate_email_state.json",
         "seed_email_state_file": "seed_email_state.json",
@@ -717,6 +718,9 @@ DEFAULTS: Dict[str, Any] = {
         "include_eve": True,
         "require_no_hard_veto": True,
         "dedupe_per_day": True,
+        # 观察池空时仍扫持仓；持仓无止损时按 position.fallback_sl_pct 兜底
+        "position_exit_enabled": True,
+        "position_fallback_stop": True,
         # 空列表 = 自动推断：各 notify.* 通道 enabled 且配置齐全即参与
         "channels": [],
     },

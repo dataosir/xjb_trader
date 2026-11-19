@@ -15,7 +15,7 @@
 | [`11-weather-retry-scheduler.md`](11-weather-retry-scheduler.md) | 盘中每 3 分钟天气缺口重试 cron（`weather-retry-cron.sh`） |
 | [`12-handoff-2026-11-05-nas-sync.md`](12-handoff-2026-11-05-nas-sync.md) | **交接**：2026-11-05 本机修复 push 后 NAS 同步验收 + 后续 AI 跟进 |
 | [`09-promotion-one-pager.md`](09-promotion-one-pager.md) | 对外推广 one-pager 快捷引用 |
-| [`06-watch-alert-scheduler.md`](06-watch-alert-scheduler.md) | 观察池盘中提醒 launchd（每分钟 + SMTP 配置） |
+| [`06-watch-alert-scheduler.md`](06-watch-alert-scheduler.md) | 观察池买点 + 持仓卖点盘中提醒 launchd（每分钟 + SMTP 配置） |
 | [`07-weekly-email-scheduler.md`](07-weekly-email-scheduler.md) | 每周五选股周报邮件 launchd（17:00 + SMTP） |
 
 **分工**：`prd/02-daily-workflow` = 机器命令 SOP；`ops/03` = 人怎么不逃避运营；`ops/05`/`06`/`07`/`08`/`10` + 仓库 `ops/` = 外部定时触发。  

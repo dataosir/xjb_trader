@@ -23,7 +23,8 @@
 | `data/daily_state.json` | 单日门禁计数（开仓/评估/复筛） | `screening/gates.py` | F02 |
 | `data/capital_state.json` | 资金与持仓 | `portfolio/portfolio.py` | F09 |
 | `data/watch_pool.json` | 观察池 | `portfolio/watch_pool.py` | F10 |
-| `data/watch_alert_state.json` | 观察提醒去重（按日/code/条件） | `portfolio/watch_pool.py` + `core/notify.py` | F16 |
+| `data/watch_alert_state.json` | 观察池买点提醒去重（按日/code/条件） | `portfolio/watch_pool.py` + `core/notify.py` | F16 |
+| `data/position_alert_state.json` | 持仓卖点提醒去重（按日/code/止损或止盈） | `portfolio/position_alert.py` + `core/notify.py` | F16 |
 | `data/weekly_email_state.json` | 周报邮件去重（按 ISO 周） | `reporting/weekly.py` + `core/notify.py` | F17 |
 | `data/trades.json` | 交易流水 | `portfolio/trades.py` | F09/F12 |
 | `data/seed_records.jsonl` | 种子样本 + T+n 回填 | `analysis/followthrough.py` | F11 |

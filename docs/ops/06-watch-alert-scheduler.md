@@ -1,6 +1,6 @@
-# 06 · 观察池盘中提醒调度（launchd）
+# 06 · 观察池买点 + 持仓卖点盘中提醒调度（launchd）
 
-> **分工**：本页管「观察池盘中每分钟扫描 + 邮件提醒」的机器侧安装；产品语义见 [`../prd/03-features/F16-watch-alert-notify.md`](../prd/03-features/F16-watch-alert-notify.md)；种子扫描见 [`05-seed-plan-scheduler.md`](05-seed-plan-scheduler.md)。
+> **分工**：本页管「观察池买点 + 持仓止损/止盈每分钟扫描 + 邮件提醒」的机器侧安装；产品语义见 [`../prd/03-features/F16-watch-alert-notify.md`](../prd/03-features/F16-watch-alert-notify.md)；种子扫描见 [`05-seed-plan-scheduler.md`](05-seed-plan-scheduler.md)。
 
 ---
 
@@ -10,9 +10,10 @@
 |---|---|
 | 触发频率 | **每 60 秒**（`StartInterval=60`） |
 | 实际生效 | 命令内部守卫：**交易日 + 盘中**（09:30–11:30、13:00–15:00）且 `alert.enabled` + `notify.email.enabled` |
+| 扫描对象 | 观察池 `active` 买点 + `capital_state.json` 当前持仓卖点（观察池为空也继续扫持仓） |
 | 代码入口 | `python3 -m tea watch-alert`（一次性，非 daemon） |
 | 与 F11 Out | 不做进程内 cron；外层 launchd 同方案 A |
-| 纪律 | **只发邮件，不自动下单** |
+| 纪律 | **只发邮件，不自动下单 / 不自动平仓** |
 
 ---
 
@@ -70,7 +71,7 @@ chmod +x ops/*.sh
 
 ```bash
 launchctl list | grep com.tea.watch-alert
-./ops/watch-alert-cron.sh          # 手动试跑（盘中 + 池非空 + 已配邮箱）
+./ops/watch-alert-cron.sh          # 手动试跑（盘中 + 观察池或持仓非空 + 已配邮箱）
 grep tea.alert logs/tea.log | tail -10
 ```
 
@@ -94,13 +95,15 @@ grep tea.alert logs/tea.log | tail -10
 | `logs/tea.log` | `tea.alert` 扫描摘要（skip / 待发 / 已发 / 失败） |
 | `logs/launchd-watch-alert.stdout.log` | launchd stdout |
 | `logs/launchd-watch-alert.stderr.log` | launchd stderr |
-| `data/watch_alert_state.json` | 当日已发去重 |
+| `data/watch_alert_state.json` | 观察池买点当日已发去重 |
+| `data/position_alert_state.json` | 持仓卖点当日已发去重（止损/止盈独立） |
 
 ### 查日志速查
 
 ```bash
 grep "tea.alert" logs/tea.log | tail -20
 cat data/watch_alert_state.json
+cat data/position_alert_state.json
 ```
 
 ---
@@ -113,7 +116,9 @@ cat data/watch_alert_state.json
 | 邮件未收到 | 查 `tea.log` ERROR；查 SMTP 配置；查 state 是否已 dedupe |
 | 不想某只再提醒 | 观察池 `--rm` 或等次日 state 按日重置 |
 | 非交易日 launchd 仍触发 | 正常；命令内 skip，exit 0 |
-| 观察池空 | 每分钟 skip，无行情请求 |
+| 观察池空、仍有持仓 | 继续扫持仓卖点，不因池空早退 |
+| 观察池与持仓都空 | 每分钟 skip，无行情请求 |
+| 持仓没录止损/止盈 | 止损按 `position.fallback_sl_pct`（默认 3%）兜底，正文标注「默认止损」；关 `alert.position_fallback_stop` 则跳过并记 `missing_levels` |
 
 ---
 
@@ -123,7 +128,9 @@ cat data/watch_alert_state.json
 - [ ] `install-launchd-watch-alert.sh` 成功，`launchctl list` 可见任务  
 - [ ] 手动 `./ops/watch-alert-cron.sh` 盘中 exit 0，日志有 `tea.alert`  
 - [ ] 测试池内标的满足条件时收到邮件，且正文含「不自动下单」  
-- [ ] 同日同代码不重复发信  
+- [ ] 持仓跌破止损 / 触及止盈时收到卖点邮件，且正文含「不自动卖出」  
+- [ ] 观察池为空但持仓非空时仍能收到卖点邮件  
+- [ ] 同日同代码同条件不重复发信；止损与止盈互不抑制  
 
 ---
 
@@ -132,9 +139,13 @@ cat data/watch_alert_state.json
 ```
 seed-plan → watch_pool（观察轨）
      ↓
-launchd 每分钟 watch-alert → 邮件提醒
+launchd 每分钟 watch-alert
+     ├─ 观察池买点 → 邮件「请手动 eval/run」
+     └─ 当前持仓卖点 → 邮件「请手动 tea close」
      ↓
 用户手动 eval / run（T+1 14:00–14:45 或演练 --any-time）
      ↓
 pos-add / 引擎登记（仍不自动下单）
+
+持仓止损/止盈越线时：只提醒，不自动平仓
 ```

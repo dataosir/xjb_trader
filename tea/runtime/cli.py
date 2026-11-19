@@ -10,10 +10,10 @@
   tea plan-check           09:35 计划复核
   tea plan-clear           清除过期旧计划
   tea review               盘后复核（跟涨回填 + 观察池）
-  tea watch-alert          盘中观察池扫描 + 邮件提醒
+  tea watch-alert          盘中扫描观察池买点 + 持仓卖点 + 邮件提醒
   tea status / weather / pos / trades / stats / weekly
   tea setup                配置向导（首次启动自动进入）
-  tea setup-email          观察池邮件提醒邮箱配置（163 SMTP）
+  tea setup-email          邮件提醒邮箱配置（163 SMTP）
   tea setup-notify         观察池提醒通道（macOS 弹窗 + Bark Push）
   tea selftest             离线自测（公式对齐验证，不联网）
 """
@@ -257,7 +257,8 @@ def cmd_watch_alert(args, cfg: Config) -> int:
     res = runner.watch_alert(cfg=cfg, io=_io(), force=args.force)
     if res.get("skip"):
         return 0
-    return 0 if not res.get("failed") else 1
+    failed = res.get("failed") or res.get("failed_positions")
+    return 0 if not failed else 1
 
 
 def cmd_watch(args, cfg: Config) -> int:
@@ -1009,7 +1010,7 @@ def build_parser() -> argparse.ArgumentParser:
                    help="跳过采集前的数据源探活（排障 / 离线时用）")
     w.set_defaults(func=cmd_weather)
 
-    wa = sub.add_parser("watch-alert", help="盘中观察池扫描 + 邮件提醒（launchd 每分钟）")
+    wa = sub.add_parser("watch-alert", help="盘中扫描观察池买点 + 持仓卖点 + 邮件提醒（launchd 每分钟）")
     wa.add_argument("--force", action="store_true",
                     help="忽略时段/开关守卫（仅演练，仍会发信若已配邮箱）")
     wa.set_defaults(func=cmd_watch_alert)

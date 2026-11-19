@@ -116,6 +116,7 @@ HIDDEN = [
     "tea.portfolio.accumulator",
     "tea.portfolio.plan",
     "tea.portfolio.portfolio",
+    "tea.portfolio.position_alert",
     "tea.portfolio.trades",
     "tea.portfolio.watch_pool",
     # 报告

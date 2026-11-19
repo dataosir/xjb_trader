@@ -41,7 +41,7 @@
 | [`prd/03-features/F13-config-onboarding.md`](prd/03-features/F13-config-onboarding.md) | 配置与向导 | F13 |
 | [`prd/03-features/F14-data-providers.md`](prd/03-features/F14-data-providers.md) | 行情源降级链 | F14 |
 | [`prd/03-features/F15-quality-selftest.md`](prd/03-features/F15-quality-selftest.md) | 自测 / CI | F15 |
-| [`prd/03-features/F16-watch-alert-notify.md`](prd/03-features/F16-watch-alert-notify.md) | 观察池盘中邮件提醒 | F16 |
+| [`prd/03-features/F16-watch-alert-notify.md`](prd/03-features/F16-watch-alert-notify.md) | 观察池买点 + 持仓卖点盘中邮件提醒 | F16 |
 | [`prd/03-features/F17-weekly-email-summary.md`](prd/03-features/F17-weekly-email-summary.md) | 每周选股周报邮件 | F17 |
 | [`prd/03-features/F18-push-notify.md`](prd/03-features/F18-push-notify.md) | 观察池即时 Push（macOS / Bark） | F18 |
 | [`prd/04-nfr-constraints.md`](prd/04-nfr-constraints.md) | 非功能硬约束 | NFR |
@@ -75,7 +75,7 @@
 | [`ops/04-evidence-scorecard.md`](ops/04-evidence-scorecard.md) | 证据周 scorecard + 里程碑 / Kill 表（Ops-2） |
 | [`ops/05-seed-plan-scheduler.md`](ops/05-seed-plan-scheduler.md) | 种子扫描外部调度（launchd 方案 A：安装 / 日志 / 漏扫补救） |
 | [`ops/09-promotion-one-pager.md`](ops/09-promotion-one-pager.md) | 对外推广 one-pager 快捷引用 |
-| [`ops/06-watch-alert-scheduler.md`](ops/06-watch-alert-scheduler.md) | 观察池盘中提醒 launchd（每分钟 `watch-alert` + SMTP） |
+| [`ops/06-watch-alert-scheduler.md`](ops/06-watch-alert-scheduler.md) | 观察池买点 + 持仓卖点盘中提醒 launchd（每分钟 `watch-alert` + SMTP） |
 | [`ops/07-weekly-email-scheduler.md`](ops/07-weekly-email-scheduler.md) | 每周五选股周报邮件 launchd（`weekly-email` + SMTP） |
 | [`ops/08-review-scheduler.md`](ops/08-review-scheduler.md) | 盘后复核自动调度（工作日 15:01 `review --scheduled` + T+3 回填；`scheduler.*` 统一配置） |
 | [`ops/10-winrate-scan-scheduler.md`](ops/10-winrate-scan-scheduler.md) | 胜率影子扫描自动调度（工作日 14:35 `winrate-scan --scheduled` + 日去重；B-P1-01 对照加速） |

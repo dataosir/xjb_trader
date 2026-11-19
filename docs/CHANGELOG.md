@@ -4,6 +4,18 @@
 
 ## [Unreleased]
 
+### 提醒 · 持仓止损/止盈盘中邮件（2026-11-19：观察池买点之外补卖点）
+
+盘中观察提醒过去只扫观察池买点，持仓跌破止损/触及止盈没有一封邮件（本月已出现 -34.5% 仍持有、现价低于止损 1 元以上的持仓）。本次把 `watch-alert` 扩展为**买点 + 卖点双扫描**，仍只提醒、不自动交易：
+
+- **`tea/portfolio/position_alert.py`**：`exit_levels()` 优先读持仓 `stop`/`target`，缺失按 `sl_pct`/`tp_pct` 由成本反推（tick 取整）；止损仍缺失且 `alert.position_fallback_stop=true` 时按 `position.fallback_sl_pct`（默认 3%）兜底，正文标注「默认止损」。
+- **卖点判定**：`stop_loss`（现价 ≤ 止损）/ `take_profit`（现价 ≥ 止盈）；同一根行情同时越线按**止损优先**，与 `followthrough._simulate_exit` 保守口径一致。
+- **去重状态**：新增 `data/position_alert_state.json`，按 `(date, code, condition)` 记录；止损与止盈互不抑制，同日各最多一封。发信失败不写 state，下一分钟可重试。
+- **编排**（`runner.watch_alert`）：观察池与持仓都空才跳过；**观察池为空但持仓非空仍继续扫卖点**。返回新增 `sent_positions` / `skipped_positions` / `failed_positions` / `position_scan`；日志记录 `code:condition`。
+- **纪律不变**：卖点邮件提示「请手动 `tea close`，不自动卖出」，不发计划、不下单、不平仓。
+- **文档**：F16 补卖点范围/流程/配置/验收；`ops/06`、`tech/02`、`tech/03` 同步。
+- **自测**：1096/1096 通过；新增 `check_position_alert`（止损/止盈触发、池空继续扫、同日去重、止损止盈互不抑制、默认止损兜底、关闭兜底记 `missing_levels`、发信失败不写 state、提醒后持仓仍在）。
+
 ### 数 · 回填顺延与 T+2 口径（2026-11-17：周末样本 + 版本幂等 + 降级排除 + 周五谨慎）
 
 - **周末样本顺延回填**（`followthrough._resolve_backfill_date` / `update_results`）：记录日为非交易日（周六/周日）时，顺延到其后第一根 K 线所在交易日；`pick_close` 取顺延日收盘，标 `pick_price_basis=rolled`，另存 `backfill_date` / `backfill_note`，原始 `date`/`chg_pct` 保留溯源。修复 688443 两条 2026-08-08/09 样本永久卡在待回填的问题。

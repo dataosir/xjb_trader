@@ -47,7 +47,7 @@ T+1 窗口 run → gates + phases → 持仓 / trades
     ↓
 review → followthrough 回填 T+n → accumulator / stats
     ↓
-（可选）launchd 每分钟 watch-alert → SMTP 邮件（F16，不自动下单）
+（可选）launchd 每分钟 watch-alert → SMTP 邮件（观察池买点 + 持仓卖点，F16；不自动下单/平仓）
 ```
 
 串联否决：任一层（道/法/术）否决 → 整笔作废。
