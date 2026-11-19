@@ -10,7 +10,7 @@
 |---|---|
 | 触发频率 | **每 60 秒**（`StartInterval=60`） |
 | 实际生效 | 命令内部守卫：**交易日 + 盘中**（09:30–11:30、13:00–15:00）且 `alert.enabled` + `notify.email.enabled` |
-| 扫描对象 | 观察池 `active` 买点 + `capital_state.json` 当前持仓卖点（观察池为空也继续扫持仓） |
+| 扫描对象 | 观察池 `active` 买点（含 `近失观察轨`）+ `capital_state.json` 当前持仓卖点（观察池为空也继续扫持仓） |
 | 代码入口 | `python3 -m tea watch-alert`（一次性，非 daemon） |
 | 与 F11 Out | 不做进程内 cron；外层 launchd 同方案 A |
 | 纪律 | **只发邮件，不自动下单 / 不自动平仓** |
@@ -55,6 +55,7 @@ tea config set alert.condition preflight_pass   # 默认 pullback_ready
 tea setup-notify                                # macOS 弹窗 + Bark Push（F18）
 tea setup-notify --test                         # 仅测 Push 通道
 tea config set alert.include_eve false          # 不扫前夕观察轨
+tea config set alert.include_near_miss false    # 不扫近失观察轨（默认扫）
 ```
 
 ---
@@ -115,6 +116,7 @@ cat data/position_alert_state.json
 | 合盖错过提醒 | 盘中手动 `tea watch-alert` |
 | 邮件未收到 | 查 `tea.log` ERROR；查 SMTP 配置；查 state 是否已 dedupe |
 | 不想某只再提醒 | 观察池 `--rm` 或等次日 state 按日重置 |
+| 近失票是否会被提醒 | 默认会：`seed.near_miss_to_watch=true` 时自动入 `近失观察轨`；邮件/报告标注「已入观察池」；关掉则标注「仅复盘」且不入池 |
 | 非交易日 launchd 仍触发 | 正常；命令内 skip，exit 0 |
 | 观察池空、仍有持仓 | 继续扫持仓卖点，不因池空早退 |
 | 观察池与持仓都空 | 每分钟 skip，无行情请求 |
@@ -137,7 +139,7 @@ cat data/position_alert_state.json
 ## 7. 纪律链（不变）
 
 ```
-seed-plan → watch_pool（观察轨）
+seed-plan → watch_pool（观察轨 / 近失观察轨）
      ↓
 launchd 每分钟 watch-alert
      ├─ 观察池买点 → 邮件「请手动 eval/run」

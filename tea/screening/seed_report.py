@@ -319,10 +319,13 @@ def render_md(result: dict, cfg: Optional[Config] = None) -> str:
     lines.append("")
 
     # ---- 三档输出
+    near_tracked = bool(cfg.get("seed.near_miss_to_watch", True))
+    near_title = ("## 输出三 · 近失（已入观察池，回踩提醒）" if near_tracked
+                  else "## 输出三 · 近失（仅复盘，不入观察池）")
     for title, key, note in (
         ("## 输出一 · 可买（追高，写次日计划，T+1 14:00 执行）", "buyable", "无可买标的。"),
         ("## 输出二 · 待启动观察（盯触发条件，不自动买入）", "watch", "观察轨为空。"),
-        ("## 输出三 · 近失（只复盘，不盯盘）", "near_miss", "无近失记录。"),
+        (near_title, "near_miss", "无近失记录。"),
     ):
         evs = result.get(key) or []
         lines += [title, ""]
@@ -343,7 +346,7 @@ def render_md(result: dict, cfg: Optional[Config] = None) -> str:
                 detail.append("软否决：" + "；".join(i["label"] for i in vt["soft"]))
             if detail:
                 lines.append(f"- **{e.get('code')} {e.get('name')}** — " + " ｜ ".join(detail))
-            if key in ("buyable", "watch", "eve"):
+            if key in ("buyable", "watch", "near_miss", "eve"):
                 order_line = format_order_hint(e, style="md")
                 if order_line:
                     lines.append(f"  - {order_line}")
@@ -524,11 +527,13 @@ def format_result(result: dict, cfg: Optional[Config] = None) -> str:
     op_map = {
         "buyable": ("买入", utils.COLOR_SEED),     # 种子选中 → 品红（与盈亏色区分）
         "watch": ("观察", utils.COLOR_WARN),       # 待定观察 → 黄
-        "near_miss": ("不操作", utils.COLOR_INFO),  # 只复盘 → 青
+        "near_miss": ("近失", utils.COLOR_INFO),  # 已入近失观察轨 → 青
         "eve": ("观察", utils.COLOR_INFO),          # 前夕观察 → 青
     }
+    near_title = ("近失（已入观察池）" if cfg.get("seed.near_miss_to_watch", True)
+                  else "近失（仅复盘）")
     for title, key in (("可买（追高）", "buyable"), ("待启动观察", "watch"),
-                       ("近失（只复盘）", "near_miss"), ("低吸观察（启动前夕）", "eve")):
+                       (near_title, "near_miss"), ("低吸观察（启动前夕）", "eve")):
         evs = result.get(key) or []
         op_label, color = op_map.get(key, ("", utils.COLOR_WARN))
         lines.append(f"  ---- {title}（{len(evs)}）----")
@@ -567,7 +572,7 @@ def format_result(result: dict, cfg: Optional[Config] = None) -> str:
                 lines.append(f"        {shortfall}")
             if e.get("triggers"):
                 lines.append("        触发：" + "；".join(e["triggers"]))
-            if key in ("buyable", "watch", "eve"):
+            if key in ("buyable", "watch", "eve", "near_miss"):
                 order_line = format_order_hint(e, style="console")
                 if order_line:
                     lines.append(f"        {order_line}")
@@ -863,10 +868,12 @@ def compact_email_stock_line(ev: dict, op: str, cfg: Config,
 def _email_summary_text(buyable: list, watch: list,
                         eve: Optional[list] = None,
                         shadow_buyable: bool = False,
-                        empty_text: str = "今日无候选。") -> str:
+                        empty_text: str = "今日无候选。",
+                        near_miss: Optional[list] = None) -> str:
     """邮件末尾一行总结。"""
     eve = eve or []
-    if not buyable and not watch and not eve:
+    near_miss = near_miss or []
+    if not buyable and not watch and not eve and not near_miss:
         return f"总结：{empty_text}"
     parts: List[str] = []
     if buyable:
@@ -876,6 +883,8 @@ def _email_summary_text(buyable: list, watch: list,
         parts.append(f"观察{len(watch)}只")
     if eve:
         parts.append(f"前夕{len(eve)}只")
+    if near_miss:
+        parts.append(f"近失{len(near_miss)}只")
     text = "、".join(parts)
     if buyable and not watch and not eve:
         return f"总结：{text}。"
@@ -988,11 +997,12 @@ _VERDICT_EMAIL = {
 
 
 def seed_should_email(result: dict, cfg: Optional[Config] = None) -> bool:
-    """种子扫描是否应发邮件（send_on_empty=false 时仅 buyable/watch/eve 非空发）。"""
+    """种子扫描是否应发邮件（send_on_empty=false 时 buyable/watch/eve/近失非空仍发）。"""
     cfg = cfg or load_config()
     if bool(cfg.get("seed.email.send_on_empty", True)):
         return True
-    return bool(result.get("buyable") or result.get("watch") or result.get("eve"))
+    return bool(result.get("buyable") or result.get("watch") or result.get("eve")
+                or result.get("near_miss"))
 
 
 def _seed_email_state_path(cfg: Config) -> str:
@@ -1041,17 +1051,30 @@ def format_seed_email_digest(result: dict, cfg: Optional[Config] = None) -> str:
     buyable = result.get("buyable") or []
     watch = result.get("watch") or []
     eve = result.get("eve") or []
+    near = result.get("near_miss") or []
     for ev in buyable:
         lines.append(compact_email_stock_line(ev, "买入", cfg))
     for ev in watch:
         lines.append(compact_email_stock_line(ev, "观察", cfg))
     for ev in eve:
         lines.append(compact_email_stock_line(ev, "观察", cfg))
+    if near:
+        tracked = bool(cfg.get("seed.near_miss_to_watch", True))
+        lines.append("")
+        lines.append("近失观察（已入观察池，回踩触发提醒）：" if tracked
+                     else "近失（仅复盘，未入观察池）：")
+        for ev in near:
+            lines.append(compact_email_stock_line(ev, "近失", cfg))
 
-    if not buyable and not watch and not eve:
+    if not buyable and not watch and not eve and not near:
         lines.append(_email_summary_text([], [], empty_text="今日无可买、无观察标的。"))
     else:
-        lines.append(_email_summary_text(buyable, watch, eve=eve))
+        lines.append(_email_summary_text(buyable, watch, eve=eve, near_miss=near))
+    if near:
+        lines.append(
+            "近失票已纳入「近失观察轨」，回踩就绪时盘中提醒；不自动买入。"
+            if cfg.get("seed.near_miss_to_watch", True)
+            else "近失票仅复盘，不入观察池、不触发盘中提醒；需 tea watch --add 才跟踪。")
     return "\n".join(lines)
 
 
@@ -1060,6 +1083,7 @@ def seed_email_subject(result: dict, cfg: Optional[Config] = None) -> str:
     buy_n = len(result.get("buyable") or [])
     watch_n = len(result.get("watch") or [])
     eve_n = len(result.get("eve") or [])
+    near_n = len(result.get("near_miss") or [])
     parts: List[str] = []
     if buy_n:
         parts.append(f"可买{buy_n}只")
@@ -1067,6 +1091,8 @@ def seed_email_subject(result: dict, cfg: Optional[Config] = None) -> str:
         parts.append(f"观察{watch_n}只")
     if eve_n:
         parts.append(f"前夕{eve_n}只")
+    if near_n:
+        parts.append(f"近失{near_n}只")
     headline = " ".join(parts) if parts else _VERDICT_EMAIL.get(
         result.get("verdict", VERDICT_EMPTY), "空仓")
     codes: List[str] = []

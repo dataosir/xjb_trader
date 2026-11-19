@@ -6,6 +6,8 @@
 
 **2026-11 扩展（P0）**：只提醒买点、不提醒卖点，等于把「没有只涨不跌的票」当成不会发生。现在同一轮盘中扫描同时检查**当前持仓**：现价跌破止损或触及止盈时发卖点提醒，观察池为空也继续扫持仓；**只提醒，不自动平仓**。
 
+**2026-11 扩展（P1）**：种子邮件此前只含可买/观察/前夕，近失票「看到了但没进池」，用户误以为收到邮件即已纳入跟踪。现在 `seed-plan` 默认把近失写入 `近失观察轨`，并纳入价格跟踪；达到回踩条件同样发买点提醒。邮件/报告会明确标注「已入观察池」或「仅复盘」。
+
 与 F11 Out「不做进程内 cron」一致：调度走 **macOS launchd 外层**（同 F03 种子扫描方案 A），进程内只提供一次性扫描命令。
 
 ## 2. 用户故事 / 场景
@@ -24,7 +26,7 @@
 
 - 新 CLI：`tea watch-alert`（单次扫描，适合 launchd 每分钟触发）  
 - 扫描对象：  
-  - **买点**：`watch_pool.json` 中 `status=active` 的项（观察池空时不打这部分行情）  
+  - **买点**：`watch_pool.json` 中 `status=active` 的项，含 `近失观察轨`（观察池空时不打这部分行情）；`alert.include_near_miss=false` 可排除近失轨  
   - **卖点**：`capital_state.json` 中当前持仓（`alert.position_exit_enabled=true` 时；观察池空也继续扫）  
 - **购买条件**（可配置 `alert.condition`，默认 `pullback_ready`）：  
   - **`pullback_ready`**（默认）：`watch_pool.pullback_ready()` 三项全满足（回撤 ≥ 配置%、分时 ≤ 配置%、入池天数 ≤ 保留天数），且当日预审**无硬否决**、身份未降级杂毛  
@@ -45,7 +47,8 @@
 - 观察池直接升格可买（仍须 F07 计划 + F08 `run`）  
 - 进程内常驻 daemon / 内置 cron 线程  
 - 微信 / 短信 / 其他第三方推送（Bark/macOS 见 [F18](F18-push-notify.md)）  
-- 对「近失轨」「仅 seed_records 影子」发买点提醒（买点只扫观察池 active 项）
+- 对「仅 seed_records 影子」发买点提醒（影子记录不入观察池）
+- 近失自动入池后再自动升格可买（仍走 F07/F08）
 
 ## 4. 主流程与边界
 
@@ -73,7 +76,7 @@ notify.send_alert → 更新对应 state → 写 tea.log
 2. **行情频率**：每分钟 × （池内 N 只 + 持仓 M 只）；`market.quote_cache_sec` 缓存减轻压力；两类都空则不请求。  
 3. **密码安全**：SMTP 密码仅存 `tea_config.json`（gitignore），不进仓库、不进日志。  
 4. **发信失败**：记录 ERROR，不更新对应 state（下一分钟可重试）；连续失败不崩溃。  
-5. **低吸前夕轨**：默认参与扫描（与 F10 一致）；若 `alert.include_eve=false` 可排除 `前夕观察轨`。  
+5. **低吸前夕轨 / 近失观察轨**：默认参与扫描（与 F10 一致）；`alert.include_eve=false` 排除 `前夕观察轨`，`alert.include_near_miss=false` 排除 `近失观察轨`。近失轨资格复检不走「观察轨须软否决或 PASS」的口径，避免入池即被剔除。  
 6. **与 F10 盘后 review 关系**：`review` 仍做收盘复核；本功能只管**盘中**提醒，不替代 `review`。  
 7. **持仓数据质量**：卖点只看 `capital_state.json` 里登记过的持仓；券商实盘已买卖但未 `pos-add` / `close` 的，系统看不到。没录止损时可用默认 3% 兜底，但正文会标注「默认止损」，不假装是原计划止损。  
 8. **同条件同日一封**：止损、止盈是两个独立条件；同日先触止损再触止盈会各发一封，不互相抑制。
@@ -85,6 +88,8 @@ notify.send_alert → 更新对应 state → 写 tea.log
 | `alert.enabled` | `false` | 总开关（与 email 子开关联动） |
 | `alert.condition` | `pullback_ready` | `pullback_ready` / `preflight_pass` |
 | `alert.include_eve` | `true` | 是否扫描前夕观察轨 |
+| `alert.include_near_miss` | `true` | 是否扫描近失观察轨 |
+| `seed.near_miss_to_watch` | `true` | 种子扫描后近失是否自动写入近失观察轨（同时影响邮件/报告措辞与价格跟踪） |
 | `alert.require_no_hard_veto` | `true` | pullback 模式下仍要求无硬否决 |
 | `alert.dedupe_per_day` | `true` | 同 code 同日同条件只发一封（买点/止损/止盈各自去重） |
 | `alert.position_exit_enabled` | `true` | 是否扫描持仓卖点（观察池空也扫） |
@@ -106,7 +111,9 @@ notify.send_alert → 更新对应 state → 写 tea.log
 
 | 模块 | 职责 |
 |---|---|
-| `tea/portfolio/watch_pool.py` | `scan_alerts()`：观察池买点逐只评估 + 返回待提醒列表 |
+| `tea/portfolio/watch_pool.py` | `scan_alerts()`：观察池买点逐只评估 + 返回待提醒列表（`TRACK_NEAR` 近失轨同口径） |
+| `tea/runtime/runner.py` | `seed_plan()`：近失自动入 `近失观察轨`，并把近失代码纳入 `price_track` |
+| `tea/screening/seed_report.py` | 邮件/报告近失段落 + 主题「近失N只」；按 `seed.near_miss_to_watch` 切换已入池/仅复盘措辞 |
 | `tea/portfolio/position_alert.py` | `scan_alerts()` / `exit_levels()`：持仓卖点触线判定 + 卖点 state 去重 |
 | `tea/core/notify.py` | `send_alert(cfg, subject, body)`：多通道发送（email/macos/bark） |
 | `tea/runtime/runner.py` | `watch_alert()`：编排观察池 + 持仓双扫描 / 去重 / 发信 |
@@ -132,6 +139,9 @@ notify.send_alert → 更新对应 state → 写 tea.log
 - [x] launchd 安装脚本可加载 `com.tea.watch-alert`  
 - [x] 买点邮件正文含：代码、名称、轨道、条件类型、当前价、**建议挂单价**（乖离自适应纪律回踩；高乖离 MA20 仅参考；止损/止盈按挂单价重算）、**计划止盈路径 T+1/T+2/T+3**（挂单价→止盈价线性拆分；复盘对照，非概率；核心数字用【】强调）、分时、回撤、提示「请手动 eval/run，不自动下单」  
 - [x] 卖点邮件正文含：代码、名称、条件（止损/止盈）、成本、现价、浮动盈亏、R 倍数、止损/止盈价与来源、建仓日/持有天数，提示「请手动 `tea close`，不自动卖出」
+- [x] 近失自动入 `近失观察轨`：资格复检不剔除、参与 `scan_alerts` 发信；`alert.include_near_miss=false` 可排除
+- [x] 近失纳入 `price_track`；种子邮件含近失段落，主题不再把「仅近失」误标为空仓
+- [x] `seed.near_miss_to_watch=false` 时邮件/报告明确「仅复盘，不入观察池」
 
 ## 8. 已知缺口 / 待迭代
 

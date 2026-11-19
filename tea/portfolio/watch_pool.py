@@ -1,7 +1,8 @@
 """观察池管理：纳入 / 复核剔除 / 回踩就绪检测。
 
 来源轨道：趋势轨（热点扫描）、观察轨（种子软否决）、启动待定轨（预审差1分）、
-萌芽观察轨、前夕观察轨。上限 12 只，趋势轨保留 2 天、确认仓 3 天。
+萌芽观察轨、前夕观察轨、近失观察轨（共振差 1~2 分，邮件/报告可见）。
+上限 12 只，趋势轨保留 2 天、确认仓 3 天。
 """
 from __future__ import annotations
 
@@ -19,10 +20,12 @@ TRACK_WATCH = "观察轨"
 TRACK_PENDING = "启动待定轨"
 TRACK_SPROUT = "萌芽观察轨"
 TRACK_EVE = "前夕观察轨"
+TRACK_NEAR = "近失观察轨"
 
 # 已知轨道全集（与 config 默认 watch.tracks 一致）：入池/算保留天数前均校验，
 # 不在集内的值不静默兜底（旧行为会把拼错的轨道名当回踩轨处理）。
-KNOWN_TRACKS = (TRACK_TREND, TRACK_WATCH, TRACK_PENDING, TRACK_SPROUT, TRACK_EVE)
+KNOWN_TRACKS = (TRACK_TREND, TRACK_WATCH, TRACK_PENDING, TRACK_SPROUT,
+                TRACK_EVE, TRACK_NEAR)
 
 STATUS_ACTIVE = "active"
 STATUS_READY = "ready"
@@ -63,7 +66,7 @@ def keep_days_for(track: str, cfg: Optional[Config] = None) -> int:
         return int(cfg.get("watch.trend_keep_days", 2))
     if track == TRACK_PENDING:
         return int(cfg.get("watch.confirm_keep_days", 3))
-    if track in (TRACK_WATCH, TRACK_SPROUT, TRACK_EVE):
+    if track in (TRACK_WATCH, TRACK_SPROUT, TRACK_EVE, TRACK_NEAR):
         return int(cfg.get("watch.pullback_keep_days", 3))
     raise ValueError(f"Unknown track type: {track!r}（已知轨道：{'、'.join(KNOWN_TRACKS)}）")
 
@@ -457,6 +460,8 @@ def attach_output_order_hints(result: dict, cfg: Optional[Config] = None) -> Non
         attach_order_hint(ev, ev, CONDITION_PULLBACK, cfg)
     for ev in result.get("eve") or []:
         attach_order_hint(ev, ev, CONDITION_PULLBACK, cfg)
+    for ev in result.get("near_miss") or []:
+        attach_order_hint(ev, ev, CONDITION_PULLBACK, cfg)
 
 
 def format_alert_body(candidate: dict, condition: str) -> str:
@@ -505,6 +510,8 @@ def scan_alerts(market: Optional[Market] = None, cfg: Optional[Config] = None,
     pool_items = active_items(cfg)
     if not cfg.get("alert.include_eve", True):
         pool_items = [i for i in pool_items if i.get("track") != TRACK_EVE]
+    if not cfg.get("alert.include_near_miss", True):
+        pool_items = [i for i in pool_items if i.get("track") != TRACK_NEAR]
 
     out: Dict[str, Any] = {
         "condition": condition,

@@ -86,7 +86,8 @@
 
 **买点（观察池）**
 
-- `watch_pool.ineligible_reason(item, ev, cfg)` → 剔除原因或 `None`（观察轨须软否决或 PASS；启动待定轨须差分 ≤ `seed.near_miss_gap`）  
+- `watch_pool.TRACK_NEAR = "近失观察轨"`；`KNOWN_TRACKS` 六轨；`ineligible_reason` 对近失轨返回 `None`（仅由 `review` 按超时/硬否决/身份降级清理）  
+- `watch_pool.ineligible_reason(item, ev, cfg)` → 剔除原因或 `None`（观察轨须软否决或 PASS；启动待定轨须差分 ≤ `seed.near_miss_gap`；近失轨不适用）  
 - `watch_pool.prune_ineligible(cfg, market)` — 批量剔除资格失效项  
 - `watch_pool.scan_alerts(cfg, market)` → `[{code, name, track, order_price, stop, target, tp_pct, body, ...}]`  
 - 资格剔除：`review` 内嵌 + `watch_alert` 扫描前调用 `prune_ineligible`  
@@ -95,7 +96,9 @@
   - **可买（追高）**：挂单价=现价；止损/止盈沿用预审 ATR 结构（扫描价口径）  
   - **观察/前夕/回踩**：乖离自适应纪律回踩（≤5%→2%、5–10%→3%、>10%→5%）；**止损/止盈按挂单价重算**；高乖离 MA20 仅参考标注  
 - `watch_pool.attach_order_hint(row, ev, condition)` — 种子 `candidate_row` / `finalize_candidates` 写入挂单价字段  
-- `watch_pool.attach_output_order_hints(result)` — 种子三档输出（可买/观察/前夕）写入挂单价  
+- `watch_pool.attach_output_order_hints(result)` — 种子三档输出（可买/观察/近失/前夕）写入挂单价  
+- `runner.seed_plan()` — `seed.near_miss_to_watch=true` 时把 `result.near_miss` 逐只写入 `近失观察轨`（source=`seed:<scan_id>`），并把近失代码合并进 `pricetrack.ensure_tracked`  
+- `seed_report` — 邮件/报告含近失段落；主题含「近失N只」；按 `seed.near_miss_to_watch` 显示「已入观察池 / 仅复盘」  
 - `seed_report.format_order_hint(cand, style)` — 挂单价展示行；`style=console|md` 时核心数值高亮  
 - `preflight.plan_targets_by_day(entry, target, tp_pct)` — T+1/T+2/T+3 计划止盈路径（线性拆分）  
 - `preflight.format_tn_plan_hint(row, style)` / `format_tn_plan_email_lines(row)` — 控制台/SEED/邮件展示  
@@ -117,6 +120,7 @@
 - `notify.send_alert(cfg, subject, body)` → `{ok, channels}`；密码/Key 不进日志  
 - `runner.watch_alert()`：Timing 守卫 → 观察池买点 scan + 持仓卖点 scan → 分别 dedupe（两个 state 文件）→ send_alert  
   - 观察池与持仓都为空才 `empty_watch_and_positions` 跳过；观察池空但持仓非空继续扫卖点  
+  - `alert.include_near_miss=false` 时买点扫描过滤 `近失观察轨`  
   - 返回含 `sent/skipped/failed`（买点）与 `sent_positions/skipped_positions/failed_positions/position_scan`（卖点）  
 - CLI：`tea watch-alert`；`tea setup-email`（SMTP）；`tea setup-notify`（macOS/Bark）；各 `--test`  
 - 调度见 `ops/06-watch-alert-scheduler.md`

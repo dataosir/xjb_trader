@@ -232,8 +232,17 @@ def seed_plan(cfg: Optional[Config] = None, market: Optional[Market] = None,
                                 triggers=ev.get("triggers"), cfg=cfg)
             if not it.get("skipped"):
                 added.append(f"{ev.get('code')}→{watch_pool.TRACK_EVE}")
+        if cfg.get("seed.near_miss_to_watch", True):
+            for ev in (result.get("near_miss") or []):
+                it = watch_pool.add(ev, track=watch_pool.TRACK_NEAR,
+                                    source=f"seed:{result.get('scan_id')}",
+                                    triggers=ev.get("triggers"), cfg=cfg)
+                if not it.get("skipped"):
+                    added.append(f"{ev.get('code')}→{watch_pool.TRACK_NEAR}")
         if added:
             io.say(f"  观察池新增/续期 {len(added)} 项：" + "、".join(added))
+        else:
+            io.say("  观察池无新增（近失入池已关闭或全部去重）")
 
         entries = _ft_entries(result)
         ft_res = (ft_mod.record_seed(entries, cfg, scan_anchor=scan_anchor)
@@ -272,8 +281,12 @@ def seed_plan(cfg: Optional[Config] = None, market: Optional[Market] = None,
                     f"回填/升级 {auto_upd.get('updated', 0)} 条，"
                     f"仍待 {auto_upd.get('pending', 0)} 条")
 
+        near_entries = result.get("near_miss") or []
         codes = [e.get("code") for e in entries if e.get("code")]
+        codes += [e.get("code") for e in near_entries if e.get("code") and
+                  e.get("code") not in codes]
         names = {e.get("code"): e.get("name") for e in entries if e.get("code")}
+        names.update({e.get("code"): e.get("name") for e in near_entries if e.get("code")})
         added_track = pricetrack.ensure_tracked(codes, names, cfg)
         pr_res = pricetrack.record_daily(mk, cfg)
         if added_track or pr_res.get("recorded"):

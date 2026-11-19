@@ -6,7 +6,7 @@
 
 ## 2. 用户故事 / 场景
 
-- `seed-plan` 自动纳入观察轨。  
+- `seed-plan` 自动纳入观察轨；近失默认纳入 `近失观察轨`（`seed.near_miss_to_watch`）。  
 - `watch --review` 或随 `review` 一并复核。  
 - 手动 `--add` / `--rm`。
 
@@ -14,9 +14,10 @@
 
 **In**
 
-- 多轨道（`KNOWN_TRACKS`，默认观察轨）  
+- 多轨道（`KNOWN_TRACKS`）：趋势轨 / 观察轨 / 启动待定轨 / 萌芽观察轨 / 前夕观察轨 / 近失观察轨  
 - 纳入 / 剔除 / 盘后复核 / 超时 prune  
-- **观察轨 / 启动待定轨资格复检**：预审不再满足入池口径（如观察轨已无软否决且非 PASS、近失等）→ 自动剔除（`watch.auto_prune_ineligible`；`review` 与盘中 `scan_alerts`）  
+- **观察轨 / 启动待定轨资格复检**：预审不再满足入池口径（如观察轨已无软否决且非 PASS、已降为近失等）→ 自动剔除（`watch.auto_prune_ineligible`；`review` 与盘中 `scan_alerts`）  
+- **近失观察轨**：差分 1–2 的落选票自动入池，保留期与回踩观察同组；不适用「观察轨须软否决或 PASS」口径，避免入池即被剔除；`review` 仍按超时/硬否决/身份降级清理  
 - 与种子报告、持仓对照协同展示  
 
 **Out**
@@ -37,6 +38,9 @@
 | 键域 | 用途 |
 |---|---|
 | 观察超时天数 / 轨道名 | watch_pool 相关配置 |
+| `seed.near_miss_to_watch` | `true`：种子近失自动入 `近失观察轨` |
+| `alert.include_near_miss` | `true`：盘中买点提醒是否扫描近失轨（F16） |
+| `watch.max_size` | 池容量上限，近失轨与其它轨共用 |
 
 ## 6. 代码锚点
 
@@ -49,6 +53,8 @@
 - [ ] 原子写 `watch_pool.json`  
 - [ ] `review` 默认会碰观察池（除非关闭）  
 - [ ] 手动加减即时可见于 `watch`  
+- [ ] 近失自动入池后不被资格复检误删，且参与盘中提醒  
+- [ ] `seed.near_miss_to_watch=false` 时近失不入池  
 
 ## 8. 已知缺口 / 待迭代
 

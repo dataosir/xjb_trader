@@ -872,9 +872,11 @@ class Screener:
                                "胜率因子→观察轨" if ev.get("winrate_gate") else "差1分→启动待定轨",
                                ev.get("winrate_gate") or f"共振 {ev.get('total_score')}/{ev.get('pass_threshold')}")
             else:
+                ev["track"] = watch_pool.TRACK_NEAR
+                ev["triggers"] = followthrough.trigger_conditions(ev, cfg)
                 near.append(ev)
                 if tracer:
-                    tracer.add(seed_trace.STEP_PREFLIGHT, ev["code"], ev["name"], "近失（只复盘）",
+                    tracer.add(seed_trace.STEP_PREFLIGHT, ev["code"], ev["name"], "近失观察轨",
                                f"共振 {ev.get('total_score')}/{ev.get('pass_threshold')}，"
                                + "；".join(ev.get("reasons", [])))
 

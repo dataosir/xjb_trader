@@ -599,6 +599,9 @@ DEFAULTS: Dict[str, Any] = {
         "near_miss_gap": 1,
         "max_watch_output": 3,
         "max_near_miss_output": 6,
+        # 近失票（共振差 1~2 分）自动进「近失观察轨」，回踩就绪时盘中提醒。
+        # 邮件会明确标注已入池；关掉则近失只出现在报告/复盘里。
+        "near_miss_to_watch": True,
         "eve_min_chg": 1.0,
         "eve_max_chg": 3.0,
         "eve_trigger_intraday": 0.75,
@@ -716,6 +719,7 @@ DEFAULTS: Dict[str, Any] = {
         "enabled": False,
         "condition": "pullback_ready",
         "include_eve": True,
+        "include_near_miss": True,
         "require_no_hard_veto": True,
         "dedupe_per_day": True,
         # 观察池空时仍扫持仓；持仓无止损时按 position.fallback_sl_pct 兜底
@@ -808,7 +812,7 @@ DEFAULTS: Dict[str, Any] = {
         "auto_prune_on_review": True,
         # 观察轨/启动待定轨：预审不再满足入池口径时自动剔除（review + 盘中 scan_alerts）
         "auto_prune_ineligible": True,
-        "tracks": ["趋势轨", "观察轨", "启动待定轨", "萌芽观察轨", "前夕观察轨"],
+        "tracks": ["趋势轨", "观察轨", "启动待定轨", "萌芽观察轨", "前夕观察轨", "近失观察轨"],
     },
     # ---------------------------------------------------------- 报告
     "report": {

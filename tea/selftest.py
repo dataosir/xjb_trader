@@ -3579,6 +3579,37 @@ def check_watch_alert(t: Suite, c: Config) -> None:
         t.eq("发信失败不写 state", len(fail.get("failed") or []), 1)
         t.ok("失败后可重试", not wp_mod.is_alert_sent(utils.today_str(), TARGET,
                                                       wp_mod.CONDITION_PULLBACK, c))
+
+        # 近失观察轨：不再被资格剔除，回踩就绪时同样发提醒
+        near_ev = dict(ev_ready)
+        near_ev["verdict"] = preflight.VERDICT_NEAR_MISS
+        near_ev["total_score"] = 4
+        t.eq("近失轨不被资格剔除", wp_mod.ineligible_reason(
+            {"track": wp_mod.TRACK_NEAR, "code": TARGET}, near_ev, c), None)
+        utils.write_json(pool_path, {"items": [dict(item, track=wp_mod.TRACK_NEAR,
+                                                    gap=2)], "removed": []})
+        if os.path.exists(state_path):
+            os.remove(state_path)
+        preflight.evaluate = _eval_ready
+        scan_near = wp_mod.scan_alerts(market=None, cfg=c)
+        t.eq("近失观察轨参与回踩提醒", len(scan_near.get("candidates") or []), 1)
+        notify_mod.set_test_sender(_fake_sender)
+        res_near = runner_mod.watch_alert(cfg=c, market=None, io=None, force=True)
+        t.eq("近失观察轨可发信", len(res_near.get("sent") or []), 1)
+
+        near_result = {"near_miss": [{
+            "code": TARGET, "name": TARGET_NAME,
+            "quote": {"price": 11.37, "chg_pct": 2.0},
+            "stage": {"stage": "突破"},
+            "total_score": 4, "pass_threshold": 6,
+        }]}
+        near_body = seed_report.format_seed_email_digest(near_result, c)
+        t.ok("种子邮件含近失段", "近失观察" in near_body and TARGET in near_body)
+        t.ok("主题不再裸空仓", "近失1只" in seed_report.seed_email_subject(near_result, c))
+        c.set("seed.near_miss_to_watch", False)
+        near_off = seed_report.format_seed_email_digest(near_result, c)
+        t.ok("关闭后标注仅复盘", "仅复盘" in near_off and "不触发盘中提醒" in near_off)
+        c.set("seed.near_miss_to_watch", True)
     finally:
         preflight.evaluate = orig_eval
         notify_mod.set_test_sender(None)
